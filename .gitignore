@@ -1,0 +1,20 @@
+# Настройки редакторов
+.idea/
+.vscode/
+
+# Переменные окружения и ключи
+.env
+.env.backup
+.env.production
+
+# Зависимости
+node_modules/
+vendor/
+
+# Сборка и логи
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.nuxt/
+.output/
+storage/*.key
