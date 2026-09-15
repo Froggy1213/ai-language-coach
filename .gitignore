@@ -2,6 +2,9 @@
 .idea/
 .vscode/
 
+# macOS
+.DS_Store
+
 # Переменные окружения и ключи
 .env
 .env.backup
