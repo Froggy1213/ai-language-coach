@@ -1,26 +1,56 @@
+# Local development infrastructure.
+#
+# Only the stateful backing services run in Docker. Laravel and Nuxt run natively
+# on the host (php artisan serve / npm run dev) so HMR, xdebug and artisan stay
+# fast — see README.md -> "Local setup".
+#
+# Every value below can be overridden from `.env` in this directory (copy
+# `.env.example` to `.env`); each one has a default, so `docker compose up -d`
+# works without any .env at all.
+#
+# The compose project name is intentionally NOT set: it must stay derived from
+# this directory, otherwise the existing `ai_language_coach_*` volumes (your
+# current database) would be replaced by empty ones.
+
 services:
   mysql:
     image: mysql:8.0
     container_name: coach_mysql
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: language_coach
-      MYSQL_USER: coach_user
-      MYSQL_PASSWORD: coach_password
-      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-language_coach}
+      MYSQL_USER: ${MYSQL_USER:-coach_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-coach_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
     ports:
-      - "3306:3306"
+      # Loopback only — the database must not be reachable from the local network.
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      # Credentials are read from the container's own environment, never inlined.
+      # `mysqladmin ping` proves the server accepts connections, not just that the
+      # port is open — matters because MySQL initialises for ~20s on first boot.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
     container_name: coach_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   mysql_data:

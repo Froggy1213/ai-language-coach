@@ -80,11 +80,15 @@ Python voice-agent worker (`livekit-agents`, Deepgram/Cartesia SDKs) — Novembe
 
 ## Local setup
 
+Docker runs **only the backing services**. Laravel, Horizon/Reverb and Nuxt run natively on the host — that keeps Nuxt HMR, xdebug and `artisan` fast, and it is what the commands below assume. The two Dockerfiles are production images for CI/ECS, not part of the dev loop (see [Containers](#containers)).
+
 Prerequisites: PHP 8.5 + Composer, Node 22 + npm, Docker (MySQL/Redis).
 
 ```bash
 # 1. Infrastructure
-docker compose up -d          # MySQL 8.0 on :3306, Redis 7 on :6379
+cp .env.example .env          # optional — every value in it has a default
+docker compose up -d          # MySQL 8.0 on :3306, Redis 7 on :6379 (loopback only)
+docker compose ps             # wait until both report (healthy)
 
 # 2. Backend (http://localhost:8000)
 cd backend
@@ -92,22 +96,76 @@ composer install
 cp .env.example .env          # or use the prepared .env (see note below)
 php artisan key:generate
 php artisan migrate
+php artisan db:seed           # seeds the per-language sentinel grammar point (§5)
 php artisan serve             # also: php artisan reverb:start, php artisan horizon
 
 # 3. Frontend (http://localhost:3000)
 cd frontend
 npm install
+cp .env.example .env          # only needed to override the defaults
 npm run dev
 ```
 
-**Note on `.env` files**: `backend/.env` currently uses SQLite (works without Docker). `frontend/.env` contains the intended production-like backend config (MySQL + Redis + Sanctum stateful domains) — move it to `backend/.env` (and adjust `REDIS_CLIENT=phpredis` only if the phpredis extension is installed) once Docker is up.
+**Note on `.env` files**: both apps now target MySQL 8 (the `docker compose` service). `backend/.env.example` ships the matching local credentials, so `cp .env.example .env` works as-is; run `php artisan key:generate` to fill `APP_KEY`. The frontend keeps its own Nuxt config in `frontend/.env` — only `NUXT_PUBLIC_*` keys, no secrets, overridable via `frontend/.env.example`. The repository root has a third, unrelated `.env` that only feeds `docker compose` (host ports + MySQL credentials) — see `.env.example`.
+
+Env names follow the runtime-config path (`public.reverb.appKey` → `NUXT_PUBLIC_REVERB_APP_KEY`), so renaming a key in `nuxt.config.ts` silently renames its variable. `frontend/.env` is loaded by `npm run dev` and `npm run preview`, but **not** by the built server — in production (container/ECS) the same values must be real environment variables.
+
+Queue/cache/sessions still use their MySQL tables (`SESSION_DRIVER`, `CACHE_STORE`, `QUEUE_CONNECTION` = `database`); switch them to `redis` for the Horizon/ElastiCache target once the `phpredis` extension or `predis/predis` is installed.
+
+Testing uses a separate `language_coach_testing` database on the same server. Create it once and migrate:
+
+```bash
+docker exec coach_mysql mysql -uroot -proot_password \
+  -e "CREATE DATABASE IF NOT EXISTS language_coach_testing CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON language_coach_testing.* TO 'coach_user'@'%';"
+DB_DATABASE=language_coach_testing php artisan migrate
+```
+
+## Containers
+
+| Component | Where it runs |
+|---|---|
+| MySQL 8.0 (`coach_mysql`) | Docker, `127.0.0.1:3306` |
+| Redis 7 (`coach_redis`) | Docker, `127.0.0.1:6379` |
+| Laravel API | host — `php artisan serve` → `:8000` |
+| Horizon / Reverb | host — `php artisan horizon` / `reverb:start` |
+| Nuxt | host — `npm run dev` → `:3000` |
+
+Both services publish on loopback only and declare healthchecks, so `docker compose up -d --wait` returns once MySQL has actually finished initialising. Compose reads the root `.env`; every value has a default, so the file is optional. Keep `MYSQL_DATABASE` / `MYSQL_USER` / `MYSQL_PASSWORD` in sync with `backend/.env`.
+
+### Production images
+
+`backend/Dockerfile` and `frontend/Dockerfile` are multi-stage production builds for CI, staging and ECS — never for the dev loop above.
+
+```bash
+docker build -t ai-language-coach/api ./backend
+docker build -t ai-language-coach/web ./frontend
+```
+
+The API image bundles nginx + php-fpm (supervisord, port 8080) alongside the CLI, so one image fills every Laravel role — the command selects which one runs:
+
+| ECS service | Command |
+|---|---|
+| `laravel-app` | *(default)* — nginx + php-fpm on `:8080` |
+| `horizon-worker` | `php artisan horizon` |
+| `reverb` | `php artisan reverb:start --host=0.0.0.0 --port=8081` |
+| migrations (one-off) | `php artisan migrate --force` |
+
+Both images install with `--no-dev`, and both `.dockerignore` files exclude the `.env` files, so runtime configuration must come from real environment variables (`NUXT_PUBLIC_*` for Nuxt). For the same reason `bootstrap/providers.php` registers `TelescopeServiceProvider` only when the package is actually installed: Telescope lives in `require-dev`, and registering it unconditionally makes a production container fail to boot.
+
+Smoke-test a build locally:
+
+```bash
+docker run --rm -p 8080:8080 -e APP_KEY="base64:$(openssl rand -base64 32)" ai-language-coach/api
+curl -i localhost:8080/up     # Laravel health route
+```
 
 ## Configuration already wired
 
 - **Backend**: Sanctum (`install:api`, `HasApiTokens` on `User`), Reverb (`config/reverb.php`, `REVERB_*` keys), Horizon + Telescope providers registered, Lighthouse schema at `graphql/schema.graphql` + `config/lighthouse.php`, Sentry config published (DSN empty — fill in before AWS deploy), CORS for `/graphql` with credentials (lock down origins before deploy, §7).
 - **Frontend**: Tailwind v4 via `@tailwindcss/vite` (`app/assets/css/main.css`), global urql client as `$urql` (`app/plugins/urql.ts`) — HTTP + WebSocket subscriptions, cookie credentials included, backend URL via `NUXT_PUBLIC_BACKEND_URL`.
-- **Tests**: Pest 5 initialized (`tests/Pest.php`), `php artisan test` green.
+- **Database**: the plan §3 schema is in place — 8 domain tables (`users` + 7), models with enum casts, factories and seeders. `GrammarPointSeeder` writes one `uncategorized` sentinel per language listed in `config/languages.php`; re-running it is safe.
+- **Tests**: Pest 5 + PHPUnit classes, `LazilyRefreshDatabase` against `language_coach_testing`, `php artisan test` green.
 
 ## Next milestones
 
-Sept 15–30: migrations per plan §3, CI skeleton · October: Lighthouse+Reverb subscriptions spike, Sanctum auth + GraphQL types, roadmap generation · November: LLM benchmark, LiveKit server + voice fleet · December: Milestone 1 (demo-ready prototype) · February: Milestone 2 (AWS).
+Sept 15–30: ~~migrations per plan §3~~, CI skeleton · October: Lighthouse+Reverb subscriptions spike, Sanctum auth + GraphQL types, roadmap generation · November: LLM benchmark, LiveKit server + voice fleet · December: Milestone 1 (demo-ready prototype) · February: Milestone 2 (AWS).
