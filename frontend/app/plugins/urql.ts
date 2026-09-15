@@ -10,7 +10,7 @@ import { createClient as createWsClient } from 'graphql-ws'
  * polling fallback) is decided in the October spike, so the URL stays
  * config-driven here.
  */
-export default defineNuxtPlugin((nuxtApp) => {
+export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig()
   const httpUrl = `${config.public.backendUrl}/graphql`
   const wsUrl = httpUrl.replace(/^http/, 'ws')
