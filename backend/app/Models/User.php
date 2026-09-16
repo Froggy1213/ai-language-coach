@@ -22,6 +22,16 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, Notifiable;
 
     /**
+     * Mirror of the column defaults, so a freshly created user is complete
+     * before it is reloaded from the database.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'current_level' => 'A1',
+    ];
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

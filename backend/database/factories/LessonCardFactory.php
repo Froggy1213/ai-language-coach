@@ -26,8 +26,10 @@ class LessonCardFactory extends Factory
             'order_index' => fake()->numberBetween(1, 20),
             'status' => LessonCardStatus::Locked,
             'cheat_sheet' => [
-                'summary' => fake()->sentence(),
+                'rule' => fake()->sentence(),
+                'formula' => fake()->sentence(),
                 'examples' => [fake()->sentence(), fake()->sentence()],
+                'pitfalls' => [fake()->sentence()],
             ],
             'practice_prompt' => fake()->sentence(),
         ];

@@ -1,41 +1,40 @@
+# Root schema. Object types live in `types/`, one file per aggregate;
+# native PHP enums are registered on the TypeRegistry (AppServiceProvider)
+# and are referenced here without being declared.
+
+#import types/*.graphql
+
 "A datetime string with format `Y-m-d H:i:s`, e.g. `2018-05-23 13:43:32`."
 scalar DateTime @scalar(class: "Nuwave\\Lighthouse\\Schema\\Types\\Scalars\\DateTime")
 
-"Indicates what fields are available at the top level of a query operation."
 type Query {
-    "Find a single user by an identifying attribute."
-    user(
-      "Search by primary key."
-      id: ID @eq @rules(apply: ["prohibits:email", "required_without:email"])
+    "The currently authenticated user."
+    me: User! @guard @auth
 
-      "Search by email address."
-      email: String @eq @rules(apply: ["prohibits:id", "required_without:id", "email"])
-    ): User @find
+    "The authenticated user's roadmap, if one has been generated yet."
+    roadmap: Roadmap @guard @whereAuth(relation: "user") @first
 
-    "List multiple users."
-    users(
-      "Filters by name. Accepts SQL LIKE wildcards `%` and `_`."
-      name: String @where(operator: "like")
-    ): [User!]! @paginate(defaultCount: 10)
+    "Review items whose review date has arrived, soonest first."
+    dueReviews: [ReviewItem!]! @guard @whereAuth(relation: "user") @all(scopes: ["due"])
+
+    "The authenticated user's mistakes, newest first."
+    mistakes(
+        "Restrict the result to a single grammar point."
+        grammarPointId: ID
+    ): [Mistake!]! @guard @field(resolver: "App\\GraphQL\\Queries\\Mistakes")
 }
 
-"Account of a person who uses this application."
-type User {
-    "Unique primary key."
-    id: ID!
+type Mutation {
+    "Sign in and start a session (Sanctum SPA cookie)."
+    login(email: String!, password: String!): User!
+        @field(resolver: "App\\GraphQL\\Mutations\\Login")
+        @validator(class: "App\\GraphQL\\Validators\\LoginValidator")
 
-    "Non-unique name."
-    name: String!
+    "Create an account and sign in."
+    register(name: String!, email: String!, password: String!, targetLanguage: String!): User!
+        @field(resolver: "App\\GraphQL\\Mutations\\Register")
+        @validator(class: "App\\GraphQL\\Validators\\RegisterValidator")
 
-    "Unique email address."
-    email: String!
-
-    "When the email was verified."
-    email_verified_at: DateTime
-
-    "When the account was created."
-    created_at: DateTime!
-
-    "When the account was last updated."
-    updated_at: DateTime!
+    "End the current session."
+    logout: Boolean! @guard @field(resolver: "App\\GraphQL\\Mutations\\Logout")
 }

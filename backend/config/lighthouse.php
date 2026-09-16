@@ -5,6 +5,7 @@ use GraphQL\Error\DebugFlag;
 use GraphQL\Validator\Rules\DisableIntrospection;
 use GraphQL\Validator\Rules\QueryComplexity;
 use GraphQL\Validator\Rules\QueryDepth;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Nuwave\Lighthouse\Execution\AuthenticationErrorHandler;
 use Nuwave\Lighthouse\Execution\AuthorizationErrorHandler;
 use Nuwave\Lighthouse\Execution\ReportingErrorHandler;
@@ -50,6 +51,11 @@ return [
          * Make sure to return spec-compliant responses in case an error is thrown.
          */
         'middleware' => [
+            // Starts the session for requests from the SPA (Sanctum stateful
+            // domains), so the session cookie authenticates them. Must run
+            // before AttemptAuthentication resolves the guards.
+            EnsureFrontendRequestsAreStateful::class,
+
             // Ensures the request is not vulnerable to cross-site request forgery.
             // Nuwave\Lighthouse\Http\Middleware\EnsureXHR::class,
 
@@ -81,9 +87,12 @@ return [
     | Used in directives such as `@guard` or the `AttemptAuthentication` middleware.
     | Falls back to the Laravel default if `null`.
     |
+    | Sanctum resolves the SPA session cookie first and personal access tokens
+    | second, so one guard covers both the Nuxt client and future token clients.
+    |
     */
 
-    'guards' => null,
+    'guards' => ['sanctum'],
 
     /*
     |--------------------------------------------------------------------------

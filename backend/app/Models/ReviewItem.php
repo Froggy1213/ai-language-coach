@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\ReviewItemFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -33,6 +34,18 @@ class ReviewItem extends Model
             'repetition_number' => 'integer',
             'next_review_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Items whose review date has arrived, soonest first.
+     *
+     * Used by the `dueReviews` query through `@all(scopes: ["due"])`.
+     *
+     * @param  Builder<ReviewItem>  $query
+     */
+    public function scopeDue(Builder $query): void
+    {
+        $query->where('next_review_at', '<=', now())->orderBy('next_review_at');
     }
 
     /**
