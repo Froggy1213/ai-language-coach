@@ -86,7 +86,7 @@ Python voice-agent worker (`livekit-agents`, Deepgram/Cartesia SDKs) — Novembe
 
 Docker runs **only the backing services**. Laravel, Horizon/Reverb and Nuxt run natively on the host — that keeps Nuxt HMR, xdebug and `artisan` fast, and it is what the commands below assume. The two Dockerfiles are production images for CI/ECS, not part of the dev loop (see [Containers](#containers)).
 
-Prerequisites: PHP 8.5 + Composer, Node 22 + npm, Docker (MySQL/Redis).
+Prerequisites: PHP 8.5 + Composer, Node 22 + npm, Docker (MySQL/Redis), and the **`redis` PHP extension** — Homebrew's PHP ships without it, so `pecl install redis` is part of setting up a machine. If pecl fails with `failed to mkdir /opt/homebrew/lib/php/pecl/<api>`, create that directory and re-run it. Subscription storage and Horizon both reach Redis through this extension, so it is required, not optional.
 
 ```bash
 # 1. Infrastructure
@@ -114,7 +114,7 @@ npm run dev
 
 Env names follow the runtime-config path (`public.reverb.appKey` → `NUXT_PUBLIC_REVERB_APP_KEY`), so renaming a key in `nuxt.config.ts` silently renames its variable. `frontend/.env` is loaded by `npm run dev` and `npm run preview`, but **not** by the built server — in production (container/ECS) the same values must be real environment variables.
 
-Queue/cache/sessions still use their MySQL tables (`SESSION_DRIVER`, `CACHE_STORE`, `QUEUE_CONNECTION` = `database`); switch them to `redis` for the Horizon/ElastiCache target once the `phpredis` extension or `predis/predis` is installed.
+Cache, sessions and queues still use their MySQL tables (`CACHE_STORE`, `SESSION_DRIVER`, `QUEUE_CONNECTION` = `database`) — deliberate while the dev loop runs on the host; switch them to `redis` for the Horizon/ElastiCache target. One thing already requires Redis today, though: `LIGHTHOUSE_SUBSCRIPTION_STORAGE=redis` (see the subscriptions bullet under [Configuration already wired](#configuration-already-wired)), which is why the extension above is listed as a prerequisite.
 
 Testing uses a separate `language_coach_testing` database on the same server. Create it once and migrate:
 
@@ -162,6 +162,17 @@ Smoke-test a build locally:
 docker run --rm -p 8080:8080 -e APP_KEY="base64:$(openssl rand -base64 32)" ai-language-coach/api
 curl -i localhost:8080/up     # Laravel health route
 ```
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main`; a newer push to the same branch cancels the run it supersedes.
+
+| Job | What it does |
+|---|---|
+| Backend — tests & code style | `php artisan test` against MySQL 8 and Redis 7 service containers — database name and credentials mirror `backend/phpunit.xml`, so CI and a local run exercise the same configuration — then `vendor/bin/pint --test` |
+| Frontend — build | `npm ci` (peer conflicts tolerated through `frontend/.npmrc`) followed by `nuxt build` |
+
+**Branch protection is not configured**, so a red run reports the problem but does not stop a merge — that is a repository setting, not something the workflow can enforce.
 
 ## Configuration already wired
 
