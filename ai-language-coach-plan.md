@@ -1,8 +1,10 @@
 # AI Language Coach — План разработки (сентябрь 2026 – февраль 2027)
 
+> **Статус на 21.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку и зависимостям от §1/§5 зафиксированы в README → «Key decisions & deviations from the plan».
+
 ## 0. Рамки проекта
 
-Единый монолит без ре-платформинга между этапами: **Laravel + Lighthouse GraphQL + Nuxt 3 + MySQL + Redis + self-hosted LiveKit**, разворачиваемый на AWS. Осознанно исключены: Kubernetes/KEDA, Kafka/RabbitMQ, PostgreSQL+pgvector, нативные мобильные клиенты, LiveKit Cloud.
+Единый монолит без ре-платформинга между этапами: **Laravel + Lighthouse GraphQL + Nuxt 4 + MySQL + Redis + self-hosted LiveKit**, разворачиваемый на AWS. Осознанно исключены: Kubernetes/KEDA, Kafka/RabbitMQ, PostgreSQL+pgvector, нативные мобильные клиенты, LiveKit Cloud.
 
 **Milestone 1 — конец декабря 2026:** базовое Web+DB приложение (CRUD, аутентификация, GraphQL), голосовой цикл работает end-to-end локально.
 **Milestone 2 — конец февраля 2027:** сервис развёрнут на AWS.
@@ -20,10 +22,10 @@
 
 | Слой | Технология | Примечание |
 |---|---|---|
-| Frontend | Nuxt 3 (Vue 3) + Tailwind | SPA-режим |
+| Frontend | Nuxt 4 (Vue 3) + Tailwind 4 | SPA-режим |
 | Auth | Laravel Sanctum (SPA cookie) | Один домен/поддомены |
-| API | Laravel 11 + Lighthouse (GraphQL) | Обычный PHP-FPM, без Octane |
-| Realtime к фронту | Laravel Reverb | Один инстанс на V1; см. риск в §5 (связка с Lighthouse subscriptions) |
+| API | Laravel 13 + Lighthouse (GraphQL) | PHP 8.5, обычный PHP-FPM, без Octane |
+| Realtime к фронту | Laravel Reverb | Один инстанс на V1; связка с Lighthouse subscriptions проверена — §5 |
 | Очереди | Redis + Laravel Horizon | Отдельный ECS-сервис |
 | DB | MySQL 8.0 (RDS) | JSON-колонки под cheat sheet/transcript |
 | Media | LiveKit Server (self-hosted, **EC2 + Elastic IP**) | Не Fargate; нативный SIGTERM-drain |
@@ -188,6 +190,8 @@ HAVING session_count >= 3;
 
 ## 4. GraphQL-контракт (Lighthouse)
 
+Реализовано на 21.09.2026: запросы `me`, `roadmap`, `dueReviews`, `mistakes(grammarPointId)` (все с owner-check) и мутации `login`/`register`/`logout` — вход тоже живёт в GraphQL, см. README, решение 7. Остальное ниже — контракт на будущее, а не описание текущего среза.
+
 ```graphql
 enum CefrLevel { A1 A2 B1 B2 C1 }
 enum SessionStatus { pending active completed failed abandoned }
@@ -282,9 +286,9 @@ type Subscription {
 2. Idempotency-гард: если есть `voice_sessions` со `status IN ('pending','active')` для пользователя — вернуть её, не создавать новую.
 3. Создать `voice_sessions` (`pending`), явный dispatch с job-metadata (`session_id`, `grammar_point_id`, `practice_prompt`).
 4. **Насыщение флота:** ждать назначения джоба с таймаутом (~5 сек). Если воркер не нашёлся — типизированная ошибка `VOICE_FLEET_BUSY`, фронт показывает «высокая нагрузка, попробуйте через минуту» с ретраем, а не висит бесконечно.
-5. Выпустить `AccessToken` (`Agence104\LiveKit\AccessToken`) с коротким TTL (10–15 минут, не дефолт SDK), scoped на `room_name`.
+5. Выпустить access-token LiveKit самостоятельно (`firebase/php-jwt`, ~50 строк) с коротким TTL (10–15 минут, не дефолт SDK), scoped на `room_name`. Пакет `Agence104\LiveKit` из исходной редакции плана заброшен (все версии тянут `firebase/php-jwt` v6 с advisory) — см. README, решение 1.
 
-**Вебхук `/api/webhooks/livekit`:** сырое тело, `Agence104\LiveKit\WebhookReceiver` (BCMath в PHP-образе). Идемпотентно: переход применяется только из ожидаемого текущего статуса, повторный `room_finished` при уже терминальном статусе игнорируется. `participant_joined` → `active`. `room_finished`: `completed`, если инициатором был сам агент (дошёл до конца сценария и корректно закрылся); `abandoned`, если комната закрылась по `empty_timeout` без участия агента.
+**Вебхук `/api/webhooks/livekit`:** сырое тело, HMAC-проверка подписи своей реализацией на `firebase/php-jwt` (BCMath в PHP-образе; готового receiver'а нет — тот же заброшенный пакет). Идемпотентно: переход применяется только из ожидаемого текущего статуса, повторный `room_finished` при уже терминальном статусе игнорируется. `participant_joined` → `active`. `room_finished`: `completed`, если инициатором был сам агент (дошёл до конца сценария и корректно закрылся); `abandoned`, если комната закрылась по `empty_timeout` без участия агента.
 
 **Статус `failed`:** `POST /internal/sessions/{id}/fail` (shared secret), агент вызывает сам при падении STT/TTS/LLM перед дисконнектом.
 
@@ -302,7 +306,7 @@ type Subscription {
 
 **Voice Fleet capacity:** первично регулируется `num_idle_processes`/`max_processes` внутри уже запущенных Fargate-тасков, ECS-автоскейл — вторая, медленная линия. `CapacityPerTask` **и** ёмкость самой LiveKit-ноды — оба бенчатся в январе (§6), не закладываются на глаз.
 
-**Lighthouse subscriptions ↔ Reverb — известный риск, не просто недоописанный контракт:** есть открытые issue именно про связку Lighthouse-subscriptions + Reverb (ошибки типов на payload, путаница private/presence-канала, незакрытые вопросы про авторизацию). План: ранний **spike в октябре** (не в декабре) — сначала попробовать направить зрелый `pusher`-драйвер Lighthouse (`LIGHTHOUSE_BROADCASTER=pusher`) на хост/порт self-hosted Reverb (он говорит по Pusher-протоколу на уровне провода) как более протестированный путь, чем «родной» reverb-драйвер. Fallback для V1, если не заведётся быстро: short-polling статуса сессии/ассессмента вместо subscription — не блокирует Milestone 1.
+**Lighthouse subscriptions ↔ Reverb — риск закрыт 21.09.2026 (spike пройден досрочно).** Связка работает: `LIGHTHOUSE_BROADCASTER=reverb` — это тот же pusher-драйвер, но смотрящий в `broadcasting.connections.reverb`, а не в Pusher Cloud. Проверено сквозным прогоном: подписка уходит по HTTP с заголовком `X-Socket-ID` → в ответе приходит приватный канал `private-lighthouse-…` → клиент авторизует его через `POST /graphql/subscriptions/auth` → результат приезжает событием `lighthouse-subscription`. **Polling-fallback не нужен.** Три вещи, без которых путь молча ломается (все три закреплены тестом `SubscriptionWiringTest`): `SubscriptionServiceProvider` обязан быть зарегистрирован в `bootstrap/providers.php` — Lighthouse его не авто-обнаруживает; `LIGHTHOUSE_SUBSCRIPTION_STORAGE=redis` обязателен, иначе `CacheStorageManager` упирается в `cache.serializable_classes => false`; клиент обязан говорить по протоколу Pusher (`laravel-echo`/`pusher-js`), а не `graphql-ws`. Поля подписки объявлять nullable — при подписке они резолвятся в `null`.
 
 **Privacy:** consent на онбординге перед записью голоса; retention транскриптов через S3 lifecycle policy; эндпоинт удаления по запросу; сырое аудио не хранится дольше времени обработки STT.
 
@@ -310,11 +314,11 @@ type Subscription {
 
 ## 6. План по этапам
 
-| Период | Фокус | Результат |
-|---|---|---|
-| 15–30 сент | Repo, docker-compose (MySQL+Redis+Laravel+Nuxt), CI skeleton, миграции по схеме §3 | `docker-compose up` поднимает всё локально |
-| Окт, нед 1 | **Spike: Lighthouse subscriptions + Reverb** (pusher-driver подход, fallback на polling если не заведётся) | Известно, работает ли связка, до того как на неё завязан декабрьский план |
-| Окт, нед 1–2 | Sanctum-auth, базовые GraphQL-типы, feature-тесты на auth/owner-check | `me`/`roadmap` отдают данные, тесты зелёные |
+| Период | Фокус | Результат | Статус |
+|---|---|---|---|
+| 15–30 сент | Repo, docker-compose (MySQL+Redis+Laravel+Nuxt), CI skeleton, миграции по схеме §3 | `docker-compose up` поднимает всё локально | ✅ 21.09 — с отличием: в Docker только MySQL+Redis, Laravel/Nuxt запускаются нативно (README → Containers) |
+| Окт, нед 1 | **Spike: Lighthouse subscriptions + Reverb** (pusher-driver подход, fallback на polling если не заведётся) | Известно, работает ли связка, до того как на неё завязан декабрьский план | ✅ 21.09, досрочно — работает, polling-fallback не понадобился (§5) |
+| Окт, нед 1–2 | Sanctum-auth, базовые GraphQL-типы, feature-тесты на auth/owner-check | `me`/`roadmap` отдают данные, тесты зелёные | ✅ 21.09, досрочно — 37 тестов зелёные, изоляция владельца покрыта |
 | Окт, нед 3–4 | Генерация roadmap, Nuxt-экран роадмапа/cheat sheet, `createAssessmentUploadUrl`+`submitAssessment`+async job (Deepgram batch→LLM→CEFR) | Онбординг с загрузкой аудио и async-обработкой работает целиком |
 | Нояб, нед 1 | **Бенчмарк first-token latency диалоговой LLM** | Модель для реплик выбрана по данным |
 | Нояб, нед 1–2 | LiveKit self-hosted на EC2 + Elastic IP, TURN/TLS (Let's Encrypt), `requestVoiceToken` с idempotency и `VOICE_FLEET_BUSY` | Голосовое соединение работает по сети, насыщение флота обработано |
@@ -344,7 +348,7 @@ type Subscription {
 - [ ] AWS Budgets + трекинг минут голоса на пользователя
 - [ ] Тесты: unit (SM-2, детект ошибок), feature (owner-check), e2e smoke
 - [ ] LiveKit на EC2 с Elastic IP, TURN-сертификат через Let's Encrypt, `stop_grace_period` под реальную длину звонка
-- [ ] Lighthouse+Reverb subscriptions подтверждены рабочими (или включён polling-fallback)
+- [x] Lighthouse+Reverb subscriptions подтверждены рабочими (spike 21.09.2026, §5) — polling-fallback не понадобился
 - [ ] `voice-agent-worker`/`horizon-worker` в публичном subnet с жёсткой SG (NAT Gateway не используется в V1)
 
 ---
