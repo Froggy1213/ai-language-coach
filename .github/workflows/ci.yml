@@ -35,6 +35,18 @@ jobs:
           --health-retries=10
           --health-start-period=30s
 
+      # Resolving the subscription storage manager opens a Redis connection, so
+      # the suite needs a server even though no test issues a Redis command.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
       - uses: actions/checkout@v7
 
@@ -42,7 +54,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pdo_mysql, mbstring, bcmath
+          extensions: pdo_mysql, mbstring, bcmath, redis
           coverage: none
 
       - name: Cache Composer downloads
