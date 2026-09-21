@@ -25,3 +25,9 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Lighthouse IDE helper output (`php artisan lighthouse:ide-helper`),
+# generated for the editor's GraphQL plugin — see README.
+/schema-directives.graphql
+/programmatic-types.graphql
+/_lighthouse_ide_helper.php
