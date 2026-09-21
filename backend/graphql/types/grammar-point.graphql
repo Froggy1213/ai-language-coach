@@ -1,0 +1,17 @@
+"Canonical grammar topic mistakes are classified against (plan §5)."
+type GrammarPoint {
+    "Unique primary key."
+    id: ID!
+
+    "Language this point belongs to."
+    language: String!
+
+    "Stable code used to match LLM output, `uncategorized` for the sentinel."
+    code: String!
+
+    "Human-readable title."
+    title: String!
+
+    "Grouping used on the review screen."
+    category: String!
+}

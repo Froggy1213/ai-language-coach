@@ -1,0 +1,17 @@
+"Spaced repetition state for one (user, grammar point) pair (plan §5)."
+type ReviewItem {
+    "Unique primary key."
+    id: ID!
+
+    "Grammar point to review."
+    grammarPoint: GrammarPoint! @belongsTo
+
+    "SM-2 ease factor."
+    easeFactor: Float! @rename(attribute: "ease_factor")
+
+    "Current interval between repetitions, in days."
+    intervalDays: Int! @rename(attribute: "interval_days")
+
+    "When the item is due next."
+    nextReviewAt: String! @rename(attribute: "next_review_at")
+}
