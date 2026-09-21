@@ -1,0 +1,17 @@
+"An error the user made in a voice session, classified by grammar point."
+type Mistake {
+    "Unique primary key."
+    id: ID!
+
+    "What the user said."
+    userUtterance: String! @rename(attribute: "user_utterance")
+
+    "Corrected version of the utterance."
+    correction: String!
+
+    "Why the correction is right."
+    explanation: String!
+
+    "Grammar point the mistake was matched to."
+    grammarPoint: GrammarPoint! @belongsTo
+}

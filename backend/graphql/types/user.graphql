@@ -1,0 +1,17 @@
+"Account of a person learning a language."
+type User {
+    "Unique primary key."
+    id: ID!
+
+    "Display name."
+    name: String!
+
+    "Language the user is learning."
+    targetLanguage: String! @rename(attribute: "target_language")
+
+    "Current CEFR band, set by the onboarding assessment."
+    currentLevel: CefrLevel! @rename(attribute: "current_level")
+
+    "The roadmap generated for this user."
+    roadmap: Roadmap @hasOne
+}

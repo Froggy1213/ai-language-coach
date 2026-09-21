@@ -1,0 +1,47 @@
+"Ordered study plan generated from the CEFR assessment."
+type Roadmap {
+    "Unique primary key."
+    id: ID!
+
+    "Title shown on the roadmap screen."
+    title: String!
+
+    "Lifecycle of the roadmap."
+    status: RoadmapStatus!
+
+    "Lesson cards in the order they should be studied."
+    lessonCards: [LessonCard!]! @hasMany @orderBy(column: "order_index")
+}
+
+"One grammar point to practise, with its cheat sheet."
+type LessonCard {
+    "Unique primary key."
+    id: ID!
+
+    "Position within the roadmap."
+    orderIndex: Int! @rename(attribute: "order_index")
+
+    "Whether the card can be practised yet."
+    status: LessonCardStatus!
+
+    "Reference material for the lesson."
+    cheatSheet: CheatSheet! @rename(attribute: "cheat_sheet")
+
+    "Grammar point this card teaches."
+    grammarPoint: GrammarPoint! @belongsTo
+}
+
+"Reference material generated for a lesson card."
+type CheatSheet {
+    "The rule in one sentence."
+    rule: String!
+
+    "Pattern to apply, e.g. `have/has + past participle`."
+    formula: String!
+
+    "Example sentences."
+    examples: [String!]!
+
+    "Common mistakes to avoid."
+    pitfalls: [String!]!
+}
