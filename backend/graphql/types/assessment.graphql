@@ -1,0 +1,35 @@
+"One onboarding recording and the async analysis it produced (plan §5)."
+type Assessment {
+    "Unique primary key."
+    id: ID!
+
+    "Where the transcription and analysis pass has got to."
+    status: AssessmentStatus!
+
+    "CEFR band the analysis settled on; null until `status` is `done`."
+    cefrLevel: CefrLevel @rename(attribute: "cefr_level")
+}
+
+"One form field the browser must send alongside the file part."
+type UploadField {
+    "Form field name, e.g. `policy` or `X-Amz-Signature`."
+    name: String!
+
+    "Value to send verbatim."
+    value: String!
+}
+
+"""
+Presigned S3 POST for one recording. The policy behind the signature carries the
+size and content-type limits, so S3 rejects a bad upload on its own (plan §5).
+"""
+type PresignedUpload {
+    "URL the multipart form posts to."
+    uploadUrl: String!
+
+    "Object URL once the upload succeeded — pass it to `submitAssessment`."
+    fileUrl: String!
+
+    "Form fields to send before the file part."
+    fields: [UploadField!]!
+}

@@ -43,4 +43,41 @@ type Mutation {
     the one they already have. Idempotent, so a retry after a timeout is safe.
     """
     generateRoadmap: Roadmap! @guard @field(resolver: "App\\GraphQL\\Mutations\\GenerateRoadmap")
+
+    """
+    Presign one S3 POST for an onboarding recording. The signature carries the
+    size and content-type limits, so the bucket rejects a bad upload itself.
+    """
+    createAssessmentUploadUrl(
+        "What the browser will send, e.g. `audio/webm;codecs=opus`."
+        contentType: String!
+    ): PresignedUpload!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\CreateAssessmentUploadUrl")
+        @validator(class: "App\\GraphQL\\Validators\\CreateAssessmentUploadUrlValidator")
+
+    """
+    Hand an uploaded recording to the transcription and CEFR analysis job. The
+    answer arrives through the `assessmentReady` subscription.
+    """
+    submitAssessment(
+        "`fileUrl` returned by `createAssessmentUploadUrl`, once the upload finished."
+        audioUrl: String!
+    ): Assessment!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\SubmitAssessment")
+        @validator(class: "App\\GraphQL\\Validators\\SubmitAssessmentValidator")
+}
+
+type Subscription {
+    """
+    Fires when the learner's assessment finished. Nullable on purpose: at
+    subscribe time the field resolves to null, and a non-null type would reject
+    the subscription response (plan §5).
+    """
+    assessmentReady(
+        "Whose assessment to watch; must be the authenticated user."
+        userId: ID!
+    ): Assessment
+        @subscription(class: "App\\GraphQL\\Subscriptions\\AssessmentReady")
 }

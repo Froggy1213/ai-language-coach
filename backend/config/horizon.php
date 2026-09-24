@@ -207,7 +207,9 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            'timeout' => 60,
+            // The assessment job transcribes and analyses a recording, which
+            // takes longer than the framework default of 60 seconds.
+            'timeout' => 300,
             'nice' => 0,
         ],
     ],
