@@ -42,7 +42,7 @@ class AnalyzeAssessmentTest extends TestCase
         $assessment = $this->assessmentFor($user);
 
         $audio = $this->audioStore();
-        $audio->shouldReceive('delete')->once()->with(self::AUDIO_URL);
+        $audio->shouldReceive('delete')->once()->with($assessment->audio_url);
 
         $broadcasts = $this->spy(BroadcastsSubscriptions::class);
 
@@ -132,6 +132,29 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertSame(AssessmentStatus::Processing, $assessment->refresh()->status);
         $this->assertSame(CefrLevel::A1, $user->refresh()->current_level);
         $this->assertNull($user->roadmap);
+    }
+
+    public function test_a_broadcast_that_cannot_be_delivered_does_not_throw_the_analysis_away(): void
+    {
+        $this->seed(GrammarPointSeeder::class);
+        $this->fakeDeepgram('I have been learning English for six years.');
+
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $assessment = $this->assessmentFor($user);
+
+        $audio = $this->audioStore();
+        $audio->shouldReceive('delete')->once()->with($assessment->audio_url);
+
+        // What Lighthouse does when one subscriber in the topic cannot be
+        // restored — a deleted user, for instance.
+        $broadcasts = Mockery::mock(BroadcastsSubscriptions::class);
+        $broadcasts->shouldReceive('broadcast')->andThrow(new RuntimeException('No query results for model [App\\Models\\User].'));
+
+        $this->runJob($assessment, $this->assessorReturning($this->b1Result()), $audio, $broadcasts);
+
+        $this->assertSame(AssessmentStatus::Done, $assessment->refresh()->status);
+        $this->assertSame(CefrLevel::B1, $user->refresh()->current_level);
+        $this->assertSame('English · A1–B1', $user->roadmap?->title);
     }
 
     public function test_it_marks_the_assessment_failed_once_the_attempts_run_out(): void

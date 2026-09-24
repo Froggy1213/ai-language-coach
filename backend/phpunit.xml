@@ -33,6 +33,11 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <!-- Subscriptions live in Redis, which the test database does not cover:
+             without a separate key prefix the suite would leave subscribers
+             whose users only exist in `language_coach_testing`, and every later
+             broadcast in the dev database would fail to restore them. -->
+        <env name="REDIS_PREFIX" value="ai_language_coach_testing_"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

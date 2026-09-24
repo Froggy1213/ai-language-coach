@@ -77,3 +77,41 @@ export const GENERATE_ROADMAP_MUTATION = /* GraphQL */ `
     }
   }
 `
+
+export const CREATE_ASSESSMENT_UPLOAD_URL_MUTATION = /* GraphQL */ `
+  mutation CreateAssessmentUploadUrl($contentType: String!) {
+    createAssessmentUploadUrl(contentType: $contentType) {
+      uploadUrl
+      fileUrl
+      fields {
+        name
+        value
+      }
+    }
+  }
+`
+
+export const SUBMIT_ASSESSMENT_MUTATION = /* GraphQL */ `
+  mutation SubmitAssessment($audioUrl: String!) {
+    submitAssessment(audioUrl: $audioUrl) {
+      id
+      status
+      cefrLevel
+    }
+  }
+`
+
+/**
+ * Sent over HTTP rather than a socket: Lighthouse picks the Pusher channel from
+ * `extensions.lighthouse_subscriptions.channel` and routes the event to the
+ * socket named in the `X-Socket-ID` header, so the caller supplies both.
+ */
+export const ASSESSMENT_READY_SUBSCRIPTION = /* GraphQL */ `
+  subscription AssessmentReady($userId: ID!) {
+    assessmentReady(userId: $userId) {
+      id
+      status
+      cefrLevel
+    }
+  }
+`

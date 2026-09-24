@@ -21,7 +21,11 @@ async function signOut(): Promise<void> {
         <NuxtLink to="/roadmap" class="font-semibold tracking-tight">AI Language Coach</NuxtLink>
 
         <div class="flex items-center gap-4 text-sm text-slate-400">
-          <span>{{ user.name }} · {{ user.currentLevel }}</span>
+          <nav class="flex items-center gap-4">
+            <NuxtLink to="/roadmap" class="transition hover:text-slate-100">Роадмап</NuxtLink>
+            <NuxtLink to="/onboarding" class="transition hover:text-slate-100">Проверить уровень</NuxtLink>
+          </nav>
+          <span class="hidden sm:inline">{{ user.name }} · {{ user.currentLevel }}</span>
           <button
             type="button"
             class="rounded-lg border border-slate-700 px-3 py-1 text-slate-300 transition hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"

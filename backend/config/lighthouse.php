@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use App\GraphQL\Subscriptions\SubscriptionRouter as AssessmentSubscriptionRouter;
 use GraphQL\Error\DebugFlag;
 use GraphQL\Validator\Rules\DisableIntrospection;
 use GraphQL\Validator\Rules\QueryComplexity;
@@ -500,7 +501,10 @@ return [
             'reverb' => [
                 'driver' => 'pusher',
                 'connection' => 'reverb',
-                'routes' => SubscriptionRouter::class.'@reverb',
+                // Ours, not Lighthouse's: the stock router leaves the auth route
+                // without middleware, which loses the session the SPA
+                // authenticates with (see the class docblock).
+                'routes' => AssessmentSubscriptionRouter::class.'@reverb',
             ],
         ],
 

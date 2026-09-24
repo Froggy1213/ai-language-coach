@@ -39,3 +39,15 @@ export interface Roadmap {
   status: RoadmapStatus
   lessonCards: LessonCard[]
 }
+
+export interface Assessment {
+  id: string
+  status: AssessmentStatus
+  cefrLevel: CefrLevel | null
+}
+
+export interface PresignedUpload {
+  uploadUrl: string
+  fileUrl: string
+  fields: Array<{ name: string; value: string }>
+}

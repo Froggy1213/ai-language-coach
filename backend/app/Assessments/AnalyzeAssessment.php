@@ -93,7 +93,16 @@ final class AnalyzeAssessment implements ShouldQueue
         // place so a retry can transcribe it again.
         $audio->delete($assessment->audio_url);
 
-        $broadcasts->broadcast(new AssessmentReady, 'assessmentReady', $assessment);
+        // The result is already stored, so a broadcast that cannot be delivered
+        // must not fail the job and throw the analysis away: Lighthouse restores
+        // every subscriber of the topic before filtering, and one whose user no
+        // longer exists takes the whole push down. The client can still see the
+        // new level by asking again (its screen offers exactly that).
+        try {
+            $broadcasts->broadcast(new AssessmentReady, 'assessmentReady', $assessment);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**
