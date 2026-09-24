@@ -1,6 +1,6 @@
 # AI Language Coach — План разработки (сентябрь 2026 – февраль 2027)
 
-> **Статус на 24.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Плюс обе половины недель 3–4 на бэкенде: генерация роадмапа (каталог grammar points A1–C1 с cheat sheet'ами, `RoadmapGenerator`, мутация `generateRoadmap`, artisan-команда) и assessment-пайплайн (`createAssessmentUploadUrl` с presigned POST-лимитами → `submitAssessment` → Horizon-джоб Deepgram batch → CEFR-анализ DeepSeek → `users.current_level` → регенерация роадмапа → подписка `assessmentReady`). 110 тестов зелёных, схема §3 не менялась. Фронт закрыт целиком: SPA-режим, Sanctum double-submit handshake, экраны входа/регистрации/роадмапа и онбординг с записью голоса (consent → MediaRecorder → presigned POST → подписка `assessmentReady` через Echo/Reverb). Вся цепочка прогнана вживую локально: реальные Deepgram и DeepSeek, MinIO вместо S3, событие подписки доставлено настоящему WebSocket-клиенту. Для локального прогона добавлены MinIO в docker-compose и передача аудио байтами вместо URL приватного бакета. Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку, схеме и контракту от §1/§3/§4/§5 зафиксированы в README → «Key decisions & deviations from the plan», пп. 9–16.
+> **Статус на 24.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Плюс обе половины недель 3–4 на бэкенде: генерация роадмапа (каталог grammar points A1–C1 с cheat sheet'ами, `RoadmapGenerator`, мутация `generateRoadmap`, artisan-команда) и assessment-пайплайн (`createAssessmentUploadUrl` с presigned POST-лимитами → `submitAssessment` → Horizon-джоб Deepgram batch → CEFR-анализ DeepSeek → `users.current_level` → регенерация роадмапа → подписка `assessmentReady`). 120 тестов зелёных, схема §3 не менялась. Фронт закрыт целиком: SPA-режим, Sanctum double-submit handshake, экраны входа/регистрации/роадмапа и онбординг с записью голоса (consent → MediaRecorder → presigned POST → подписка `assessmentReady` через Echo/Reverb). Вся цепочка прогнана вживую локально: реальные Deepgram и DeepSeek, MinIO вместо S3, событие подписки доставлено настоящему WebSocket-клиенту. Для локального прогона добавлены MinIO в docker-compose и передача аудио байтами вместо URL приватного бакета. ⚠️ **Открытый дефект:** вход в браузере не доводит до роадмапа — серверная часть входа подтверждена по логам, клиентский переход после `login()` нет; подробности и следующий шаг — после таблицы §6. Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку, схеме и контракту от §1/§3/§4/§5 зафиксированы в README → «Key decisions & deviations from the plan», пп. 9–19.
 
 ## 0. Рамки проекта
 
@@ -337,6 +337,18 @@ type Subscription {
 | Янв, нед 3–4 | Нагрузочный тест: `CapacityPerTask` агента **и** ёмкость LiveKit-ноды, SIGTERM-поведение voice-agent-worker, тюнинг `num_idle_processes`/`load_threshold`, AWS Budgets | Известна реальная ёмкость, стоимость часа диалога, надёжность shutdown |
 | Фев, нед 1–2 | AWS: RDS, ElastiCache, ECS Fargate (laravel-app, horizon-worker, reverb, voice-agent-worker в публичных subnet без NAT) + EC2 для LiveKit, S3, Secrets Manager, CI/CD | Инфраструктура поднята |
 | Фев, нед 3–4 | **Milestone 2**: деплой, smoke-test в проде, финальная документация | Публично доступный сервис |
+
+**Открытый дефект (24.09.2026): вход в браузере не доводит до роадмапа.**
+
+Что известно по фактам (Telescope, тип `request`, окно 02:55:50–02:56:45):
+
+- `POST /graphql` с `mutation Login` → **200**, тело `{"data":{"login":{"id":"1","name":"Test User"}}}` — форма отправляется, сервер пускает, попыток было девять.
+- Следом `GET /graphql?operationName=Me` → **200** и пользователь возвращается, то есть сессионная кука и CSRF-заголовок в порядке.
+- При этом за всё окно **нет ни одного запроса `Roadmap`**: приложение не доходит до экрана роадмапа, новых server-side исключений в Telescope нет.
+
+Гипотеза: падает клиентский переход после `login()` — либо `navigateTo('/roadmap')` отклоняется и попадает в `catch` формы (тогда при успешном входе показывается «Не удалось войти.»), либо глобальный middleware не видит пользователя, выставленного в `useState`. Следующий шаг: открыть консоль браузера на `/login` и посмотреть ошибку при нажатии «Войти»; если её не видно — headless Chrome с `--dump-dom` (запуск был прерван).
+
+Важно для честности статуса: бэкенд, пайплайн ассессмента и подписка проверены вживую и зелёные (120 тестов), а вот **сквозной путь «браузер → вход → роадмап» не подтверждён** — это единственное незакрытое место октябрьского пункта.
 
 ---
 
