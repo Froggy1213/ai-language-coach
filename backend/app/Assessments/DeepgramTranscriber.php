@@ -7,12 +7,14 @@ use DIJ\Deepgram\Deepgram;
 /**
  * Batch speech-to-text for an uploaded recording (plan §5).
  *
- * Deepgram fetches the object from S3 itself — the audio never passes through
- * this process — so the assessment job only needs the presigned-free object URL
- * that was stored when the upload was submitted.
+ * The audio is posted to Deepgram as a file body rather than as an S3 URL. The
+ * bucket is private, so a URL would come back 403 to the provider — and a
+ * presigned one would hand the recording to a third party for as long as it
+ * lives. Sending the bytes also means a local S3-compatible store behaves
+ * exactly like the real bucket.
  *
- * The `dij-digital/deepgram-laravel` package wraps the request; its own model
- * and language defaults come from `config/deepgram-laravel.php` (Nova-2,
+ * The `dij-digital/deepgram-laravel` package wraps the request; its model and
+ * language defaults come from `config/deepgram-laravel.php` (Nova-2,
  * `DEEPGRAM_DEFAULT_LANGUAGE`). Response time is governed by the global HTTP
  * options set in AppServiceProvider: a long recording takes longer than the
  * framework's 30-second default.
@@ -24,13 +26,25 @@ final class DeepgramTranscriber
     /**
      * @throws TranscriptionFailed when the provider returns no usable text.
      */
-    public function transcribe(string $audioUrl, ?string $language = null): Transcription
+    public function transcribe(Recording $recording, ?string $language = null): Transcription
     {
-        $response = $this->deepgram->listen()->transcribeUrl($audioUrl, array_filter([
-            'language' => $language,
-            'smart_format' => true,
-            'punctuate' => true,
-        ]));
+        $path = $this->spool($recording);
+
+        try {
+            $response = $this->deepgram->listen()->transcribeFile(
+                absoluteFilePath: $path,
+                mimeType: $recording->contentType,
+                options: array_filter([
+                    'language' => $language,
+                    'smart_format' => true,
+                    'punctuate' => true,
+                ]),
+            );
+        } finally {
+            // The package has read the file by now; a recording should not
+            // outlive the call that needed it (plan §5).
+            @unlink($path);
+        }
 
         $text = trim((string) data_get($response, 'results.channels.0.alternatives.0.transcript', ''));
 
@@ -45,5 +59,20 @@ final class DeepgramTranscriber
             durationSeconds: (float) data_get($response, 'metadata.duration', 0),
             raw: $response,
         );
+    }
+
+    /**
+     * The package takes a path, not a stream, so the bytes are spooled to a
+     * temporary file for the duration of the call.
+     */
+    private function spool(Recording $recording): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'assessment-recording-');
+
+        if ($path === false || file_put_contents($path, $recording->contents) === false) {
+            throw new TranscriptionFailed('The recording could not be spooled to a temporary file.');
+        }
+
+        return $path;
     }
 }

@@ -28,6 +28,16 @@ interface AssessmentAudioStorage
     public function inspect(User $user, string $fileUrl): AudioUpload;
 
     /**
+     * Read the object back out of the bucket.
+     *
+     * The transcription provider needs the audio itself: the bucket is private,
+     * so handing out a URL would not survive the first request.
+     *
+     * @throws InvalidAssessmentAudio when the object is missing or unreadable.
+     */
+    public function fetch(AudioUpload $upload): Recording;
+
+    /**
      * Drop the raw audio once it has been transcribed (plan §5: recordings are
      * kept no longer than the STT pass needs them).
      */

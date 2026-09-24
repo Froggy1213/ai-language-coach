@@ -52,6 +52,53 @@ services:
       retries: 5
       start_period: 5s
 
+  # S3-compatible store for onboarding recordings (plan §5). The assessment
+  # pipeline presigns POSTs and reads the object back, so a bucket has to exist
+  # long before AWS does — and unlike the real bucket this one is reachable from
+  # the host, which is what makes the whole pipeline testable locally.
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: coach_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-coach_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-coach_minio_password}
+    ports:
+      # Loopback only, console included: the API is what Laravel signs against.
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # MinIO starts empty, and the pipeline needs the bucket to exist before the
+  # first presigned POST. Runs once, then exits.
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: coach_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-coach_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-coach_minio_password}
+      AWS_BUCKET: ${AWS_BUCKET:-coach-audio}
+    entrypoint:
+      - sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$AWS_BUCKET" &&
+        echo "bucket $$AWS_BUCKET ready"
+
 volumes:
   mysql_data:
   redis_data:
+  minio_data:
+

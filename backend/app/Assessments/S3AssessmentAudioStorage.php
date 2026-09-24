@@ -38,6 +38,11 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
                 'Content-Type' => $contentType,
             ],
             options: [
+                // Every form field has to be covered by the policy, the bucket
+                // included — without this condition S3 answers AccessDenied
+                // ("Bucket not specified in the policy") and MinIO says so
+                // explicitly.
+                ['eq', '$bucket', $this->bucket()],
                 ['content-length-range', 1, $this->maxSizeBytes()],
                 ['eq', '$key', $key],
                 ['eq', '$Content-Type', $contentType],
@@ -94,6 +99,23 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
         );
     }
 
+    public function fetch(AudioUpload $upload): Recording
+    {
+        try {
+            $object = $this->client->getObject([
+                'Bucket' => $this->bucket(),
+                'Key' => $upload->key,
+            ]);
+        } catch (S3Exception $exception) {
+            throw new InvalidAssessmentAudio('The uploaded audio could not be read back from the bucket.', previous: $exception);
+        }
+
+        return new Recording(
+            contents: (string) $object['Body'],
+            contentType: $upload->contentType,
+        );
+    }
+
     public function delete(string $fileUrl): void
     {
         try {
@@ -145,6 +167,16 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
         }
 
         $key = ltrim(rawurldecode($path), '/');
+
+        // A path-style endpoint (MinIO, or AWS with AWS_USE_PATH_STYLE_ENDPOINT)
+        // carries the bucket as the first path segment; a virtual-host URL keeps
+        // it in the host, so only strip it when it is really there.
+        $bucketPrefix = $this->bucket().'/';
+
+        if (str_starts_with($key, $bucketPrefix)) {
+            $key = substr($key, strlen($bucketPrefix));
+        }
+
         $prefix = config('assessments.key_prefix', 'assessments').'/';
 
         if (! str_starts_with($key, $prefix) || str_contains($key, '..')) {

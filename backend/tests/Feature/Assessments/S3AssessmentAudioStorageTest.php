@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Assessments;
 
+use App\Assessments\AudioUpload;
 use App\Assessments\InvalidAssessmentAudio;
 use App\Assessments\S3AssessmentAudioStorage;
 use App\Models\User;
@@ -10,6 +11,7 @@ use Aws\MockHandler;
 use Aws\Result;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Support\Carbon;
 use RuntimeException;
 use Tests\TestCase;
@@ -36,6 +38,7 @@ class S3AssessmentAudioStorageTest extends TestCase
         $policy = $this->policy($upload->fields['Policy']);
 
         $this->assertSame('2026-09-24T12:10:00Z', $policy['expiration']);
+        $this->assertContains(['eq', '$bucket', self::BUCKET], $policy['conditions']);
         $this->assertContains(['content-length-range', 1, 15 * 1024 * 1024], $policy['conditions']);
         $this->assertContains(['eq', '$Content-Type', 'audio/webm'], $policy['conditions']);
         $this->assertContains(['eq', '$key', $upload->fields['key']], $policy['conditions']);
@@ -60,6 +63,18 @@ class S3AssessmentAudioStorageTest extends TestCase
         $this->assertSame($key, $upload->key);
         $this->assertSame(2048, $upload->sizeBytes);
         $this->assertSame('audio/webm', $upload->contentType);
+    }
+
+    public function test_it_reads_a_path_style_url_where_the_bucket_leads_the_path(): void
+    {
+        $user = $this->user(7);
+
+        // MinIO, and AWS when AWS_USE_PATH_STYLE_ENDPOINT is on, hand out URLs
+        // with the bucket as the first path segment.
+        $upload = $this->storage($this->headHandler(2048))
+            ->inspect($user, 'http://localhost:9000/coach-audio/assessments/7/recording.webm');
+
+        $this->assertSame('assessments/7/recording.webm', $upload->key);
     }
 
     public function test_it_normalises_the_content_type_the_bucket_reports(): void
@@ -140,6 +155,32 @@ class S3AssessmentAudioStorageTest extends TestCase
             ->inspect($this->user(7), 'https://coach-audio.s3.us-east-1.amazonaws.com/assessments/7/notes.webm');
     }
 
+    public function test_it_reads_the_recording_back_out_of_the_bucket(): void
+    {
+        $handler = new MockHandler;
+        $handler->append(new Result(['Body' => Utils::streamFor('fake-webm-bytes')]));
+
+        $recording = $this->storage($handler)->fetch($this->upload());
+
+        $this->assertSame('fake-webm-bytes', $recording->contents);
+        $this->assertSame('audio/webm', $recording->contentType);
+        $this->assertSame('GetObject', $handler->getLastCommand()->getName());
+    }
+
+    public function test_it_fails_when_the_recording_cannot_be_read_back(): void
+    {
+        $handler = new MockHandler;
+        $handler->append(new S3Exception('Forbidden', new Command('GetObject', [
+            'Bucket' => self::BUCKET,
+            'Key' => 'assessments/7/recording.webm',
+        ])));
+
+        $this->expectException(InvalidAssessmentAudio::class);
+        $this->expectExceptionMessage('could not be read back');
+
+        $this->storage($handler)->fetch($this->upload());
+    }
+
     public function test_it_deletes_the_recording_from_the_bucket(): void
     {
         $handler = new MockHandler;
@@ -195,6 +236,16 @@ class S3AssessmentAudioStorageTest extends TestCase
     private function user(int $id): User
     {
         return (new User)->forceFill(['id' => $id, 'target_language' => 'en']);
+    }
+
+    private function upload(): AudioUpload
+    {
+        return new AudioUpload(
+            key: 'assessments/7/recording.webm',
+            fileUrl: 'https://coach-audio.s3.us-east-1.amazonaws.com/assessments/7/recording.webm',
+            sizeBytes: 15,
+            contentType: 'audio/webm',
+        );
     }
 
     /**

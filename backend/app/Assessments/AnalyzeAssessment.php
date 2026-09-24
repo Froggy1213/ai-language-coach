@@ -61,7 +61,13 @@ final class AnalyzeAssessment implements ShouldQueue
 
         $user = $assessment->user;
 
-        $transcription = $transcriber->transcribe($assessment->audio_url, $user->target_language);
+        // The object is checked again here, not only when the upload was
+        // submitted: it may have been replaced or removed since, and the
+        // transcription cannot work from a URL the bucket will not serve.
+        $upload = $audio->inspect($user, $assessment->audio_url);
+        $recording = $audio->fetch($upload);
+
+        $transcription = $transcriber->transcribe($recording, $user->target_language);
         $result = $assessor->assess($transcription, $user);
 
         DB::transaction(function () use ($assessment, $user, $transcription, $result): void {

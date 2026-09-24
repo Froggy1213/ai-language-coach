@@ -6,8 +6,10 @@ use App\Assessments\AnalyzeAssessment;
 use App\Assessments\AssessmentAnalysisFailed;
 use App\Assessments\AssessmentAudioStorage;
 use App\Assessments\AssessmentResult;
+use App\Assessments\AudioUpload;
 use App\Assessments\CefrAssessor;
 use App\Assessments\DeepgramTranscriber;
+use App\Assessments\Recording;
 use App\Enums\AssessmentStatus;
 use App\Enums\CefrLevel;
 use App\Enums\RoadmapStatus;
@@ -19,6 +21,7 @@ use Database\Seeders\GrammarPointSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Mockery;
+use Mockery\MockInterface;
 use Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions;
 use RuntimeException;
 use Tests\TestCase;
@@ -38,7 +41,7 @@ class AnalyzeAssessmentTest extends TestCase
         $firstRoadmap = $this->app->make(RoadmapGenerator::class)->generate($user);
         $assessment = $this->assessmentFor($user);
 
-        $audio = Mockery::mock(AssessmentAudioStorage::class);
+        $audio = $this->audioStore();
         $audio->shouldReceive('delete')->once()->with(self::AUDIO_URL);
 
         $broadcasts = $this->spy(BroadcastsSubscriptions::class);
@@ -91,6 +94,8 @@ class AnalyzeAssessmentTest extends TestCase
         ]);
 
         $audio = Mockery::mock(AssessmentAudioStorage::class);
+        $audio->shouldNotReceive('inspect');
+        $audio->shouldNotReceive('fetch');
         $audio->shouldNotReceive('delete');
 
         $broadcasts = $this->spy(BroadcastsSubscriptions::class);
@@ -110,7 +115,7 @@ class AnalyzeAssessmentTest extends TestCase
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
         $assessment = $this->assessmentFor($user);
 
-        $audio = Mockery::mock(AssessmentAudioStorage::class);
+        $audio = $this->audioStore();
         $audio->shouldNotReceive('delete');
 
         $assessor = Mockery::mock(CefrAssessor::class);
@@ -174,6 +179,27 @@ class AnalyzeAssessmentTest extends TestCase
             $this->app->make(RoadmapGenerator::class),
             $broadcasts,
         );
+    }
+
+    /**
+     * The bucket, stubbed: the job reads the object back and checks it again
+     * before anything is transcribed.
+     */
+    private function audioStore(): MockInterface
+    {
+        $audio = Mockery::mock(AssessmentAudioStorage::class);
+        $audio->shouldReceive('inspect')->andReturn(new AudioUpload(
+            key: 'assessments/1/recording.webm',
+            fileUrl: self::AUDIO_URL,
+            sizeBytes: 2048,
+            contentType: 'audio/webm',
+        ));
+        $audio->shouldReceive('fetch')->andReturn(new Recording(
+            contents: 'fake-webm-bytes',
+            contentType: 'audio/webm',
+        ));
+
+        return $audio;
     }
 
     private function assessorReturning(AssessmentResult $result): CefrAssessor

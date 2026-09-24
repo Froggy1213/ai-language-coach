@@ -3,6 +3,7 @@
 namespace Tests\Feature\Assessments;
 
 use App\Assessments\DeepgramTranscriber;
+use App\Assessments\Recording;
 use App\Assessments\TranscriptionFailed;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\RequestException;
@@ -18,27 +19,42 @@ class DeepgramTranscriberTest extends TestCase
         config(['deepgram-laravel.api_key' => 'test-key']);
     }
 
-    public function test_it_returns_the_transcript_deepgram_produced(): void
+    public function test_it_posts_the_recording_itself_and_returns_the_transcript(): void
     {
         Http::fake(['api.deepgram.com/*' => Http::response($this->payload('I have been learning English for six years.'))]);
 
         $transcription = $this->transcriber()->transcribe(
-            'https://coach-audio.s3.amazonaws.com/assessments/7/recording.webm',
+            new Recording(contents: 'fake-webm-bytes', contentType: 'audio/webm'),
             'en',
         );
 
         $this->assertSame('I have been learning English for six years.', $transcription->text);
         $this->assertSame(42.5, $transcription->durationSeconds);
-        $this->assertSame('I have been learning English for six years.', data_get($transcription->raw, 'results.channels.0.alternatives.0.transcript'));
+        $this->assertSame(
+            'I have been learning English for six years.',
+            data_get($transcription->raw, 'results.channels.0.alternatives.0.transcript'),
+        );
 
+        // The audio travels in the body: the bucket is private, so a URL would
+        // have come back 403 to Deepgram.
         Http::assertSent(static function (Request $request): bool {
             return str_starts_with($request->url(), 'https://api.deepgram.com/v1/listen?')
                 && str_contains($request->url(), 'model=nova-2')
                 && str_contains($request->url(), 'language=en')
                 && str_contains($request->url(), 'punctuate=true')
                 && $request->hasHeader('Authorization', 'Token test-key')
-                && $request['url'] === 'https://coach-audio.s3.amazonaws.com/assessments/7/recording.webm';
+                && $request->hasHeader('Content-Type', 'audio/webm')
+                && $request->body() === 'fake-webm-bytes';
         });
+    }
+
+    public function test_it_removes_the_spooled_recording_after_the_call(): void
+    {
+        Http::fake(['api.deepgram.com/*' => Http::response($this->payload('Hello.'))]);
+
+        $this->transcriber()->transcribe(new Recording(contents: 'fake-bytes', contentType: 'audio/wav'));
+
+        $this->assertSame([], glob(sys_get_temp_dir().'/assessment-recording-*'));
     }
 
     public function test_it_fails_when_the_recording_produced_no_speech(): void
@@ -48,7 +64,7 @@ class DeepgramTranscriberTest extends TestCase
         $this->expectException(TranscriptionFailed::class);
         $this->expectExceptionMessage('empty transcript');
 
-        $this->transcriber()->transcribe('https://coach-audio.s3.amazonaws.com/assessments/7/silence.webm');
+        $this->transcriber()->transcribe(new Recording(contents: 'silence', contentType: 'audio/webm'));
     }
 
     public function test_it_fails_when_deepgram_rejects_the_request(): void
@@ -57,7 +73,7 @@ class DeepgramTranscriberTest extends TestCase
 
         $this->expectException(RequestException::class);
 
-        $this->transcriber()->transcribe('https://coach-audio.s3.amazonaws.com/assessments/7/recording.webm');
+        $this->transcriber()->transcribe(new Recording(contents: 'bytes', contentType: 'audio/webm'));
     }
 
     private function transcriber(): DeepgramTranscriber
