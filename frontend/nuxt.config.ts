@@ -4,7 +4,16 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
+  // SPA (plan §1): the Sanctum session cookie lives in the browser, so there is
+  // nothing meaningful to render on the server — and no session to render with.
+  ssr: false,
   css: ['~/assets/css/main.css'],
+  app: {
+    head: {
+      htmlAttrs: { lang: 'ru' },
+      title: 'AI Language Coach',
+    },
+  },
   vite: {
     plugins: [tailwindcss()],
   },
