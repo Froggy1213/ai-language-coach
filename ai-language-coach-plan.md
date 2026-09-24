@@ -1,6 +1,6 @@
 # AI Language Coach — План разработки (сентябрь 2026 – февраль 2027)
 
-> **Статус на 21.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку и зависимостям от §1/§5 зафиксированы в README → «Key decisions & deviations from the plan».
+> **Статус на 24.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Плюс первая половина недель 3–4: генерация роадмапа — каталог grammar points A1–C1 с cheat sheet'ами, `RoadmapGenerator`, мутация `generateRoadmap`, artisan-команда, 33 новых теста (70 зелёных, схема §3 не менялась). Осталась вторая половина — assessment upload + async job (Deepgram batch → LLM → CEFR). Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку, схеме и контракту от §1/§3/§4/§5 зафиксированы в README → «Key decisions & deviations from the plan», пп. 9–11.
 
 ## 0. Рамки проекта
 
@@ -190,7 +190,7 @@ HAVING session_count >= 3;
 
 ## 4. GraphQL-контракт (Lighthouse)
 
-Реализовано на 21.09.2026: запросы `me`, `roadmap`, `dueReviews`, `mistakes(grammarPointId)` (все с owner-check) и мутации `login`/`register`/`logout` — вход тоже живёт в GraphQL, см. README, решение 7. Остальное ниже — контракт на будущее, а не описание текущего среза.
+Реализовано на 24.09.2026: запросы `me`, `roadmap`, `dueReviews`, `mistakes(grammarPointId)` (все с owner-check) и мутации `login`/`register`/`logout` — вход тоже живёт в GraphQL, см. README, решение 7 — плюс `generateRoadmap` (идемпотентная генерация роадмапа по `current_level`, README, решение 10) и добавленное к контракту поле `LessonCard.practicePrompt`. Остальное ниже — контракт на будущее, а не описание текущего среза.
 
 ```graphql
 enum CefrLevel { A1 A2 B1 B2 C1 }
@@ -217,6 +217,7 @@ type LessonCard {
   orderIndex: Int!
   status: String!
   cheatSheet: CheatSheet!
+  practicePrompt: String!   # добавлено: текст, о котором агент просит говорить (§5)
   grammarPoint: GrammarPoint! @belongsTo
 }
 
@@ -260,6 +261,7 @@ type Query {
 }
 
 type Mutation {
+  generateRoadmap: Roadmap! @guard   # добавлено: идемпотентно, из current_level (§5)
   createAssessmentUploadUrl(contentType: String!): PresignedUpload! @guard
   submitAssessment(audioUrl: String!): Assessment! @guard
   requestVoiceToken(lessonCardId: ID!): VoiceSession! @guard
@@ -300,6 +302,8 @@ type Subscription {
 
 **Ограничение LLM при разборе ошибок:** промпт async-разбора получает канонический список `grammar_points` (id+code), отфильтрованный по `target_language` пользователя, вывод — строго структурированный по этому списку. Для случая, когда модель не может уверенно сопоставить ошибку ни одному пункту — sentinel `grammar_point` `code = "uncategorized"` на каждый язык, а не отказ записи (у `mistakes.grammar_point_id` NOT NULL).
 
+**Cheat sheet и practice prompt — реализовано 24.09.2026.** Контент живёт в `backend/resources/grammar/{language}.php`: версионируемый каталог (код, категория, CEFR-уровень, `cheat_sheet {rule, formula, examples, pitfalls}`, `practice_prompt`). `GrammarPointSeeder` раскладывает его в `grammar_points` вместе с sentinel'ом, `RoadmapGenerator` — в `lesson_cards` (cheat sheet копируется в карту, чтобы позже её можно было заменить персональной LLM-версией). Английский каталог — 32 пункта A1–C1; схема §3 при этом не менялась. Выбор по уровню: все пункты не выше `users.current_level`, от слабых к сильным, первая карта `ready`, остальные `locked`. Генерация идемпотентна (повтор возвращает существующий активный роадмап), `regenerate()` архивирует предыдущий — его карты остаются, потому что на них ссылаются `mistakes` и `voice_sessions`.
+
 **Latency:** per-turn `{stt_final, llm_first_token, tts_first_chunk, total_turnaround}` в `voice_sessions.transcript` + отдельно в CloudWatch напрямую из Python-процесса.
 
 **SM-2:** `review_items` создаётся лениво при первой `mistake` на пару (user, grammar_point), если строки ещё нет — дефолты `ease_factor=2.50, interval_days=1, next_review_at=NOW()+1 день`. `submitReviewResult(grammarPointId, quality)` пересчитывает по формуле SM-2. `completeLessonCard(lessonCardId)` — в транзакции с `lockForUpdate()` — переводит карту в `completed` и разблокирует следующую (`order_index+1` → `ready`).
@@ -319,7 +323,7 @@ type Subscription {
 | 15–30 сент | Repo, docker-compose (MySQL+Redis+Laravel+Nuxt), CI skeleton, миграции по схеме §3 | `docker-compose up` поднимает всё локально | ✅ 21.09 — с отличием: в Docker только MySQL+Redis, Laravel/Nuxt запускаются нативно (README → Containers) |
 | Окт, нед 1 | **Spike: Lighthouse subscriptions + Reverb** (pusher-driver подход, fallback на polling если не заведётся) | Известно, работает ли связка, до того как на неё завязан декабрьский план | ✅ 21.09, досрочно — работает, polling-fallback не понадобился (§5) |
 | Окт, нед 1–2 | Sanctum-auth, базовые GraphQL-типы, feature-тесты на auth/owner-check | `me`/`roadmap` отдают данные, тесты зелёные | ✅ 21.09, досрочно — 37 тестов зелёные, изоляция владельца покрыта |
-| Окт, нед 3–4 | Генерация roadmap, Nuxt-экран роадмапа/cheat sheet, `createAssessmentUploadUrl`+`submitAssessment`+async job (Deepgram batch→LLM→CEFR) | Онбординг с загрузкой аудио и async-обработкой работает целиком |
+| Окт, нед 3–4 | ~~Генерация roadmap~~, Nuxt-экран роадмапа/cheat sheet, `createAssessmentUploadUrl`+`submitAssessment`+async job (Deepgram batch→LLM→CEFR) | Генерация роадмапа закрыта 24.09 (каталог A1–C1, `RoadmapGenerator`, мутация, команда, 70 тестов); остались экран и assessment-пайплайн | 🟡 частично |
 | Нояб, нед 1 | **Бенчмарк first-token latency диалоговой LLM** | Модель для реплик выбрана по данным |
 | Нояб, нед 1–2 | LiveKit self-hosted на EC2 + Elastic IP, TURN/TLS (Let's Encrypt), `requestVoiceToken` с idempotency и `VOICE_FLEET_BUSY` | Голосовое соединение работает по сети, насыщение флота обработано |
 | Нояб, нед 3–4 | Интеграция LLM в агента, latency-инструментация, идемпотентная обработка `room_finished`/`failed`, ограничение LLM списком grammar_points | Диалоговый спринт с таймингами, вебхук не дублирует обработку |
