@@ -61,6 +61,11 @@ export function useAssessment() {
    * The subscription is opened over HTTP with the socket id in a header, which
    * is how Lighthouse knows which Pusher connection the result belongs to; the
    * returned channel is then authorized through Echo.
+   *
+   * The authorization is what makes this channel real, so it is awaited: the
+   * upload starts only once Echo reports the subscription as live. Without that
+   * wait a failed handshake — a refused origin, a 419, a missing Reverb — is
+   * invisible here, and the screen waits for a push that can never arrive.
    */
   async function onReady(userId: string, handler: (assessment: Assessment) => void): Promise<() => void> {
     const socketId = await connectedSocketId()
@@ -81,17 +86,47 @@ export function useAssessment() {
     const name = channelName.replace(/^private-/, '')
     const channel = $echo.private(name)
 
-    channel.listen('.lighthouse-subscription', (payload: { data?: { assessmentReady?: Assessment | null } }) => {
-      const assessment = payload?.data?.assessmentReady
+    // Lighthouse's Pusher broadcaster wraps the execution result as
+    // `{ more, result }` — the assessment is under `result.data`, not `data`,
+    // so reading `payload.data` here is a listener that never fires.
+    channel.listen('.lighthouse-subscription', (payload: { result?: { data?: { assessmentReady?: Assessment | null } } }) => {
+      const assessment = payload?.result?.data?.assessmentReady
 
       if (assessment) {
         handler(assessment)
       }
     })
 
+    await confirmSubscription(channel)
+
     return () => {
       $echo.leave(name)
     }
+  }
+
+  /**
+   * Echo reports a private channel as subscribed only after pusher-js has
+   * authorized it and the server has confirmed; until then nothing is listening
+   * on the other end of a push.
+   */
+  async function confirmSubscription(
+    channel: ReturnType<typeof $echo.private>,
+    timeoutMs = 10000,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(
+          'Не удалось подписаться на результат: проверьте, что запущен reverb:start и что '
+          + '/graphql/subscriptions/auth доступен браузеру.',
+        )),
+        timeoutMs,
+      )
+
+      channel.subscribed(() => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    })
   }
 
   /**

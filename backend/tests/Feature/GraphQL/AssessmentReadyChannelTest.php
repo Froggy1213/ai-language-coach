@@ -120,6 +120,25 @@ class AssessmentReadyChannelTest extends TestCase
         $this->assertContains(EnsureFrontendRequestsAreStateful::class, $route->middleware());
     }
 
+    /**
+     * The SPA is a different origin from the API, so a response without CORS
+     * headers is a response the browser throws away: pusher-js reports
+     * "Failed to fetch", the private channel never subscribes, and the waiting
+     * onboarding screen never hears about its own assessment.
+     */
+    public function test_the_authorization_response_is_reachable_from_the_spa_origin(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $this->postJson('/graphql/subscriptions/auth', [
+            'channel_name' => $this->channelFor($user),
+            'socket_id' => '1234.5678',
+        ], self::SPA_HEADERS)
+            ->assertOk()
+            ->assertHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+    }
+
     private function channelFor(User $user): string
     {
         $response = $this->graphQL(self::SUBSCRIBE, ['userId' => (string) $user->id], [], self::SPA_HEADERS)

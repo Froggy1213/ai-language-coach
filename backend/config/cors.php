@@ -15,7 +15,12 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'graphql'],
+    // 'graphql/*' is not optional: the subscription channel-authorization route
+    // lives at /graphql/subscriptions/auth, and a bare 'graphql' matches that
+    // path exactly — so the one request Echo's custom authorizer makes came back
+    // without CORS headers, the private channel was never subscribed, and the
+    // result push had nowhere to land.
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'graphql', 'graphql/*'],
 
     'allowed_methods' => ['*'],
 
