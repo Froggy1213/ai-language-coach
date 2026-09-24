@@ -41,6 +41,6 @@ class Roadmap extends Model
      */
     public function lessonCards(): HasMany
     {
-        return $this->hasMany(LessonCard::class);
+        return $this->hasMany(LessonCard::class)->orderBy('order_index');
     }
 }

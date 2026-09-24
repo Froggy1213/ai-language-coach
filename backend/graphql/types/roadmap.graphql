@@ -27,6 +27,9 @@ type LessonCard {
     "Reference material for the lesson."
     cheatSheet: CheatSheet! @rename(attribute: "cheat_sheet")
 
+    "What the voice agent asks the learner to talk about."
+    practicePrompt: String! @rename(attribute: "practice_prompt")
+
     "Grammar point this card teaches."
     grammarPoint: GrammarPoint! @belongsTo
 }

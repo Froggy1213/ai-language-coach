@@ -4,6 +4,7 @@ namespace Tests\Feature\GraphQL;
 
 use App\Enums\CefrLevel;
 use App\Enums\LessonCardStatus;
+use App\Enums\RoadmapStatus;
 use App\Models\GrammarPoint;
 use App\Models\LessonCard;
 use App\Models\Mistake;
@@ -85,6 +86,25 @@ class QueryGraphQLTest extends TestCase
             ->assertJsonPath('data.roadmap.lessonCards.0.status', 'ready')
             ->assertJsonPath('data.roadmap.lessonCards.1.id', (string) $later->id)
             ->assertJsonCount(2, 'data.roadmap.lessonCards');
+    }
+
+    public function test_roadmap_returns_the_active_plan_when_an_older_one_was_archived(): void
+    {
+        $user = User::factory()->create();
+        Roadmap::factory()->for($user)->create(['title' => 'Old plan', 'status' => RoadmapStatus::Archived]);
+        $active = Roadmap::factory()->for($user)->create(['title' => 'Current plan', 'status' => RoadmapStatus::Active]);
+
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                roadmap { id title status }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.roadmap.id', (string) $active->id)
+            ->assertJsonPath('data.roadmap.title', 'Current plan')
+            ->assertJsonPath('data.roadmap.status', 'active');
     }
 
     public function test_roadmap_does_not_leak_another_users_plan(): void

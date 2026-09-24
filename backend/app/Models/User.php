@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\CefrLevel;
+use App\Enums\RoadmapStatus;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -46,11 +47,19 @@ class User extends Authenticatable
     }
 
     /**
+     * The roadmap the learner is working through now.
+     *
+     * Regeneration archives the previous roadmap instead of deleting it, so the
+     * relation has to name the active one — otherwise `User.roadmap` could
+     * return the plan the user has already moved on from.
+     *
      * @return HasOne<Roadmap, $this>
      */
     public function roadmap(): HasOne
     {
-        return $this->hasOne(Roadmap::class);
+        return $this->hasOne(Roadmap::class)
+            ->where('status', RoadmapStatus::Active)
+            ->latest('id');
     }
 
     /**

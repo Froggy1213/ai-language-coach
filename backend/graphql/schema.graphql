@@ -11,8 +11,8 @@ type Query {
     "The currently authenticated user."
     me: User! @guard @auth
 
-    "The authenticated user's roadmap, if one has been generated yet."
-    roadmap: Roadmap @guard @whereAuth(relation: "user") @first
+    "The roadmap the authenticated user is working through, if one has been generated yet."
+    roadmap: Roadmap @guard @field(resolver: "App\\GraphQL\\Queries\\Roadmap")
 
     "Review items whose review date has arrived, soonest first."
     dueReviews: [ReviewItem!]! @guard @whereAuth(relation: "user") @all(scopes: ["due"])
@@ -37,4 +37,10 @@ type Mutation {
 
     "End the current session."
     logout: Boolean! @guard @field(resolver: "App\\GraphQL\\Mutations\\Logout")
+
+    """
+    Build the roadmap for the authenticated user's current CEFR band, or return
+    the one they already have. Idempotent, so a retry after a timeout is safe.
+    """
+    generateRoadmap: Roadmap! @guard @field(resolver: "App\\GraphQL\\Mutations\\GenerateRoadmap")
 }
