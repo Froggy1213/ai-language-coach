@@ -1,6 +1,6 @@
 # AI Language Coach — План разработки (сентябрь 2026 – февраль 2027)
 
-> **Статус на 24.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Плюс первая половина недель 3–4: генерация роадмапа — каталог grammar points A1–C1 с cheat sheet'ами, `RoadmapGenerator`, мутация `generateRoadmap`, artisan-команда, 33 новых теста (70 зелёных, схема §3 не менялась). Осталась вторая половина — assessment upload + async job (Deepgram batch → LLM → CEFR). Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку, схеме и контракту от §1/§3/§4/§5 зафиксированы в README → «Key decisions & deviations from the plan», пп. 9–11.
+> **Статус на 24.09.2026.** Закрыто: сентябрьский блок целиком (репозиторий, docker-compose, миграции §3, CI) и октябрьские недели 1–2 — spike Lighthouse↔Reverb пройден (§5), Sanctum-auth, базовые GraphQL-типы и owner-check тесты готовы. Плюс обе половины недель 3–4 на бэкенде: генерация роадмапа (каталог grammar points A1–C1 с cheat sheet'ами, `RoadmapGenerator`, мутация `generateRoadmap`, artisan-команда) и assessment-пайплайн (`createAssessmentUploadUrl` с presigned POST-лимитами → `submitAssessment` → Horizon-джоб Deepgram batch → CEFR-анализ DeepSeek → `users.current_level` → регенерация роадмапа → подписка `assessmentReady`). 110 тестов зелёных, схема §3 не менялась. Остался фронтенд: Nuxt-экраны онбординга и роадмапа (включая Sanctum double-submit handshake в urql). Отметки по этапам — в §6, закрытые пункты чеклиста — в §7. Отклонения по стеку, схеме и контракту от §1/§3/§4/§5 зафиксированы в README → «Key decisions & deviations from the plan», пп. 9–16.
 
 ## 0. Рамки проекта
 
@@ -242,7 +242,9 @@ type Mistake {
   grammarPoint: GrammarPoint! @belongsTo
 }
 
-type PresignedUpload { uploadUrl: String! fileUrl: String! }
+# ИЗМЕНЕНО: добавлен `fields` — presigned POST без полей формы не отправить (§5)
+type PresignedUpload { uploadUrl: String! fileUrl: String! fields: [UploadField!]! }
+type UploadField { name: String! value: String! }
 
 # ИСПРАВЛЕНО: было [GrammarPoint!]!, без интервалов очередь не отрисовать
 type ReviewItem {
@@ -281,7 +283,9 @@ type Subscription {
 
 ## 5. Голосовой пайплайн и вспомогательные потоки — контракт реализации
 
-**Ассессмент — полный поток:** `createAssessmentUploadUrl` (presigned S3 PUT, лимит размера ~15 МБ и MIME `audio/webm|wav|mp3` через условия presigned POST) → клиент грузит файл в S3 → `submitAssessment(audioUrl)` создаёт `assessments` со статусом `processing` и диспатчит Horizon job: Deepgram batch STT → LLM-анализ транскрипта → CEFR-оценка → `assessments.status = done` → генерация `roadmaps`/`lesson_cards`. Фронт получает готовность через `assessmentReady(userId)` subscription, не синхронным ожиданием.
+**Ассессмент — полный поток:** `createAssessmentUploadUrl` (presigned S3 POST, лимит размера ~15 МБ и MIME `audio/webm|wav|mp3` через условия политики) → клиент грузит файл в S3 → `submitAssessment(audioUrl)` создаёт `assessments` со статусом `processing` и диспатчит Horizon job: Deepgram batch STT → LLM-анализ транскрипта → CEFR-оценка → `assessments.status = done` → генерация `roadmaps`/`lesson_cards`. Фронт получает готовность через `assessmentReady(userId)` subscription, не синхронным ожиданием.
+
+**Ассессмент — реализовано 24.09.2026.** Ключ объекта — `assessments/{userId}/{ulid}.{ext}`, лимиты и MIME в `config/assessments.php`; `submitAssessment` не доверяет клиенту и повторно проверяет объект в бакете (владелец по префиксу, размер, content type). Джоб `AnalyzeAssessment` (timeout 300 с, 3 попытки с бэкоффом 30/120 c, `retry_after` очередей и timeout Horizon подняты под это) пропускает всё, что уже не `processing`; сырое аудио удаляется **после** успешного анализа, чтобы повторная попытка могла перечитать запись; при исчерпании попыток `failed()` пишет `status = failed` и текст ошибки в `raw_data`, иначе экран онбординга ждал бы `processing` вечно. Structured output `laravel/ai` не валидирует — ответ модели проходит через валидатор в `DeepSeekCefrAssessor` (бэнд только A1–C1, непустые summary/strengths/weaknesses), иначе джоб падает. Провайдер LLM указывается явно (`ai.default` смотрит в OpenAI), модель — `ASSESSMENT_ANALYSIS_MODEL` (уточнить под аккаунт до AWS, §7).
 
 **`requestVoiceToken` резолвер:**
 1. Проверить владение уроком и `status === 'ready'`.
@@ -323,7 +327,7 @@ type Subscription {
 | 15–30 сент | Repo, docker-compose (MySQL+Redis+Laravel+Nuxt), CI skeleton, миграции по схеме §3 | `docker-compose up` поднимает всё локально | ✅ 21.09 — с отличием: в Docker только MySQL+Redis, Laravel/Nuxt запускаются нативно (README → Containers) |
 | Окт, нед 1 | **Spike: Lighthouse subscriptions + Reverb** (pusher-driver подход, fallback на polling если не заведётся) | Известно, работает ли связка, до того как на неё завязан декабрьский план | ✅ 21.09, досрочно — работает, polling-fallback не понадобился (§5) |
 | Окт, нед 1–2 | Sanctum-auth, базовые GraphQL-типы, feature-тесты на auth/owner-check | `me`/`roadmap` отдают данные, тесты зелёные | ✅ 21.09, досрочно — 37 тестов зелёные, изоляция владельца покрыта |
-| Окт, нед 3–4 | ~~Генерация roadmap~~, Nuxt-экран роадмапа/cheat sheet, `createAssessmentUploadUrl`+`submitAssessment`+async job (Deepgram batch→LLM→CEFR) | Генерация роадмапа закрыта 24.09 (каталог A1–C1, `RoadmapGenerator`, мутация, команда, 70 тестов); остались экран и assessment-пайплайн | 🟡 частично |
+| Окт, нед 3–4 | ~~Генерация roadmap~~, ~~`createAssessmentUploadUrl`+`submitAssessment`+async job (Deepgram batch→LLM→CEFR)~~, Nuxt-экраны онбординга и роадмапа/cheat sheet | Бэкенд закрыт 24.09 (каталог A1–C1, `RoadmapGenerator`, assessment-пайплайн с подпиской, 110 тестов); остались Nuxt-экраны и Sanctum handshake | 🟡 фронт |
 | Нояб, нед 1 | **Бенчмарк first-token latency диалоговой LLM** | Модель для реплик выбрана по данным |
 | Нояб, нед 1–2 | LiveKit self-hosted на EC2 + Elastic IP, TURN/TLS (Let's Encrypt), `requestVoiceToken` с idempotency и `VOICE_FLEET_BUSY` | Голосовое соединение работает по сети, насыщение флота обработано |
 | Нояб, нед 3–4 | Интеграция LLM в агента, latency-инструментация, идемпотентная обработка `room_finished`/`failed`, ограничение LLM списком grammar_points | Диалоговый спринт с таймингами, вебхук не дублирует обработку |
