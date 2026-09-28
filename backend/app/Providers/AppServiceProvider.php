@@ -12,6 +12,7 @@ use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
 use App\Enums\VoiceSessionStatus;
 use App\GraphQL\Types\NativeEnumType;
+use App\Voice\LiveKitToken;
 use Aws\S3\S3Client;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Http;
@@ -56,6 +57,14 @@ class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->bind(CefrAssessor::class, DeepSeekCefrAssessor::class);
+
+        // LiveKit access tokens and the server API calls that dispatch the voice
+        // agent (plan §5). A singleton because LiveKitApi wraps it and both read
+        // the same key pair from `config/voice.php`.
+        $this->app->singleton(LiveKitToken::class, fn (): LiveKitToken => new LiveKitToken(
+            apiKey: (string) $this->app['config']->get('voice.livekit.api_key'),
+            apiSecret: (string) $this->app['config']->get('voice.livekit.api_secret'),
+        ));
     }
 
     /**

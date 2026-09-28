@@ -67,6 +67,17 @@ type Mutation {
         @guard
         @field(resolver: "App\\GraphQL\\Mutations\\SubmitAssessment")
         @validator(class: "App\\GraphQL\\Validators\\SubmitAssessmentValidator")
+
+    """
+    Open a spoken practice session for a lesson card and return the room and its
+    access token. Idempotent: while a session is pending or active, calling this
+    again returns that same session instead of opening a second room. Fails with
+    the `VOICE_FLEET_BUSY` error code when no agent worker is free.
+    """
+    requestVoiceToken(
+        "The lesson card to practise; must be one of the learner's own `ready` cards."
+        lessonCardId: ID!
+    ): VoiceSession! @guard @field(resolver: "App\\Voice\\StartVoiceSession")
 }
 
 type Subscription {

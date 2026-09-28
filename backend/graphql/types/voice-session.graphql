@@ -1,0 +1,33 @@
+"One spoken practice session with the voice agent (plan §4)."
+type VoiceSession {
+    "Unique primary key."
+    id: ID!
+
+    "Lifecycle of the session."
+    status: VoiceSessionStatus!
+
+    """
+    WebSocket endpoint the browser dials. Returned per session rather than read
+    from the client's build-time environment, so a deployment can move the
+    LiveKit node without rebuilding the frontend.
+    """
+    livekitUrl: String! @field(resolver: "App\\GraphQL\\Resolvers\\VoiceSessionConnection@url")
+
+    """
+    Short-lived access token scoped to this session's room. Minted when the
+    field is read, never stored: a token saved at session creation would already
+    be expired for a learner returning to an idle session.
+    """
+    livekitToken: String @field(resolver: "App\\GraphQL\\Resolvers\\VoiceSessionConnection@token")
+
+    "Why the session failed, when it did."
+    failReason: String @rename(attribute: "fail_reason")
+
+    "Length of the conversation in seconds, once it finished."
+    durationSec: Int @rename(attribute: "duration_sec")
+    "The lesson this session practises."
+    lessonCard: LessonCard! @belongsTo
+
+    "Mistakes the async analysis found in this session."
+    mistakes: [Mistake!]! @hasMany
+}
