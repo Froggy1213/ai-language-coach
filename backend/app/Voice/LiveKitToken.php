@@ -46,14 +46,25 @@ final class LiveKitToken
     /**
      * This backend's own token for the server API (RoomService, AgentDispatch
      * Service). Short-lived and never sent to a client.
+     *
+     * LiveKit's room-scoped admin endpoints (agent dispatch, participant listing)
+     * check the grant against the room in the request, so a capability-only token
+     * is refused; `roomCreate` is the exception, because the room does not exist
+     * yet when it is called.
      */
-    public function server(): string
+    public function server(?string $roomName = null): string
     {
-        return $this->encode([
+        $grants = [
             'roomCreate' => true,
             'roomList' => true,
             'roomAdmin' => true,
-        ], 'api');
+        ];
+
+        if ($roomName !== null) {
+            $grants['room'] = $roomName;
+        }
+
+        return $this->encode($grants, 'api');
     }
 
     /**

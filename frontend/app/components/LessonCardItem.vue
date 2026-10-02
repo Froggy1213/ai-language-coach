@@ -33,7 +33,16 @@ const statusClass = computed(() => STATUS_CLASSES[props.card.status])
           {{ card.grammarPoint.title }}
         </h2>
       </div>
-      <span class="rounded-full border px-3 py-1 text-xs" :class="statusClass">{{ statusLabel }}</span>
+      <div class="flex items-center gap-3">
+        <NuxtLink
+          v-if="card.status === 'ready'"
+          :to="`/practice/${card.id}`"
+          class="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-sky-400"
+        >
+          Практика
+        </NuxtLink>
+        <span class="rounded-full border px-3 py-1 text-xs" :class="statusClass">{{ statusLabel }}</span>
+      </div>
     </header>
 
     <p class="mt-4 rounded-lg bg-slate-950/60 px-3 py-2 text-sm text-slate-300">

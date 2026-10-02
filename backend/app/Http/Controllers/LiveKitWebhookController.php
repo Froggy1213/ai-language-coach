@@ -73,7 +73,11 @@ final class LiveKitWebhookController extends Controller
                 roomName: $roomName,
                 reason: is_string($event['roomEndReason'] ?? null) ? $event['roomEndReason'] : null,
                 durationSeconds: VoiceSessionLifecycle::durationSeconds(
-                    roomCreatedAt: $this->timestamp($event['room']['createdAt'] ?? null),
+                    // Real LiveKit servers send `creationTime` (seconds, as a numeric
+                    // string) on the room object, while older payloads named it
+                    // `createdAt`. We prefer `creationTime` and fall back to `createdAt`.
+                    roomCreatedAt: $this->timestamp($event['room']['creationTime'] ?? null)
+                        ?? $this->timestamp($event['room']['createdAt'] ?? null),
                     roomFinishedAt: $this->timestamp($event['createdAt'] ?? null),
                 ),
             ),

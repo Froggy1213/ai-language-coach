@@ -32,7 +32,7 @@ final class LiveKitWebhook
             throw new RuntimeException('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set to verify webhooks.');
         }
 
-        $token = $this->bearerToken($authorizationHeader);
+        $token = $this->signatureToken($authorizationHeader);
 
         if ($token === null) {
             throw InvalidWebhookSignature::missing();
@@ -75,12 +75,25 @@ final class LiveKitWebhook
         }
     }
 
-    private function bearerToken(string $authorizationHeader): ?string
+    /**
+     * Extracts the signature token from the Authorization header.
+     *
+     * Real LiveKit servers send the bare JWT without a `Bearer ` prefix. We
+     * accept both the bare token and the `Bearer `-prefixed shape because the
+     * endpoint documentation, curl examples, and existing tests use Bearer.
+     */
+    private function signatureToken(string $authorizationHeader): ?string
     {
-        if (preg_match('/^Bearer\s+(.+)$/i', trim($authorizationHeader), $matches) !== 1) {
+        $header = trim($authorizationHeader);
+
+        if ($header === '') {
             return null;
         }
 
-        return trim($matches[1]);
+        if (preg_match('/^Bearer(?:\s+(.+))?$/i', $header, $matches) === 1) {
+            return isset($matches[1]) && trim($matches[1]) !== '' ? trim($matches[1]) : null;
+        }
+
+        return $header;
     }
 }

@@ -17,3 +17,15 @@ export function graphQLErrorMessage(error: CombinedError | null | undefined): st
 
   return fieldMessage ?? error.graphQLErrors[0]?.message ?? error.message
 }
+
+/**
+ * Returns the first GraphQL error's extensions.code, if present.
+ */
+export function graphQLErrorCode(error: CombinedError | null | undefined): string | null {
+  if (!error) {
+    return null
+  }
+
+  const extensions = error.graphQLErrors[0]?.extensions as { code?: string } | undefined
+  return extensions?.code ?? null
+}

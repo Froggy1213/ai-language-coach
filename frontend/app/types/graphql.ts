@@ -2,6 +2,7 @@ export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1'
 export type LessonCardStatus = 'locked' | 'ready' | 'completed'
 export type RoadmapStatus = 'active' | 'completed' | 'archived'
 export type AssessmentStatus = 'processing' | 'done' | 'failed'
+export type VoiceSessionStatus = 'pending' | 'active' | 'completed' | 'failed' | 'abandoned'
 
 export interface CurrentUser {
   id: string
@@ -50,4 +51,14 @@ export interface PresignedUpload {
   uploadUrl: string
   fileUrl: string
   fields: Array<{ name: string; value: string }>
+}
+
+export interface VoiceSession {
+  id: string
+  status: VoiceSessionStatus
+  livekitUrl: string
+  livekitToken: string | null
+  failReason: string | null
+  durationSec: number | null
+  lessonCard: LessonCard
 }

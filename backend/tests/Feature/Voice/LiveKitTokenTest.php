@@ -47,13 +47,25 @@ class LiveKitTokenTest extends TestCase
         $this->assertArrayNotHasKey('roomList', $video);
     }
 
-    public function test_a_server_token_carries_the_grants_the_api_calls_need(): void
+    public function test_a_server_token_without_a_room_omits_the_room_claim_for_room_creation(): void
     {
         $video = $this->claims($this->tokens()->server())['video'];
 
         $this->assertTrue($video->roomCreate);
         $this->assertTrue($video->roomList);
         $this->assertTrue($video->roomAdmin);
+        $this->assertFalse(isset($video->room));
+        $this->assertFalse($video->roomJoin ?? false);
+    }
+
+    public function test_a_server_token_can_be_scoped_to_a_room_for_admin_calls(): void
+    {
+        $video = $this->claims($this->tokens()->server('lesson-42'))['video'];
+
+        $this->assertTrue($video->roomCreate);
+        $this->assertTrue($video->roomList);
+        $this->assertTrue($video->roomAdmin);
+        $this->assertSame('lesson-42', $video->room);
         $this->assertFalse($video->roomJoin ?? false);
     }
 

@@ -282,14 +282,37 @@ class RequestVoiceTokenTest extends TestCase
 
         $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
 
-        $this->assertStringContainsString(
-            'LiveKit livekit.RoomService/CreateRoom failed with HTTP 500',
-            (string) $response->json('errors.0.extensions.debugMessage'),
-        );
+        $response->assertGraphQLErrorMessage('Could not start voice session. Please try again later.');
+        $this->assertSame('VOICE_START_FAILED', $response->json('errors.0.extensions.code'));
 
         // The important part: a session left `pending` here would be handed back
         // by the idempotency guard on the next attempt, together with a token for
         // a room nobody is in.
+        $session = VoiceSession::query()->sole();
+        $this->assertSame(VoiceSessionStatus::Failed, $session->status);
+        $this->assertSame('voice_start_failed', $session->fail_reason);
+    }
+
+    public function test_reports_voice_start_failed_when_livekit_refuses_agent_dispatch(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
+            'livekit.test/twirp/livekit.AgentDispatchService/CreateDispatch' => Http::response([
+                'code' => 'unauthenticated',
+                'msg' => 'permissions denied',
+            ], 401),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        // A typed error rather than an untyped internal server error with debug stack traces.
+        $response->assertGraphQLErrorMessage('Could not start voice session. Please try again later.');
+        $this->assertSame('VOICE_START_FAILED', $response->json('errors.0.extensions.code'));
+
         $session = VoiceSession::query()->sole();
         $this->assertSame(VoiceSessionStatus::Failed, $session->status);
         $this->assertSame('voice_start_failed', $session->fail_reason);

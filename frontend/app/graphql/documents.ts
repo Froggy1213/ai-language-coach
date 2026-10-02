@@ -115,3 +115,32 @@ export const ASSESSMENT_READY_SUBSCRIPTION = /* GraphQL */ `
     }
   }
 `
+
+export const REQUEST_VOICE_TOKEN_MUTATION = /* GraphQL */ `
+  mutation RequestVoiceToken($lessonCardId: ID!) {
+    requestVoiceToken(lessonCardId: $lessonCardId) {
+      id
+      status
+      livekitUrl
+      livekitToken
+      failReason
+      durationSec
+      lessonCard {
+        id
+        practicePrompt
+        cheatSheet {
+          rule
+          formula
+          examples
+          pitfalls
+        }
+        grammarPoint {
+          id
+          code
+          title
+          category
+        }
+      }
+    }
+  }
+`

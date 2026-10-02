@@ -123,6 +123,22 @@ class LiveKitWebhookTest extends TestCase
 
         $this->send($this->event('room_finished', $session->room_name, [
             'roomEndReason' => 'ROOM_END_API_DELETE',
+            'room' => ['name' => $session->room_name, 'creationTime' => '1000'],
+            'createdAt' => '1480',
+        ]))->assertOk()->assertJson(['applied' => true]);
+
+        $session->refresh();
+        $this->assertSame(VoiceSessionStatus::Completed, $session->status);
+        $this->assertSame(480, $session->duration_sec);
+        $this->assertNull($session->fail_reason);
+    }
+
+    public function test_it_tolerates_the_legacy_created_at_room_field_for_duration(): void
+    {
+        $session = $this->activeSession();
+
+        $this->send($this->event('room_finished', $session->room_name, [
+            'roomEndReason' => 'ROOM_END_API_DELETE',
             'room' => ['name' => $session->room_name, 'createdAt' => 1000],
             'createdAt' => 1480,
         ]))->assertOk()->assertJson(['applied' => true]);
@@ -173,8 +189,8 @@ class LiveKitWebhookTest extends TestCase
 
         $this->send($this->event('room_finished', $session->room_name, [
             'roomEndReason' => 'ROOM_END_API_DELETE',
-            'room' => ['name' => $session->room_name, 'createdAt' => 1000],
-            'createdAt' => 1480,
+            'room' => ['name' => $session->room_name, 'creationTime' => '1000'],
+            'createdAt' => '1480',
         ]))->assertOk()->assertJson(['applied' => true]);
 
         // A redelivery of the same event: the second one changes nothing, and
@@ -234,6 +250,30 @@ class LiveKitWebhookTest extends TestCase
         $this->assertSame(VoiceSessionStatus::Completed, $session->fresh()->status);
     }
 
+    public function test_it_accepts_the_bare_jwt_signature_livekit_actually_sends(): void
+    {
+        // Real LiveKit servers send the bare JWT without a 'Bearer ' prefix,
+        // paired with the 'application/webhook+json' content type. If the header
+        // parser expects 'Bearer', every real webhook is refused as unsigned
+        // and the session status transition never happens.
+        $session = $this->activeSession();
+        $body = $this->event('room_finished', $session->room_name, [
+            'roomEndReason' => 'ROOM_END_API_DELETE',
+        ]);
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => $this->sign($body),
+                'CONTENT_TYPE' => 'application/webhook+json',
+            ],
+            content: json_encode($body),
+        )->assertOk()->assertJson(['applied' => true]);
+
+        $this->assertSame(VoiceSessionStatus::Completed, $session->fresh()->status);
+    }
+
     /**
      * @param  array<string, mixed>  $body
      */
@@ -261,8 +301,8 @@ class LiveKitWebhookTest extends TestCase
     {
         return array_replace([
             'event' => $name,
-            'room' => ['name' => $roomName, 'createdAt' => 1000],
-            'createdAt' => 1500,
+            'room' => ['name' => $roomName, 'creationTime' => '1000'],
+            'createdAt' => '1500',
             'id' => 'evt-1',
         ], $overrides);
     }

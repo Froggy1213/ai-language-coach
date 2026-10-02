@@ -53,7 +53,7 @@ final class LiveKitApi
             'agentName' => (string) config('voice.agent.name'),
             'room' => $roomName,
             'metadata' => json_encode($metadata, JSON_THROW_ON_ERROR),
-        ]);
+        ], room: $roomName);
     }
 
     /**
@@ -68,7 +68,7 @@ final class LiveKitApi
      */
     public function participants(string $roomName): array
     {
-        $response = $this->call('livekit.RoomService/ListParticipants', ['room' => $roomName]);
+        $response = $this->call('livekit.RoomService/ListParticipants', ['room' => $roomName], room: $roomName);
 
         /** @var list<array<string, mixed>> $participants */
         $participants = $response['participants'] ?? [];
@@ -85,7 +85,7 @@ final class LiveKitApi
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function call(string $method, array $payload): array
+    private function call(string $method, array $payload, ?string $room = null): array
     {
         $apiKey = (string) config('voice.livekit.api_key');
         $apiSecret = (string) config('voice.livekit.api_secret');
@@ -95,7 +95,7 @@ final class LiveKitApi
             throw new RuntimeException('LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set to call the LiveKit server API.');
         }
 
-        $response = $this->request()
+        $response = $this->request($room)
             ->post($this->httpEndpoint($url).'/twirp/'.$method, $payload);
 
         if ($response->status() === 429) {
@@ -114,9 +114,9 @@ final class LiveKitApi
         return $decoded;
     }
 
-    private function request(): PendingRequest
+    private function request(?string $room = null): PendingRequest
     {
-        return Http::withToken($this->token->server())
+        return Http::withToken($this->token->server($room))
             ->acceptJson()
             ->asJson()
             ->timeout((int) config('voice.livekit.api_timeout_seconds'))

@@ -109,10 +109,11 @@ final class StartVoiceSession
             $this->api->dispatchAgent($session->room_name, $this->jobMetadata($session, $card, $user));
             $this->waitForAgent($session->room_name);
         } catch (VoiceFleetBusy $exception) {
-            // The room exists and the learner was never told about it, so it is
-            // closed rather than left to sit until its idle timeout. Marking the
-            // session failed is what keeps the idempotency guard from handing
-            // this dead room back on the next attempt.
+            // The room exists and the learner was never told about it. It is not
+            // closed here: LiveKit's own empty timeout (VOICE_ROOM_EMPTY_TIMEOUT)
+            // is the backstop, and it costs nothing but an idle room until then.
+            // Marking the session failed is what keeps the idempotency guard from
+            // handing this dead room back on the next attempt.
             $session->update([
                 'status' => VoiceSessionStatus::Failed,
                 'fail_reason' => 'voice_fleet_busy',
@@ -134,7 +135,15 @@ final class StartVoiceSession
                 'fail_reason' => 'voice_start_failed',
             ]);
 
-            throw $exception;
+            report($exception);
+
+            $failure = VoiceStartFailed::forFailure($exception);
+
+            throw new Error(
+                $failure->getMessage(),
+                extensions: ['code' => 'VOICE_START_FAILED'],
+                previous: $failure,
+            );
         }
 
         $session->update(['status' => VoiceSessionStatus::Active]);
