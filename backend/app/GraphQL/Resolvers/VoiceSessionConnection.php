@@ -38,6 +38,11 @@ final class VoiceSessionConnection
     {
         // Reading the config here rather than trusting the client's build-time
         // environment keeps one source of truth for where voice runs.
-        return (string) config('voice.livekit.url');
+        //
+        // `public_url` exists because that single source has two audiences: the
+        // address this backend dials for the Twirp API, and the address the
+        // browser dials for WebRTC. They coincide on a single host, so the
+        // fallback is what keeps the ordinary local setup a one-key config.
+        return (string) (config('voice.livekit.public_url') ?? config('voice.livekit.url'));
     }
 }

@@ -1,0 +1,23 @@
+# Build context for agent/Dockerfile.
+#
+# The image runs `COPY . .`, so anything left here is baked into it. `.env` is
+# the one that matters: a developer's local file would be copied in and then read
+# by `load_dotenv()` at import time, silently overriding the environment
+# variables docker-compose passes to the container — including LIVEKIT_URL,
+# which has to be the service name inside the network and 127.0.0.1 outside it.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
+
+.venv/
+venv/
+
+# Editor / vcs noise
+.git
+.gitignore
+.DS_Store
+.idea
+.vscode

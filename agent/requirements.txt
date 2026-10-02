@@ -1,0 +1,15 @@
+# Pinned to the major version that is actually run and tested (1.8.x, see the
+# image build): the 1.x line introduced AgentSession, which agent.py uses, and
+# the plugins version-lock to it. Left open-ended, a later `pip install` could
+# pull a 2.x with a different entrypoint API into a container that still reports
+# itself healthy.
+livekit-agents>=1.8,<2.0
+livekit-plugins-deepgram>=1.8,<2.0
+livekit-plugins-cartesia>=1.8,<2.0
+livekit-plugins-openai>=1.8,<2.0
+livekit-plugins-silero>=1.8,<2.0
+
+# Used directly by agent.py to report a failed session to Laravel. The plugins
+# bring their own HTTP client, but that is an implementation detail of theirs.
+aiohttp>=3.9,<4.0
+python-dotenv>=1.0,<2.0

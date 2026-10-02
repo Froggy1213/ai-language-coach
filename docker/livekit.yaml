@@ -1,0 +1,27 @@
+# LiveKit Server configuration for local development.
+#
+# Ports:
+#   7880     - HTTP API and WebSocket signaling
+#   7881     - WebRTC TCP fallback
+#   7882/udp - WebRTC UDP media traffic
+#
+# node_ip is set to 127.0.0.1 so that WebRTC ICE candidates announced to local
+# browsers match the host loopback instead of Docker's internal bridge IP.
+
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  node_ip: "127.0.0.1"
+  use_external_ip: false
+
+keys:
+  devkey: "99fed3cd67e98cae5fa57a9aec3818d317f5e8a54f67c87e"
+
+webhook:
+  api_key: "devkey"
+  urls:
+    - "http://host.docker.internal:8000/api/webhooks/livekit"

@@ -40,6 +40,9 @@ class RequestVoiceTokenTest extends TestCase
 
         config([
             'voice.livekit.url' => 'wss://livekit.test',
+            // Nulled explicitly so a developer's own LIVEKIT_PUBLIC_URL in .env
+            // cannot change what these tests assert about the returned URL.
+            'voice.livekit.public_url' => null,
             'voice.livekit.api_key' => 'test-api-key',
             'voice.livekit.api_secret' => 'test-api-secret-that-is-long-enough',
             // The fleet answers instantly in every test but the timeout one, so
@@ -89,6 +92,28 @@ class RequestVoiceTokenTest extends TestCase
             && $request['name'] === $session->room_name
             && $request['emptyTimeout'] === (int) config('voice.room.empty_timeout_seconds')
             && $request['maxParticipants'] === 2);
+    }
+
+    public function test_the_browser_dials_the_public_url_while_the_api_dials_the_internal_one(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+        $this->fakeLiveKit(agentJoins: true);
+
+        // A containerised backend reaches LiveKit by service name, which the
+        // learner's browser cannot resolve — the two addresses are configured
+        // apart for exactly that deployment.
+        config(['voice.livekit.public_url' => 'wss://voice.example.com']);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame('wss://voice.example.com', $response->json('data.requestVoiceToken.livekitUrl'));
+
+        // The dispatch still goes to the internal address: the public URL is for
+        // the browser and must not leak into the server API calls.
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://livekit.test/'));
     }
 
     public function test_dispatches_the_agent_with_the_lesson_as_job_metadata(): void

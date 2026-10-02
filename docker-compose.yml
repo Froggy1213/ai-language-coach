@@ -1,8 +1,13 @@
-# Local development infrastructure.
+# Infrastructure and services configuration.
 #
-# Only the stateful backing services run in Docker. Laravel and Nuxt run natively
-# on the host (php artisan serve / npm run dev) so HMR, xdebug and artisan stay
-# fast — see README.md -> "Local setup".
+# By default, stateful backing services + LiveKit + Voice Agent run in Docker:
+#   `docker compose up -d`
+# Laravel and Nuxt run natively on the host (php artisan serve / npm run dev) so HMR,
+# xdebug, and artisan stay fast — see README.md -> "Local setup".
+#
+# Alternatively, to run the ENTIRE stack (including Laravel, Reverb, Horizon, and Nuxt)
+# in containers without running anything on the host:
+#   `docker compose --profile full up -d`
 #
 # Every value below can be overridden from `.env` in this directory (copy
 # `.env.example` to `.env`); each one has a default, so `docker compose up -d`
@@ -11,6 +16,84 @@
 # The compose project name is intentionally NOT set: it must stay derived from
 # this directory, otherwise the existing `ai_language_coach_*` volumes (your
 # current database) would be replaced by empty ones.
+
+# ---------------------------------------------------------------------------
+# The LiveKit key pair signs access tokens *and* webhooks, so the server, the
+# agent and the backend have to sign with the same one. Defined once because a
+# mismatch between any two of them is indistinguishable from a wrong
+# VOICE_AGENT_NAME: rooms open, dispatches are accepted, nobody ever joins.
+# ---------------------------------------------------------------------------
+x-livekit-credentials: &livekit-credentials
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-99fed3cd67e98cae5fa57a9aec3818d317f5e8a54f67c87e}
+
+# ---------------------------------------------------------------------------
+# Shared Laravel environment for the `full` profile (api, horizon, reverb).
+#
+# `backend/.env` is excluded from the image on purpose (backend/.dockerignore),
+# so every key the application needs has to arrive as an environment variable —
+# a role that is missing one still boots and only fails at the first query.
+# One anchor instead of three copies is what keeps the three roles from drifting
+# apart. The database and object-store values interpolate the same variables the
+# `mysql` and `minio` services use, so a container cannot be pointed at a
+# database or bucket that was never created.
+#
+# The queue is Redis here rather than the `database` driver backend/.env uses:
+# Horizon only consumes Redis queues, so a `database` queue would leave the
+# horizon container running and permanently idle.
+# ---------------------------------------------------------------------------
+x-laravel-environment: &laravel-environment
+  <<: *livekit-credentials
+
+  APP_ENV: local
+  APP_DEBUG: "true"
+
+  # A local-development key ONLY. Committed so this profile works with no .env
+  # at all, but every service sharing it can read every other service's cookies
+  # and tokens — which is exactly what production must not do, and why plan §7
+  # takes the real key from Secrets Manager.
+  APP_KEY: ${APP_KEY:-base64:/z0ptXSDQvAl3H0G0+Yn+HjGr+x+kaKcXBkzrEv2iZE=}
+
+  DB_CONNECTION: mysql
+  DB_HOST: mysql
+  DB_PORT: 3306
+  DB_DATABASE: ${MYSQL_DATABASE:-language_coach}
+  DB_USERNAME: ${MYSQL_USER:-coach_user}
+  DB_PASSWORD: ${MYSQL_PASSWORD:-coach_password}
+
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
+  SESSION_DRIVER: database
+  CACHE_STORE: database
+  QUEUE_CONNECTION: redis
+  BROADCAST_CONNECTION: reverb
+
+  # Reverb's host and port here are the *server-side* target: inside the network
+  # the service is `reverb:8081`. The browser is told a different address by the
+  # `web` service below, for the same reason LIVEKIT_PUBLIC_URL exists.
+  REVERB_APP_ID: ${REVERB_APP_ID:-}
+  REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+  REVERB_APP_SECRET: ${REVERB_APP_SECRET:-}
+  REVERB_HOST: reverb
+  REVERB_PORT: 8081
+  REVERB_SCHEME: http
+
+  AWS_ENDPOINT: http://minio:9000
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-coach_minio}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-coach_minio_password}
+  AWS_BUCKET: ${AWS_BUCKET:-coach-audio}
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_USE_PATH_STYLE_ENDPOINT: "true"
+
+  # LIVEKIT_URL is what this backend dials (Twirp); LIVEKIT_PUBLIC_URL is what
+  # the learner's browser dials (WebRTC). A browser cannot resolve `livekit`, so
+  # a containerised API has to set both or every session hands the learner a
+  # hostname that does not exist.
+  LIVEKIT_URL: ws://livekit:7880
+  LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://127.0.0.1:7880}
+  VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
+  VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:-82cba8627ffb6407e152a3baa17f586b85f213cacb9b55b9}
 
 services:
   mysql:
@@ -28,9 +111,6 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      # Credentials are read from the container's own environment, never inlined.
-      # `mysqladmin ping` proves the server accepts connections, not just that the
-      # port is open — matters because MySQL initialises for ~20s on first boot.
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
@@ -97,8 +177,171 @@ services:
         mc mb --ignore-existing "local/$$AWS_BUCKET" &&
         echo "bucket $$AWS_BUCKET ready"
 
+  # LiveKit WebRTC server for real-time voice sessions (plan §5).
+  # Handles room signaling, WebRTC media and webhook delivery to the backend.
+  # rtc.node_ip is pinned to 127.0.0.1 so that ICE candidates announced to local
+  # browsers match the host loopback instead of Docker's internal bridge IP.
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: coach_livekit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LIVEKIT_PORT:-7880}:7880"
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:7882:7882/udp"
+    environment:
+      <<: *livekit-credentials
+      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-127.0.0.1}
+      VOICE_WEBHOOK_URL: ${VOICE_WEBHOOK_URL:-http://host.docker.internal:8000/api/webhooks/livekit}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        cat << EOF > /tmp/livekit.yaml
+        port: 7880
+        bind_addresses:
+          - 0.0.0.0
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          node_ip: "$$LIVEKIT_NODE_IP"
+          use_external_ip: false
+        keys:
+          "$$LIVEKIT_API_KEY": "$$LIVEKIT_API_SECRET"
+        webhook:
+          api_key: "$$LIVEKIT_API_KEY"
+          urls:
+            - "$$VOICE_WEBHOOK_URL"
+        EOF
+        exec /livekit-server --config /tmp/livekit.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Python Voice Agent worker (livekit-agents, Deepgram, LLM, TTS).
+  # Registers under VOICE_AGENT_NAME ('ai-language-coach'), receives explicit dispatches
+  # with lesson metadata from Laravel, joins the room as an AGENT participant,
+  # conducts conversational practice with the learner, and reports failures.
+  voice-agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: coach_voice_agent
+    restart: unless-stopped
+    depends_on:
+      livekit:
+        condition: service_healthy
+    environment:
+      <<: *livekit-credentials
+      LIVEKIT_URL: ws://livekit:7880
+      VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://host.docker.internal:8000}
+      VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:-82cba8627ffb6407e152a3baa17f586b85f213cacb9b55b9}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # The worker's own HTTP server (livekit-agents, WorkerOptions.port). It
+      # answers 200 "OK" once the worker is registered, which is the difference
+      # between "the container is up" and "the fleet can actually take a job".
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8081/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Optional Full-Stack Profile (`docker compose --profile full up -d`)
+  # ---------------------------------------------------------------------------
+  api:
+    profiles: ["full"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach_api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8080"
+    environment:
+      <<: *laravel-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  horizon:
+    profiles: ["full"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach_horizon
+    restart: unless-stopped
+    command: ["php", "artisan", "horizon"]
+    depends_on:
+      - api
+    environment:
+      # QUEUE_CONNECTION=redis comes from the anchor: Horizon is a Redis queue
+      # runner and would sit idle against the `database` driver.
+      <<: *laravel-environment
+
+  reverb:
+    profiles: ["full"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach_reverb
+    restart: unless-stopped
+    # The image's role convention is Reverb on 8081 (README -> "Containers"),
+    # and the `web` service below is told the same port, because the browser
+    # reaches this container through the published host port rather than the
+    # service name.
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8081"]
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      - api
+    environment:
+      <<: *laravel-environment
+
+  web:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: coach_web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NUXT_PUBLIC_BACKEND_URL: http://127.0.0.1:8000
+      # frontend/.env is excluded from the image, so without these the built app
+      # falls back to nuxt.config's port 8080 while the reverb container listens
+      # on 8081 — every subscription would target a port nobody serves.
+      NUXT_PUBLIC_REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+      NUXT_PUBLIC_REVERB_HOST: 127.0.0.1
+      NUXT_PUBLIC_REVERB_PORT: 8081
+      NUXT_PUBLIC_REVERB_SCHEME: http
+    depends_on:
+      - api
+
 volumes:
   mysql_data:
   redis_data:
   minio_data:
-
