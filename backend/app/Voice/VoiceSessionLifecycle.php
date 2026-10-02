@@ -3,6 +3,7 @@
 namespace App\Voice;
 
 use App\Enums\VoiceSessionStatus;
+use App\Mistakes\AnalyzeVoiceSessionMistakes;
 use App\Models\VoiceSession;
 use Illuminate\Support\Facades\DB;
 
@@ -93,6 +94,56 @@ final class VoiceSessionLifecycle
     }
 
     /**
+     * Records latency metrics and transcript for a single conversational turn (plan §5).
+     *
+     * Idempotent: redelivered turns with the same turn_id update the turn in place
+     * rather than appending a duplicate.
+     *
+     * Terminal sessions (completed, abandoned, failed) accept turns so in-flight
+     * turn telemetry is not dropped if room closure races ahead of the agent's HTTP report.
+     *
+     * @param  array{turn_id: string, transcript: ?string, stt_final: ?float, llm_first_token: ?float, tts_first_chunk: ?float, total_turnaround: ?float}  $turn
+     * @return bool whether the session exists and the turn was recorded
+     */
+    public function recordTurn(int $sessionId, array $turn): bool
+    {
+        return DB::transaction(function () use ($sessionId, $turn): bool {
+            $session = VoiceSession::query()
+                ->where('id', $sessionId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $session instanceof VoiceSession) {
+                return false;
+            }
+
+            $turnId = (string) ($turn['turn_id'] ?? $turn['speech_id'] ?? '');
+            $transcript = $session->transcript ?? [];
+            if (! is_array($transcript)) {
+                $transcript = [];
+            }
+
+            $updated = false;
+            foreach ($transcript as $index => $item) {
+                if (is_array($item) && (($item['turn_id'] ?? null) === $turnId || ($item['speech_id'] ?? null) === $turnId)) {
+                    $transcript[$index] = array_merge($item, array_filter($turn, static fn (mixed $value): bool => $value !== null));
+                    $updated = true;
+                    break;
+                }
+            }
+
+            if (! $updated) {
+                $transcript[] = $turn;
+            }
+
+            $session->transcript = array_values($transcript);
+            $session->save();
+
+            return true;
+        });
+    }
+
+    /**
      * @param  list<VoiceSessionStatus>  $from
      * @param  array<string, mixed>  $attributes
      * @return bool whether this delivery is the one that applied the transition
@@ -113,8 +164,33 @@ final class VoiceSessionLifecycle
             $session->status = $to;
             $session->save();
 
+            if ($to->isTerminal() && $this->hasLearnerUtterances($session)) {
+                AnalyzeVoiceSessionMistakes::dispatch($session)->afterCommit();
+            }
+
             return true;
         });
+    }
+
+    private function hasLearnerUtterances(VoiceSession $session): bool
+    {
+        $transcript = $session->transcript;
+        if (! is_array($transcript) || empty($transcript)) {
+            return false;
+        }
+
+        foreach ($transcript as $turn) {
+            if (! is_array($turn) || ($turn['type'] ?? null) === 'analysis') {
+                continue;
+            }
+
+            $text = trim((string) ($turn['transcript'] ?? ''));
+            if ($text !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

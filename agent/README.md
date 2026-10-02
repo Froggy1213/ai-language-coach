@@ -12,6 +12,7 @@ Acts as the conversational language tutor in practice voice rooms (`/practice/{c
 - **Backend lifecycle**:
   - Receives `job.metadata` from Laravel (`session_id`, `grammar_point`, `practice_prompt`, `target_language`, `level`).
   - Reports fatal stream errors to `POST /api/internal/sessions/{id}/fail` with `X-Internal-Secret`.
+  - Measures per-turn stage latencies (`stt_final`, `llm_first_token`, `tts_first_chunk`, `total_turnaround` in ms) across LiveKit Agents 1.8 metric events (`metrics_collected`), reports them to `POST /api/internal/sessions/{id}/turns` with `X-Internal-Secret`, and writes structured JSON log lines (`TURN_LATENCY`) to stdout.
 
 ## Running with Docker (Recommended)
 
