@@ -15,4 +15,9 @@ enum VoiceSessionStatus: string
     case Completed = 'completed';
     case Failed = 'failed';
     case Abandoned = 'abandoned';
+
+    public function isTerminal(): bool
+    {
+        return in_array($this, [self::Completed, self::Failed, self::Abandoned], true);
+    }
 }

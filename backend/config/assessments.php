@@ -66,4 +66,21 @@ return [
         'timeout_seconds' => (int) env('ASSESSMENT_ANALYSIS_TIMEOUT', 120),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Voice Session Mistake Analysis
+    |--------------------------------------------------------------------------
+    |
+    | Async mistake analysis of completed voice sessions (plan §1, §5).
+    | Constrained to the canonical grammar catalogue with the "uncategorized"
+    | sentinel as fallback. Runs on DeepSeek-V3 where price beats latency.
+    |
+    */
+
+    'mistake_analysis' => [
+        'provider' => env('MISTAKE_ANALYSIS_PROVIDER', 'deepseek'),
+        'model' => env('MISTAKE_ANALYSIS_MODEL', 'deepseek-chat'),
+        'timeout_seconds' => (int) env('MISTAKE_ANALYSIS_TIMEOUT', 120),
+    ],
+
 ];
