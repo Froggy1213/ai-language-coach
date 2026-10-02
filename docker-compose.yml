@@ -69,6 +69,19 @@ x-laravel-environment: &laravel-environment
   QUEUE_CONNECTION: redis
   BROADCAST_CONNECTION: reverb
 
+  # The three Lighthouse subscription keys backend/.env supplies on the host and
+  # the image cannot, because backend/.env is excluded from it. Each one is a
+  # silent failure without the other two looking wrong: without the broadcaster
+  # Lighthouse falls back to `pusher`, whose key is unset, so channel
+  # authorization answers 500 and the browser's subscription never confirms;
+  # without `redis` the subscription registry lands in the same cache store the
+  # app uses; and with the default query-cache mode the parsed AST is serialised
+  # into that store and comes back as `__PHP_Incomplete_Class`
+  # (`cache.serializable_classes => false`), so every repeated query 500s.
+  LIGHTHOUSE_BROADCASTER: reverb
+  LIGHTHOUSE_SUBSCRIPTION_STORAGE: redis
+  LIGHTHOUSE_QUERY_CACHE_MODE: opcache
+
   # Reverb's host and port here are the *server-side* target: inside the network
   # the service is `reverb:8081`. The browser is told a different address by the
   # `web` service below, for the same reason LIVEKIT_PUBLIC_URL exists.
@@ -79,7 +92,18 @@ x-laravel-environment: &laravel-environment
   REVERB_PORT: 8081
   REVERB_SCHEME: http
 
+  # Sanctum only hands out stateful (cookie) auth to the hosts listed here, and
+  # backend/.env is excluded from the image, so the `full` profile has to name
+  # the browser's origin itself — without this the SPA at 127.0.0.1:3000 cannot
+  # sign in at all, while the same request from the host works.
+  SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:-127.0.0.1:3000,localhost:3000,127.0.0.1:8000}
+
   AWS_ENDPOINT: http://minio:9000
+  # The learner's browser posts the recording straight to the bucket, so it has
+  # to be told an address it can resolve — `minio` is not one of them. Same
+  # two-audience split as LIVEKIT_URL/LIVEKIT_PUBLIC_URL below, and the same
+  # published port the `minio` service maps.
+  AWS_PUBLIC_ENDPOINT: ${AWS_PUBLIC_ENDPOINT:-http://127.0.0.1:${MINIO_PORT:-9000}}
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-coach_minio}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-coach_minio_password}
   AWS_BUCKET: ${AWS_BUCKET:-coach-audio}
@@ -294,6 +318,15 @@ services:
     container_name: coach_horizon
     restart: unless-stopped
     command: ["php", "artisan", "horizon"]
+    # The backend image's own healthcheck probes port 8080 (`wget /up`), which a
+    # queue worker never serves — the container was therefore reported unhealthy
+    # while working perfectly. Horizon answers for itself instead.
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       - api
     environment:
@@ -313,6 +346,15 @@ services:
     # reaches this container through the published host port rather than the
     # service name.
     command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8081"]
+    # Same inherited-healthcheck trap as `horizon`, with a second twist: Reverb
+    # listens on 8081, and even there a plain GET / is a 404, so `wget` would
+    # fail on the right port too. The probe is the socket, not a route.
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(@fsockopen(\"127.0.0.1\", 8081) ? 0 : 1);'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
       - "127.0.0.1:8081:8081"
     depends_on:

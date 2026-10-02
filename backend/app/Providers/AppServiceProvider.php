@@ -12,6 +12,8 @@ use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
 use App\Enums\VoiceSessionStatus;
 use App\GraphQL\Types\NativeEnumType;
+use App\Mistakes\DeepSeekMistakeAnalyzer;
+use App\Mistakes\MistakeAnalyzer;
 use App\Voice\LiveKitToken;
 use Aws\S3\S3Client;
 use Illuminate\Contracts\Foundation\Application;
@@ -54,9 +56,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AssessmentAudioStorage::class, fn (Application $app): S3AssessmentAudioStorage => new S3AssessmentAudioStorage(
             client: $app->make(S3Client::class),
             bucket: (string) $app['config']->get('filesystems.disks.s3.bucket'),
+            browserEndpoint: $app['config']->get('filesystems.disks.s3.public_endpoint'),
         ));
 
         $this->app->bind(CefrAssessor::class, DeepSeekCefrAssessor::class);
+        $this->app->bind(MistakeAnalyzer::class, DeepSeekMistakeAnalyzer::class);
 
         // LiveKit access tokens and the server API calls that dispatch the voice
         // agent (plan §5). A singleton because LiveKitApi wraps it and both read

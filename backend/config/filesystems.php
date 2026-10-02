@@ -55,6 +55,15 @@ return [
             'bucket' => env('AWS_BUCKET'),
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
+            /*
+             * The endpoint the *browser* posts a recording to, when that differs
+             * from the one this backend signs against — the same two-audience
+             * split `LIVEKIT_URL`/`LIVEKIT_PUBLIC_URL` has (README, decision 31).
+             * An origin only (`http://127.0.0.1:9000`); the bucket path stays the
+             * one the signature already addresses. Empty on the host and on AWS,
+             * where one address serves both.
+             */
+            'public_endpoint' => env('AWS_PUBLIC_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
             'report' => false,

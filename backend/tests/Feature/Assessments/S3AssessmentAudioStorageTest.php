@@ -52,6 +52,77 @@ class S3AssessmentAudioStorageTest extends TestCase
         $this->assertStringEndsWith('.wav', $upload->fields['key']);
     }
 
+    public function test_it_hands_the_browser_the_address_that_can_reach_the_bucket(): void
+    {
+        $upload = $this->containerStorage()->presignUpload($this->user(7), 'audio/webm');
+
+        $this->assertSame('http://127.0.0.1:9000/'.self::BUCKET, $upload->uploadUrl);
+        $this->assertSame(
+            'http://127.0.0.1:9000/'.self::BUCKET.'/'.$upload->fields['key'],
+            $upload->fileUrl,
+        );
+
+        // The host was never part of the signature: the policy still pins the
+        // bucket and the key the browser posts under, so re-pointing the origin
+        // cannot be used to sign for somewhere else.
+        $conditions = $this->policy($upload->fields['Policy'])['conditions'];
+
+        $this->assertContains(['eq', '$bucket', self::BUCKET], $conditions);
+        $this->assertContains(['eq', '$key', $upload->fields['key']], $conditions);
+        $this->assertArrayHasKey('X-Amz-Signature', $upload->fields);
+    }
+
+    public function test_it_leaves_the_signed_address_alone_when_one_endpoint_serves_both(): void
+    {
+        $upload = $this->containerStorage(browserEndpoint: null)
+            ->presignUpload($this->user(7), 'audio/webm');
+
+        $this->assertSame('http://minio:9000/'.self::BUCKET, $upload->uploadUrl);
+        $this->assertStringStartsWith('http://minio:9000/'.self::BUCKET.'/', $upload->fileUrl);
+    }
+
+    public function test_it_names_a_public_endpoint_that_is_not_an_origin(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('AWS_PUBLIC_ENDPOINT must be an origin');
+
+        $this->containerStorage(browserEndpoint: 'not-an-origin')
+            ->presignUpload($this->user(7), 'audio/webm');
+    }
+
+    public function test_it_refuses_a_public_endpoint_that_carries_a_path(): void
+    {
+        // A prefix would have to be stitched onto the signed path, and there is
+        // no way to tell a reverse-proxy prefix from a bucket that belongs there.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('origin only, without a path');
+
+        $this->containerStorage(browserEndpoint: 'https://gateway.example.com/storage')
+            ->presignUpload($this->user(7), 'audio/webm');
+    }
+
+    public function test_it_refuses_to_repoint_a_virtual_host_url_at_a_path_style_origin(): void
+    {
+        // Virtual-host addressing keeps the bucket in the host, so the browser's
+        // origin would have to be `coach-audio.127.0.0.1`, which resolves only
+        // with wildcard DNS. Handing over the internal `minio` name instead would
+        // be the defect this setting exists to close.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('needs path-style addressing');
+
+        new S3AssessmentAudioStorage(
+            new S3Client([
+                'version' => 'latest',
+                'region' => 'us-east-1',
+                'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
+                'endpoint' => 'http://minio:9000',
+                'use_path_style_endpoint' => false,
+            ]),
+            self::BUCKET,
+            'http://127.0.0.1:9000',
+        )->presignUpload($this->user(7), 'audio/webm');
+    }
+
     public function test_it_reports_what_the_bucket_holds_for_an_upload(): void
     {
         $user = $this->user(7);
@@ -206,6 +277,26 @@ class S3AssessmentAudioStorageTest extends TestCase
         }
 
         return new S3AssessmentAudioStorage(new S3Client($config), self::BUCKET);
+    }
+
+    /**
+     * The `--profile full` shape: the API container signs against the `minio`
+     * service name, which a browser cannot resolve, so it is told its own
+     * published address instead (README, decision 31).
+     */
+    private function containerStorage(?string $browserEndpoint = 'http://127.0.0.1:9000'): S3AssessmentAudioStorage
+    {
+        return new S3AssessmentAudioStorage(
+            new S3Client([
+                'version' => 'latest',
+                'region' => 'us-east-1',
+                'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
+                'endpoint' => 'http://minio:9000',
+                'use_path_style_endpoint' => true,
+            ]),
+            self::BUCKET,
+            $browserEndpoint,
+        );
     }
 
     public function test_it_names_the_missing_bucket_instead_of_failing_on_a_signature(): void

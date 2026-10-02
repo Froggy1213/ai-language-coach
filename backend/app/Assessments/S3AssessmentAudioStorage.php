@@ -23,6 +23,12 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
     public function __construct(
         private readonly S3Client $client,
         private readonly string $bucket,
+        /**
+         * Where the learner's browser has to POST, when that is not the address
+         * this backend signs against (README, decision 31). Null on the host and
+         * on AWS, where one endpoint serves both audiences.
+         */
+        private readonly ?string $browserEndpoint = null,
     ) {}
 
     public function presignUpload(User $user, string $contentType): PresignedUpload
@@ -53,8 +59,8 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
         $attributes = $post->getFormAttributes();
 
         return new PresignedUpload(
-            uploadUrl: $attributes['action'],
-            fileUrl: $this->client->getObjectUrl($this->bucket(), $key),
+            uploadUrl: $this->browserUrl($attributes['action']),
+            fileUrl: $this->browserUrl($this->client->getObjectUrl($this->bucket(), $key)),
             fields: $post->getFormInputs(),
         );
     }
@@ -134,6 +140,74 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
     private function keyFor(User $user, string $contentType): string
     {
         return $this->userPrefix($user).Str::ulid().'.'.AudioContentType::extension($contentType);
+    }
+
+    /**
+     * Re-points a presigned URL at the address the browser can reach.
+     *
+     * A presigned POST is dialled twice for two audiences, the way `LIVEKIT_URL`
+     * is: this backend signs it, the learner's browser posts to it. On the host
+     * they are one address; in a container they cannot be, because the browser
+     * resolves neither `minio` nor the API container's `127.0.0.1`. The host is
+     * not part of the signature — the policy covers the bucket, the key and the
+     * content type — so swapping the origin keeps the upload valid, and the path
+     * (and with it the bucket) is left exactly as signed.
+     */
+    private function browserUrl(string $url): string
+    {
+        $origin = $this->browserOrigin();
+
+        if ($origin === '') {
+            return $url;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH);
+
+        // A path-style endpoint puts the bucket in the path, and that path is
+        // what carries over to the browser's address. A virtual-host endpoint
+        // puts it in the host instead (`http://coach-audio.minio:9000`), where
+        // swapping the origin would produce `http://coach-audio.127.0.0.1:9000`
+        // — an address only wildcard DNS resolves. Saying so beats handing the
+        // browser an unresolvable `minio` and letting it fail obscurely.
+        if (! is_string($path) || $path === '' || $path === '/') {
+            throw new RuntimeException(
+                "AWS_PUBLIC_ENDPOINT needs path-style addressing (the bucket in the URL path), but `{$url}` carries it in the host; set AWS_USE_PATH_STYLE_ENDPOINT=true."
+            );
+        }
+
+        $query = parse_url($url, PHP_URL_QUERY);
+
+        return $origin.$path.(is_string($query) ? '?'.$query : '');
+    }
+
+    /**
+     * An endpoint that cannot be turned into an origin is named, rather than
+     * silently leaving the internal address in the browser's hands.
+     */
+    private function browserOrigin(): string
+    {
+        if (blank($this->browserEndpoint)) {
+            return '';
+        }
+
+        $parts = parse_url((string) $this->browserEndpoint);
+
+        if (! is_array($parts) || ! isset($parts['scheme'], $parts['host'])) {
+            throw new RuntimeException(
+                "AWS_PUBLIC_ENDPOINT must be an origin such as http://127.0.0.1:9000, `{$this->browserEndpoint}` is not."
+            );
+        }
+
+        // A path on the public endpoint would have to prefix the signed path,
+        // and there is no way to tell a reverse-proxy prefix from a bucket that
+        // belongs there: refuse instead of guessing and posting to the wrong key.
+        if (trim((string) ($parts['path'] ?? ''), '/') !== '') {
+            throw new RuntimeException(
+                "AWS_PUBLIC_ENDPOINT is the browser's origin only, without a path, but `{$this->browserEndpoint}` has one."
+            );
+        }
+
+        return $parts['scheme'].'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
     }
 
     /**
