@@ -112,6 +112,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Limits
+    |--------------------------------------------------------------------------
+    |
+    | Plan §7 checklist: "Rate-limit sessions/day per user".
+    | A cost guard against unbounded LiveKit agent dispatches and downstream
+    | STT/TTS/LLM usage. Default is 10 sessions per calendar day; the real cap
+    | will be calibrated during the January load tests (§6).
+    |
+    */
+
+    'daily_session_limit' => (int) env('VOICE_DAILY_SESSION_LIMIT', 10),
+
+    /*
+    |--------------------------------------------------------------------------
     | Internal Agent Endpoints
     |--------------------------------------------------------------------------
     |

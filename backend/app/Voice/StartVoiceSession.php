@@ -10,6 +10,7 @@ use App\Models\VoiceSession;
 use GraphQL\Error\Error;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Sleep;
 use Illuminate\Validation\ValidationException;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
@@ -93,16 +94,45 @@ final class StartVoiceSession
      */
     private function start(User $user, LessonCard $card): VoiceSession
     {
-        // The room name is derivable from a primary key on purpose: it is not a
-        // secret, it is an address. What protects the room is the signed token.
-        $session = $user->voiceSessions()->create([
-            'lesson_card_id' => $card->getKey(),
-            'status' => VoiceSessionStatus::Pending,
-            'room_name' => '',
-        ]);
+        try {
+            $session = DB::transaction(function () use ($user, $card): VoiceSession {
+                // Locking the user's row serialises concurrent start attempts for
+                // one learner so that concurrent requests cannot race past the daily
+                // session limit or open duplicate rooms for the same card.
+                User::query()->whereKey($user->getKey())->lockForUpdate()->first();
 
-        $session->room_name = 'lesson-'.$session->getKey();
-        $session->save();
+                // Re-check idempotency under lock in case a concurrent request won the race.
+                if ($existing = $this->currentSession($user, $card)) {
+                    return $existing;
+                }
+
+                $this->ensureWithinDailyLimit($user);
+
+                // The room name is derivable from a primary key on purpose: it is not a
+                // secret, it is an address. What protects the room is the signed token.
+                $session = $user->voiceSessions()->create([
+                    'lesson_card_id' => $card->getKey(),
+                    'status' => VoiceSessionStatus::Pending,
+                    'room_name' => '',
+                ]);
+
+                $session->room_name = 'lesson-'.$session->getKey();
+                $session->save();
+
+                return $session;
+            });
+        } catch (VoiceDailyLimitReached $exception) {
+            throw new Error(
+                $exception->getMessage(),
+                extensions: ['code' => 'VOICE_DAILY_LIMIT_REACHED'],
+                previous: $exception,
+            );
+        }
+
+        // If the session was already created by a concurrent request, reuse it.
+        if (! $session->wasRecentlyCreated) {
+            return $session;
+        }
 
         try {
             $this->api->createRoom($session->room_name);
@@ -149,6 +179,33 @@ final class StartVoiceSession
         $session->update(['status' => VoiceSessionStatus::Active]);
 
         return $session;
+    }
+
+    /**
+     * Enforce a per-user daily cap on voice sessions (plan §7).
+     *
+     * Every row created today counts towards the limit, including failed sessions:
+     * creating a row dispatches a LiveKit room and voice agent, which incurs
+     * infrastructure and API costs regardless of whether the call completed.
+     *
+     * Day boundary is UTC calendar day (from 00:00:00 UTC). All timestamps are
+     * stored in UTC, and users.timezone is not populated during registration.
+     */
+    private function ensureWithinDailyLimit(User $user): void
+    {
+        $limit = (int) config('voice.daily_session_limit', 10);
+
+        if ($limit <= 0) {
+            return;
+        }
+
+        $count = $user->voiceSessions()
+            ->where('created_at', '>=', Date::now('UTC')->startOfDay())
+            ->count();
+
+        if ($count >= $limit) {
+            throw VoiceDailyLimitReached::forLimit($limit);
+        }
     }
 
     /**

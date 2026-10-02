@@ -374,6 +374,198 @@ class RequestVoiceTokenTest extends TestCase
         );
     }
 
+    public function test_allows_creating_sessions_when_under_the_daily_cap(): void
+    {
+        config(['voice.daily_session_limit' => 3]);
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+        $this->fakeLiveKit(agentJoins: true);
+
+        // Pre-create 2 completed sessions for earlier today.
+        VoiceSession::factory()->count(2)->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame(3, $user->voiceSessions()->count());
+        $this->assertSame(VoiceSessionStatus::Active->value, $response->json('data.requestVoiceToken.status'));
+    }
+
+    public function test_rejects_session_creation_when_daily_cap_is_reached_and_creates_no_row(): void
+    {
+        config(['voice.daily_session_limit' => 3]);
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        // Pre-create 3 sessions for today (reaching the cap).
+        VoiceSession::factory()->count(3)->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorMessage('Daily voice session limit reached (3 sessions per day). Please try again tomorrow.');
+        $this->assertSame('VOICE_DAILY_LIMIT_REACHED', $response->json('errors.0.extensions.code'));
+
+        // No new row is created and no LiveKit calls were made.
+        $this->assertSame(3, $user->voiceSessions()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_failed_sessions_count_towards_the_daily_cap(): void
+    {
+        config(['voice.daily_session_limit' => 2]);
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        // Any row created today counts, including failed sessions from aborted starts or agent drops.
+        VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Failed,
+            'fail_reason' => 'voice_fleet_busy',
+            'created_at' => now(),
+        ]);
+        VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Abandoned,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorMessage('Daily voice session limit reached (2 sessions per day). Please try again tomorrow.');
+        $this->assertSame('VOICE_DAILY_LIMIT_REACHED', $response->json('errors.0.extensions.code'));
+        $this->assertSame(2, $user->voiceSessions()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_idempotency_guard_wins_over_daily_cap_for_existing_active_session(): void
+    {
+        config(['voice.daily_session_limit' => 2]);
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        // The user is at the cap (2 sessions), but one is the active session for this card.
+        $existing = VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Active,
+            'created_at' => now(),
+        ]);
+        VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame((string) $existing->getKey(), $response->json('data.requestVoiceToken.id'));
+        $this->assertSame(2, $user->voiceSessions()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_idempotency_guard_wins_over_daily_cap_for_existing_pending_session(): void
+    {
+        config(['voice.daily_session_limit' => 2]);
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        // The user is at the cap (2 sessions), but one is a pending session for this card.
+        $existing = VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Pending,
+            'created_at' => now(),
+        ]);
+        VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame((string) $existing->getKey(), $response->json('data.requestVoiceToken.id'));
+        $this->assertSame(2, $user->voiceSessions()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_daily_cap_is_scoped_per_user(): void
+    {
+        config(['voice.daily_session_limit' => 2]);
+
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $cardB = $this->readyCardFor($userB);
+
+        // User A reaches the cap.
+        VoiceSession::factory()->count(2)->for($userA)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        // User B has not started any sessions yet.
+        Sanctum::actingAs($userB);
+        $this->fakeLiveKit(agentJoins: true);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $cardB->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame(1, $userB->voiceSessions()->count());
+        $this->assertSame(2, $userA->voiceSessions()->count());
+    }
+
+    public function test_day_boundary_resets_quota_at_utc_midnight(): void
+    {
+        config(['voice.daily_session_limit' => 2]);
+        $this->freezeTime();
+
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+        $this->fakeLiveKit(agentJoins: true);
+
+        // Pre-create 2 sessions yesterday (prior to today 00:00:00 UTC).
+        VoiceSession::factory()->count(2)->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now()->subDay(),
+        ]);
+
+        // Sessions from yesterday do not count towards today's limit.
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+        $response->assertGraphQLErrorFree();
+        $this->assertSame(3, $user->voiceSessions()->count());
+
+        // Mark the active session as completed so card can be practised again.
+        VoiceSession::query()->where('user_id', $user->getKey())->update(['status' => VoiceSessionStatus::Completed]);
+
+        // Now user reaches today's cap by adding another session today (1 + 1 = 2 sessions today).
+        VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+        ]);
+
+        // Next attempt today is blocked.
+        $blockedResponse = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+        $blockedResponse->assertGraphQLErrorMessage('Daily voice session limit reached (2 sessions per day). Please try again tomorrow.');
+        $this->assertSame('VOICE_DAILY_LIMIT_REACHED', $blockedResponse->json('errors.0.extensions.code'));
+
+        // Advancing clock past midnight UTC resets today's quota.
+        $this->travel(1)->days();
+        $newDayResponse = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+        $newDayResponse->assertGraphQLErrorFree();
+        $this->assertSame(5, $user->voiceSessions()->count());
+    }
+
     /**
      * A roadmap owned by the learner with one card they may practise.
      *

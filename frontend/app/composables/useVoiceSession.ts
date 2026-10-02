@@ -85,6 +85,26 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
       return 'Не удалось начать голосовую сессию на сервере. Попробуйте позже.'
     }
 
+    if (code === 'VOICE_DAILY_LIMIT_REACHED') {
+      return 'Дневной лимит голосовых сессий исчерпан. Попробуйте снова завтра.'
+    }
+
+    if (code === 'LESSON_CARD_NOT_FOUND') {
+      return 'Этот урок не найден в вашем роадмапе.'
+    }
+
+    if (code === 'LESSON_CARD_LOCKED') {
+      return 'Этот урок пока заблокирован.'
+    }
+
+    if (code === 'REVIEW_ITEM_NOT_FOUND') {
+      return 'Материал для повторения не найден.'
+    }
+
+    if (code === 'GRAMMAR_POINT_NOT_FOUND') {
+      return 'Грамматическое правило не найдено.'
+    }
+
     const serverMessage = graphQLErrorMessage(failure)
     if (serverMessage === 'This lesson card does not exist.') {
       return 'Этот урок не найден в вашем роадмапе.'
