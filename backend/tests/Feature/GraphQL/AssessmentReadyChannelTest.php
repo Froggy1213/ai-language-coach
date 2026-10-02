@@ -2,12 +2,19 @@
 
 namespace Tests\Feature\GraphQL;
 
+use App\Enums\AssessmentStatus;
+use App\GraphQL\Subscriptions\AssessmentReady;
+use App\Models\Assessment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
+use Nuwave\Lighthouse\Subscriptions\BroadcastDriverManager;
+use Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions;
+use Nuwave\Lighthouse\Subscriptions\Subscriber;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
 use Tests\TestCase;
 
@@ -48,9 +55,11 @@ class AssessmentReadyChannelTest extends TestCase
         // empty subscription storage instead; deleting the raw keys avoids the
         // restore that `subscribersByTopic()` would do.
         $redis = Redis::connection(config('lighthouse.subscriptions.broadcasters.echo.connection', 'default'));
+        $prefix = (string) config('database.redis.options.prefix', '');
 
         foreach ($redis->keys('*graphql.*') as $key) {
-            $redis->del($key);
+            $unprefixed = str_starts_with($key, $prefix) ? substr($key, strlen($prefix)) : $key;
+            $redis->del($unprefixed);
         }
     }
 
@@ -137,6 +146,36 @@ class AssessmentReadyChannelTest extends TestCase
         ], self::SPA_HEADERS)
             ->assertOk()
             ->assertHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+    }
+
+    public function test_the_broadcast_payload_for_a_failed_assessment_carries_the_failure_status(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        // Register the subscription in Redis
+        $this->channelFor($user);
+
+        $assessment = Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Failed,
+            'cefr_level' => null,
+        ]);
+
+        $driverManager = Mockery::mock(BroadcastDriverManager::class);
+        $driverManager->shouldReceive('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(Subscriber::class),
+                Mockery::on(function (array $result): bool {
+                    return ($result['data']['assessmentReady']['status'] ?? null) === 'failed'
+                        && array_key_exists('status', $result['data']['assessmentReady']);
+                }),
+            );
+
+        $this->app->instance(BroadcastDriverManager::class, $driverManager);
+
+        $subscriptionBroadcaster = $this->app->make(BroadcastsSubscriptions::class);
+        $subscriptionBroadcaster->broadcast(new AssessmentReady, 'assessmentReady', $assessment);
     }
 
     private function channelFor(User $user): string

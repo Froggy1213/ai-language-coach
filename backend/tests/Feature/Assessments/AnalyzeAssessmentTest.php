@@ -166,7 +166,9 @@ class AnalyzeAssessmentTest extends TestCase
             'raw_data' => ['upload' => ['key' => 'assessments/1/recording.webm']],
         ]);
 
-        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('Deepgram timed out'));
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('Deepgram timed out'), $broadcasts);
 
         $assessment->refresh();
 
@@ -174,6 +176,14 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertSame('Deepgram timed out', $assessment->raw_data['error']);
         $this->assertSame(['key' => 'assessments/1/recording.webm'], $assessment->raw_data['upload']);
         $this->assertSame(CefrLevel::A1, $user->refresh()->current_level);
+
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(AssessmentReady::class),
+                'assessmentReady',
+                Mockery::on(static fn ($root): bool => $root->is($assessment) && $root->status === AssessmentStatus::Failed),
+            );
     }
 
     public function test_a_late_failure_does_not_overwrite_a_finished_assessment(): void
@@ -183,10 +193,46 @@ class AnalyzeAssessmentTest extends TestCase
             'cefr_level' => CefrLevel::B1,
         ]);
 
-        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('late failure'));
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('late failure'), $broadcasts);
 
         $this->assertSame(AssessmentStatus::Done, $assessment->refresh()->status);
         $this->assertSame(CefrLevel::B1, $assessment->cefr_level);
+        $broadcasts->shouldNotHaveReceived('broadcast');
+    }
+
+    public function test_a_redelivery_does_not_broadcast_again_for_an_already_failed_assessment(): void
+    {
+        $assessment = Assessment::factory()->create([
+            'status' => AssessmentStatus::Failed,
+            'raw_data' => ['error' => 'First failure'],
+        ]);
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('Duplicate failure'), $broadcasts);
+
+        $this->assertSame(AssessmentStatus::Failed, $assessment->refresh()->status);
+        $this->assertSame('First failure', $assessment->refresh()->raw_data['error']);
+        $broadcasts->shouldNotHaveReceived('broadcast');
+    }
+
+    public function test_a_broadcast_that_cannot_be_delivered_on_failure_does_not_mask_the_failure(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $assessment = Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Processing,
+            'audio_url' => self::AUDIO_URL,
+        ]);
+
+        $broadcasts = Mockery::mock(BroadcastsSubscriptions::class);
+        $broadcasts->shouldReceive('broadcast')->andThrow(new RuntimeException('No query results for model [App\\Models\\User].'));
+
+        (new AnalyzeAssessment($assessment))->failed(new RuntimeException('Deepgram timed out'), $broadcasts);
+
+        $this->assertSame(AssessmentStatus::Failed, $assessment->refresh()->status);
+        $this->assertSame('Deepgram timed out', $assessment->raw_data['error']);
     }
 
     private function runJob(

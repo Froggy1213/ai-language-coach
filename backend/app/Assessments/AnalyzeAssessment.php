@@ -107,9 +107,10 @@ final class AnalyzeAssessment implements ShouldQueue
 
     /**
      * Called once the attempts are exhausted. The waitlist screen would hang on
-     * `processing` forever, so the failure is written where the client looks.
+     * `processing` forever, so the failure is written where the client looks
+     * and broadcast over the same subscription the success path uses.
      */
-    public function failed(?Throwable $exception): void
+    public function failed(?Throwable $exception, ?BroadcastsSubscriptions $broadcasts = null): void
     {
         $assessment = $this->assessment->fresh();
 
@@ -123,5 +124,12 @@ final class AnalyzeAssessment implements ShouldQueue
                 'error' => $exception?->getMessage(),
             ]),
         ]);
+
+        try {
+            $broadcasts ??= app(BroadcastsSubscriptions::class);
+            $broadcasts->broadcast(new AssessmentReady, 'assessmentReady', $assessment);
+        } catch (Throwable $broadcastException) {
+            report($broadcastException);
+        }
     }
 }

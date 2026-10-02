@@ -7,6 +7,7 @@ type Stage = 'consent' | 'ready' | 'recording' | 'uploading' | 'waiting' | 'done
 const stage = ref<Stage>('consent')
 const consented = ref(false)
 const error = ref<string | null>(null)
+const failureMessage = ref<string | null>(null)
 const elapsed = ref(0)
 const level = ref<string | null>(null)
 
@@ -29,6 +30,7 @@ function startRecording(): void {
 
 async function beginRecording(): Promise<void> {
   error.value = null
+  failureMessage.value = null
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -90,6 +92,7 @@ async function finishRecording(): Promise<void> {
 async function upload(recording: Blob, contentType: string): Promise<void> {
   stage.value = 'uploading'
   error.value = null
+  failureMessage.value = null
 
   try {
     const currentUser = user.value
@@ -101,6 +104,13 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
     // Subscribe first: the analysis can finish before the mutation's response
     // is even rendered.
     stopListening = await onReady(currentUser.id, (assessment) => {
+      if (assessment.status === 'failed') {
+        failureMessage.value = 'Не удалось расшифровать или оценить запись. Попробуйте проверить статус ещё раз или запишите рассказ заново.'
+        stopListening?.()
+        stopListening = null
+        return
+      }
+
       level.value = assessment.cefrLevel
       stage.value = 'done'
       stopListening?.()
@@ -210,9 +220,15 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="stage === 'waiting'" class="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-      <p class="text-slate-300">Расшифровываем и оцениваем. Обычно это занимает меньше минуты.</p>
+      <p v-if="!failureMessage" class="text-slate-300">Расшифровываем и оцениваем. Обычно это занимает меньше минуты.</p>
+      <p v-else class="text-rose-300">
+        {{ failureMessage }}
+      </p>
       <div class="flex flex-wrap items-center gap-3">
-        <span class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+        <span
+          v-if="!failureMessage"
+          class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400"
+        />
         <button
           type="button"
           class="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 transition hover:border-slate-400"
@@ -220,8 +236,16 @@ onBeforeUnmount(() => {
         >
           Проверить сейчас
         </button>
+        <button
+          v-if="failureMessage"
+          type="button"
+          class="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 transition hover:border-slate-400"
+          @click="stage = 'ready'; failureMessage = null"
+        >
+          Записать снова
+        </button>
       </div>
-      <p class="text-xs text-slate-500">
+      <p v-if="!failureMessage" class="text-xs text-slate-500">
         Если результат не приходит, проверьте, запущен ли <code>php artisan reverb:start</code> и заполнен ли
         <code>NUXT_PUBLIC_REVERB_APP_KEY</code>.
       </p>
