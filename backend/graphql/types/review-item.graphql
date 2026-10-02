@@ -12,6 +12,9 @@ type ReviewItem {
     "Current interval between repetitions, in days."
     intervalDays: Int! @rename(attribute: "interval_days")
 
+    "Number of consecutive successful reviews."
+    repetitionNumber: Int! @rename(attribute: "repetition_number")
+
     "When the item is due next."
     nextReviewAt: String! @rename(attribute: "next_review_at")
 }

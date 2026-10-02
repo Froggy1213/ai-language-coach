@@ -22,7 +22,14 @@ type Query {
         "Restrict the result to a single grammar point."
         grammarPointId: ID
     ): [Mistake!]! @guard @field(resolver: "App\\GraphQL\\Queries\\Mistakes")
+
+    "A voice session belonging to the authenticated user, if it exists."
+    voiceSession(
+        "Primary key of the voice session."
+        id: ID!
+    ): VoiceSession @guard @field(resolver: "App\\GraphQL\\Queries\\VoiceSession")
 }
+
 
 type Mutation {
     "Sign in and start a session (Sanctum SPA cookie)."
@@ -78,6 +85,33 @@ type Mutation {
         "The lesson card to practise; must be one of the learner's own `ready` cards."
         lessonCardId: ID!
     ): VoiceSession! @guard @field(resolver: "App\\Voice\\StartVoiceSession")
+
+    """
+    Submit the learner's self-assessed recall quality (0 to 5) for a grammar point
+    and recompute its spaced repetition schedule using the SM-2 algorithm.
+    """
+    submitReviewResult(
+        "The grammar point that was reviewed."
+        grammarPointId: ID!
+        "Recall quality score from 0 (complete blackout) to 5 (perfect recall)."
+        quality: Int!
+    ): ReviewItem!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\SubmitReviewResult")
+        @validator(class: "App\\GraphQL\\Validators\\SubmitReviewResultValidator")
+
+    """
+    Mark a lesson card as completed and unlock the next card in sequence (order_index + 1)
+    inside a database transaction under pessimistic locking. Idempotent: repeating on
+    an already completed card leaves it completed and returns it.
+    """
+    completeLessonCard(
+        "The lesson card to complete; must be one of the learner's own cards."
+        lessonCardId: ID!
+    ): LessonCard!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\CompleteLessonCard")
+        @validator(class: "App\\GraphQL\\Validators\\CompleteLessonCardValidator")
 }
 
 type Subscription {
@@ -91,4 +125,16 @@ type Subscription {
         userId: ID!
     ): Assessment
         @subscription(class: "App\\GraphQL\\Subscriptions\\AssessmentReady")
+
+    """
+    Fires when a voice session's feedback and mistake analysis is ready.
+    Nullable on purpose: at subscribe time the field resolves to null, and
+    a non-null type would reject the subscription response (plan §5).
+    """
+    sessionFeedbackReady(
+        "The voice session to watch; must belong to the authenticated user."
+        sessionId: ID!
+    ): VoiceSession
+        @subscription(class: "App\\GraphQL\\Subscriptions\\SessionFeedbackReady")
 }
+
