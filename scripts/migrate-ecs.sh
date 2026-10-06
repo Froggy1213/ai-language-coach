@@ -17,8 +17,14 @@ usage() {
     cat << 'EOF'
 Usage: ./scripts/migrate-ecs.sh [options]
 
-Executes `php artisan migrate --force` as a standalone one-off ECS Fargate task,
-streams task logs, waits for task termination, and verifies exit code 0.
+Executes `php artisan migrate --force` followed by `php artisan lighthouse:clear-cache`
+as a standalone one-off ECS Fargate task, streams task logs, waits for task
+termination, and verifies exit code 0.
+
+The cache clear is not decoration: Lighthouse caches the parsed schema in the
+cache store, so a deploy that changes the SDL without clearing it leaves the new
+API answering queries with the previous schema — which surfaces as a field being
+"unknown" in a browser whose client already asks for it.
 
 Options:
   -c, --cluster <CLUSTER>      ECS cluster name (default: ai-language-coach-cluster)
@@ -93,11 +99,17 @@ if [[ -z "$SUBNETS" || -z "$SECURITY_GROUP" ]]; then
     fi
 fi
 
+# The container is named `migration` in the task definition (infra/terraform/ecs.tf).
+# `lighthouse:clear-cache` runs after a successful migration, never before it: a
+# failed migration must leave the running deploy's schema cache untouched.
+CONTAINER_OVERRIDES='{"containerOverrides":[{"name":"migration","command":["sh","-lc","php artisan migrate --force && php artisan lighthouse:clear-cache"]}]}'
+
 RUN_CMD=(
     aws ecs run-task
     --cluster "$CLUSTER"
     --task-definition "$TASK_DEF"
     --launch-type FARGATE
+    --overrides "$CONTAINER_OVERRIDES"
     --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS:-subnet-placeholder}],securityGroups=[${SECURITY_GROUP:-sg-placeholder}],assignPublicIp=ENABLED}"
 )
 
