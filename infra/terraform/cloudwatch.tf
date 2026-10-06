@@ -235,6 +235,65 @@ resource "aws_cloudwatch_dashboard" "main" {
           ]
           yAxis = { left = { min = 0, max = 100, label = "Percent" } }
         }
+      },
+      # The next three widgets read the series the *application* publishes
+      # (App\Observability\CloudWatchMetricPublisher, plan §7). They are
+      # deliberately separate from the log-based ones above: the log filter is
+      # cheap but breaks silently if the agent's log format changes, while these
+      # come from the database row the turn was stored in and are what an alarm
+      # can be trusted on.
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Turn Latency by Stage, P95 (application series, ms)"
+          region = var.aws_region
+          period = 300
+          metrics = [
+            ["AiLanguageCoach/Voice", "TurnLatencyMs", "Stage", "stt_final", "Environment", var.environment, { stat = "p95", label = "STT final" }],
+            ["AiLanguageCoach/Voice", "TurnLatencyMs", "Stage", "llm_first_token", "Environment", var.environment, { stat = "p95", label = "LLM first token", color = "#2ca02c" }],
+            ["AiLanguageCoach/Voice", "TurnLatencyMs", "Stage", "tts_first_chunk", "Environment", var.environment, { stat = "p95", label = "TTS first chunk", color = "#9467bd" }],
+            ["AiLanguageCoach/Voice", "TurnLatencyMs", "Stage", "total_turnaround", "Environment", var.environment, { stat = "p95", label = "Total turnaround", color = "#d62728" }]
+          ]
+          yAxis = { left = { min = 0, label = "Milliseconds" } }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Voice Seconds Consumed (cost driver, plan §7 budget)"
+          region = var.aws_region
+          period = 300
+          metrics = [
+            ["AiLanguageCoach/Voice", "VoiceSeconds", "Environment", var.environment, { stat = "Sum", label = "Voice seconds" }]
+          ]
+          yAxis = { left = { min = 0, label = "Seconds" } }
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 18
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Session Outcomes (application series)"
+          region = var.aws_region
+          period = 300
+          metrics = [
+            ["AiLanguageCoach/Voice", "SessionOutcome", "Status", "completed", "Environment", var.environment, { stat = "Sum", label = "Completed", color = "#2ca02c" }],
+            ["AiLanguageCoach/Voice", "SessionOutcome", "Status", "failed", "Environment", var.environment, { stat = "Sum", label = "Failed", color = "#d62728" }],
+            ["AiLanguageCoach/Voice", "SessionOutcome", "Status", "abandoned", "Environment", var.environment, { stat = "Sum", label = "Abandoned", color = "#ff7f0e" }]
+          ]
+          yAxis = { left = { min = 0, label = "Sessions" } }
+        }
       }
     ]
   })
