@@ -142,7 +142,7 @@ final class VoiceSessionLifecycle
                 && ! $session->mistakes()->exists()
                 && ! $this->isAlreadyAnalyzed($session)
             ) {
-                AnalyzeVoiceSessionMistakes::dispatch($session)->afterCommit();
+                $this->dispatchAnalysis($session);
             }
 
             return true;
@@ -199,16 +199,29 @@ final class VoiceSessionLifecycle
             $session->save();
 
             if ($to->isTerminal() && $this->hasLearnerUtterances($session)) {
-                $delay = (int) config('voice.mistake_analysis_delay_seconds', 10);
-                $pending = AnalyzeVoiceSessionMistakes::dispatch($session);
-                if ($delay > 0) {
-                    $pending->delay(now()->addSeconds($delay));
-                }
-                $pending->afterCommit();
+                $this->dispatchAnalysis($session);
             }
 
             return true;
         });
+    }
+
+    /**
+     * Queue the mistake analysis after a short delay, so that turn reports the
+     * agent is still flushing when the room closes are in the transcript by the
+     * time the job reads it. The job is idempotent under its own lock, so a
+     * second dispatch from a late turn costs one no-op run at most.
+     */
+    private function dispatchAnalysis(VoiceSession $session): void
+    {
+        $delay = (int) config('voice.mistake_analysis_delay_seconds', 10);
+        $pending = AnalyzeVoiceSessionMistakes::dispatch($session);
+
+        if ($delay > 0) {
+            $pending->delay(now()->addSeconds($delay));
+        }
+
+        $pending->afterCommit();
     }
 
     private function isAlreadyAnalyzed(VoiceSession $session): bool
