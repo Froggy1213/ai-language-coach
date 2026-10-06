@@ -2,6 +2,7 @@
 
 use App\Providers\AppServiceProvider;
 use App\Providers\HorizonServiceProvider;
+use App\Providers\ObservabilityServiceProvider;
 use App\Providers\TelescopeServiceProvider;
 use Laravel\Telescope\TelescopeApplicationServiceProvider;
 use Nuwave\Lighthouse\Subscriptions\SubscriptionServiceProvider;
@@ -9,6 +10,10 @@ use Nuwave\Lighthouse\Subscriptions\SubscriptionServiceProvider;
 $providers = [
     AppServiceProvider::class,
     HorizonServiceProvider::class,
+
+    // Binds the voice pipeline's metrics sink (plan §7): a CloudWatch client
+    // when one is configured, silence otherwise.
+    ObservabilityServiceProvider::class,
 
     // Lighthouse ships subscriptions as an opt-in extension: the provider is
     // absent from the package's auto-discovery list, and without it

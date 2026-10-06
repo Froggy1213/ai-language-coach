@@ -88,7 +88,9 @@ class VoiceSessionMistakeDispatchTest extends TestCase
         $this->assertTrue($applied);
         $this->assertSame(VoiceSessionStatus::Abandoned, $session->refresh()->status);
 
-        Queue::assertNothingPushed();
+        // Narrow deliberately: a terminal transition now also queues the cost
+        // metrics (PublishSessionMetrics), and this test is about the analysis.
+        Queue::assertNotPushed(AnalyzeVoiceSessionMistakes::class);
     }
 
     public function test_it_never_dispatches_when_transcript_has_only_empty_utterances(): void
@@ -106,7 +108,7 @@ class VoiceSessionMistakeDispatchTest extends TestCase
 
         (new VoiceSessionLifecycle)->finished($session->room_name, 'ROOM_END_API_DELETE');
 
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(AnalyzeVoiceSessionMistakes::class);
     }
 
     public function test_it_never_dispatches_on_non_terminal_transitions(): void

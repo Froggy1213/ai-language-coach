@@ -5,6 +5,8 @@ namespace App\Voice;
 use App\Enums\VoiceSessionStatus;
 use App\Mistakes\AnalyzeVoiceSessionMistakes;
 use App\Models\VoiceSession;
+use App\Observability\PublishSessionMetrics;
+use App\Observability\PublishTurnMetrics;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -134,6 +136,8 @@ final class VoiceSessionLifecycle
             $session->transcript = array_values($transcript);
             $session->save();
 
+            $this->publishTurnMetrics($session, $turn);
+
             $turnTranscript = trim((string) ($turn['transcript'] ?? ''));
             $isLearnerUtterance = ($turnTranscript !== '') && (($turn['type'] ?? null) !== 'analysis');
 
@@ -198,8 +202,15 @@ final class VoiceSessionLifecycle
             $session->status = $to;
             $session->save();
 
-            if ($to->isTerminal() && $this->hasLearnerUtterances($session)) {
-                $this->dispatchAnalysis($session);
+            if ($to->isTerminal()) {
+                // What the call cost, for the CloudWatch series the AWS Budget
+                // alert is read next to (plan §7). Queued, so a metrics outage
+                // never delays a webhook LiveKit would then retry.
+                PublishSessionMetrics::dispatch($session->id)->afterCommit();
+
+                if ($this->hasLearnerUtterances($session)) {
+                    $this->dispatchAnalysis($session);
+                }
             }
 
             return true;
@@ -222,6 +233,34 @@ final class VoiceSessionLifecycle
         }
 
         $pending->afterCommit();
+    }
+
+    /**
+     * Hand the turn's stages to the metrics sink (plan §7).
+     *
+     * Only the stages the agent actually reported are published: a missing TTS
+     * measurement is not a zero, and recording it as one would drag the P95 the
+     * dashboard is watched through.
+     *
+     * @param  array<string, mixed>  $turn
+     */
+    private function publishTurnMetrics(VoiceSession $session, array $turn): void
+    {
+        $stages = [];
+
+        foreach (PublishTurnMetrics::STAGES as $stage) {
+            $value = $turn[$stage] ?? null;
+
+            if (is_numeric($value)) {
+                $stages[$stage] = (float) $value;
+            }
+        }
+
+        if ($stages === []) {
+            return;
+        }
+
+        PublishTurnMetrics::dispatch($session->id, $stages)->afterCommit();
     }
 
     private function isAlreadyAnalyzed(VoiceSession $session): bool
