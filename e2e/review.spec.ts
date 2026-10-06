@@ -26,19 +26,21 @@ test.describe('Spaced repetition review screen @smoke', () => {
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
 
-    // 4. Must display either review items or the documented empty state
-    // (e.g. heading "Повторение", active review items, or empty state text)
-    const reviewContent = page.getByTestId('review-items')
-      .or(page.getByTestId('review-empty'))
-      .or(page.getByTestId('review-card'))
-      .or(page.getByRole('heading', { name: /повторен/i }))
-      .or(page.getByText(/нет повторений|карточек для повторения|все повторено|очередь повторений/i));
-    await expect(reviewContent.first()).toBeVisible();
+    // 4. The screen itself must be there — asserted on its own heading rather
+    // than on "something that mentions review", so a blank page cannot pass.
+    await expect(page.getByRole('heading', { level: 1, name: 'Очередь повторений' })).toBeVisible();
 
-    // 5. Must not render a generic unhandled 404 page
+    // 5. And it must have resolved to one of its two real states: the queue, or
+    // the honest "nothing is due" panel. Which one depends on the seeded
+    // learner's data, so both are accepted — but nothing else is.
+    const queue = page.getByRole('heading', { name: /К повторению: \d+/ });
+    const emptyState = page.getByRole('heading', { name: 'Все карточки повторены!' });
+    await expect(queue.or(emptyState).first()).toBeVisible();
+
+    // 6. Must not render a generic unhandled 404 page
     await expect(page.getByText('Page not found: /review')).toHaveCount(0);
 
-    // 6. Final assert that no console errors or page errors were produced
+    // 7. Final assert that no console errors or page errors were produced
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
   });

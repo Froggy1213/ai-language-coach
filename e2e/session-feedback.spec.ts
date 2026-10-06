@@ -29,11 +29,9 @@ test.describe('Session feedback screen @smoke', () => {
     const spinner = page.locator('.animate-spin, [role="progressbar"], [data-testid="loading"]');
     await expect(spinner).toHaveCount(0);
 
-    // 5. Must render a clear application not-found state (not an unhandled page)
-    const notFoundMessage = page.getByTestId('session-not-found')
-      .or(page.getByRole('heading', { name: /сессия не найдена|не найдено/i }))
-      .or(page.getByText(/сессия не найдена|сессия.*не существует|не удалось найти/i));
-    await expect(notFoundMessage.first()).toBeVisible();
+    // 5. Must render the screen's own not-found heading: this route belongs to
+    // the learner, so an id that is not theirs has to say so rather than spin.
+    await expect(page.getByRole('heading', { level: 1, name: 'Сессия не найдена' })).toBeVisible();
 
     // 6. Must not be the unhandled generic 404 page
     await expect(page.getByText('Page not found: /session/999999')).toHaveCount(0);
