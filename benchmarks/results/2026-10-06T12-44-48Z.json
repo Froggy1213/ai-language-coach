@@ -1,0 +1,169 @@
+{
+  "timestamp_utc": "2026-10-06T12:44:48Z",
+  "config": {
+    "repetitions": 12,
+    "timeout_seconds": 20.0,
+    "max_tokens": 150,
+    "temperature": 0.7,
+    "warm_up_included_in_stats": false,
+    "turn_budget_p95_ms": 600.0
+  },
+  "system_prompt": "You are an expert, empathetic AI Language Coach.\nYou are conducting a 1-on-1 spoken practice session with a language learner.\n\nSession Details:\n- Target Language: en\n- Student CEFR Level: A2\n- Target Grammar Point: Present Perfect (past experiences vs finished past actions)\n- Practice Goal / Scenario: Practice discussing past travel experiences and visits.\n\nGuidelines:\n1. Speak exclusively or predominantly in the target language (en), tailored to level A2.\n2. Keep your conversational turns concise (1 to 3 short sentences maximum). You are speaking aloud over voice.\n3. Be conversational and interactive: ask open-ended questions so the student does most of the talking.\n4. When the student makes an error related to 'Present Perfect', provide a gentle rephrase or brief correction naturally in conversation.\n5. Keep the atmosphere supportive, friendly, and motivating.",
+  "learner_utterance": "Yesterday I have visited my friend in London, but I didn't saw Big Ben yet. Have you ever went there?",
+  "candidates": [
+    {
+      "provider": "deepseek",
+      "model_id": "deepseek-chat",
+      "base_url": "https://api.deepseek.com",
+      "status": "ready"
+    }
+  ],
+  "skipped_candidates": [
+    {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini",
+      "status": "skipped",
+      "reason": "Missing environment variable OPENAI_API_KEY"
+    },
+    {
+      "provider": "groq",
+      "model_id": "llama-3.3-70b-versatile",
+      "status": "skipped",
+      "reason": "Missing environment variable GROQ_API_KEY"
+    }
+  ],
+  "results": {
+    "deepseek:deepseek-chat": {
+      "provider": "deepseek",
+      "model_id": "deepseek-chat",
+      "base_url": "https://api.deepseek.com",
+      "warm_up": {
+        "status": "success",
+        "ttft_ms": 1080.76,
+        "total_ms": 1270.17,
+        "tokens": 53
+      },
+      "successful_runs": 12,
+      "total_runs": 12,
+      "ttft_ms": {
+        "count": 12,
+        "mean": 816.6,
+        "min": 566.07,
+        "max": 1095.64,
+        "p50": 853.39,
+        "p90": 1040.29,
+        "p95": 1068.42,
+        "stddev": 173.61
+      },
+      "total_ms": {
+        "count": 12,
+        "mean": 1390.2,
+        "min": 845.5,
+        "max": 2656.31,
+        "p50": 1182.85,
+        "p90": 2475.53,
+        "p95": 2594.32,
+        "stddev": 596.41
+      },
+      "sample_response_text": "That sounds like a fun trip! Just a small note: we say \"I visited my friend yesterday\" — for a finished time like \"yesterday,\" we use the past simple.\n\nAnd yes, I've been to London! I've seen Big Ben. Have you ever been there before?",
+      "raw_samples": [
+        {
+          "iteration": 1,
+          "success": true,
+          "ttft_ms": 987.55,
+          "total_ms": 1246.26,
+          "token_count": 59,
+          "error": null
+        },
+        {
+          "iteration": 2,
+          "success": true,
+          "ttft_ms": 887.85,
+          "total_ms": 1240.17,
+          "token_count": 61,
+          "error": null
+        },
+        {
+          "iteration": 3,
+          "success": true,
+          "ttft_ms": 822.18,
+          "total_ms": 1079.74,
+          "token_count": 63,
+          "error": null
+        },
+        {
+          "iteration": 4,
+          "success": true,
+          "ttft_ms": 637.97,
+          "total_ms": 961.25,
+          "token_count": 49,
+          "error": null
+        },
+        {
+          "iteration": 5,
+          "success": true,
+          "ttft_ms": 919.1,
+          "total_ms": 1167.99,
+          "token_count": 49,
+          "error": null
+        },
+        {
+          "iteration": 6,
+          "success": true,
+          "ttft_ms": 884.61,
+          "total_ms": 2543.6,
+          "token_count": 56,
+          "error": null
+        },
+        {
+          "iteration": 7,
+          "success": true,
+          "ttft_ms": 692.78,
+          "total_ms": 949.64,
+          "token_count": 52,
+          "error": null
+        },
+        {
+          "iteration": 8,
+          "success": true,
+          "ttft_ms": 566.07,
+          "total_ms": 931.19,
+          "token_count": 56,
+          "error": null
+        },
+        {
+          "iteration": 9,
+          "success": true,
+          "ttft_ms": 659.49,
+          "total_ms": 2656.31,
+          "token_count": 52,
+          "error": null
+        },
+        {
+          "iteration": 10,
+          "success": true,
+          "ttft_ms": 1095.64,
+          "total_ms": 1197.71,
+          "token_count": 47,
+          "error": null
+        },
+        {
+          "iteration": 11,
+          "success": true,
+          "ttft_ms": 599.8,
+          "total_ms": 845.5,
+          "token_count": 49,
+          "error": null
+        },
+        {
+          "iteration": 12,
+          "success": true,
+          "ttft_ms": 1046.15,
+          "total_ms": 1862.99,
+          "token_count": 54,
+          "error": null
+        }
+      ]
+    }
+  }
+}

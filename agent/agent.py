@@ -54,6 +54,7 @@ try:
     from livekit.plugins import openai
     HAS_OPENAI = True
 except ImportError:
+    openai = None  # type: ignore
     HAS_OPENAI = False
 
 try:
@@ -685,26 +686,112 @@ def create_stt(metadata: Dict[str, Any]):
 
 
 def create_llm():
+    """
+    Constructs the dialogue LLM instance for LiveKit AgentSession.
+
+    The dialogue model is fully environment-driven:
+    - LLM_PROVIDER: Candidate provider identifier (e.g. 'deepseek', 'openai', 'groq',
+      or any OpenAI-compatible provider). If unset, auto-detects based on configured
+      API keys, preserving the baseline default (DeepSeek if DEEPSEEK_API_KEY is present,
+      else OpenAI if OPENAI_API_KEY is present).
+    - LLM_MODEL: Model identifier (e.g. 'deepseek-chat', 'gpt-4o-mini', 'llama-3.3-70b-versatile').
+      Defaults per provider.
+    - LLM_BASE_URL: OpenAI-compatible endpoint URL (e.g. 'https://api.deepseek.com',
+      'https://api.groq.com/openai/v1', or provider default).
+    - API keys: Resolved from universal override LLM_API_KEY or provider-specific keys
+      (DEEPSEEK_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, or {PROVIDER}_API_KEY).
+
+    Why OpenAI-compatible interface?
+    LiveKit Agents' `livekit-plugins-openai` (`openai.LLM`) natively implements the
+    streaming LLM protocol used by AgentSession. All candidate providers evaluated
+    in the dialogue latency benchmark (DeepSeek, OpenAI, Groq, Together, OpenRouter)
+    provide OpenAI-compatible chat completion endpoints. By driving provider, model,
+    and base_url from environment variables, applying the benchmark's conclusion
+    requires only updating environment configuration (in docker-compose.yml or .env)
+    without touching code or rebuilding containers.
+    """
     if not HAS_OPENAI:
         raise RuntimeError("livekit-plugins-openai is required for LLM integration")
 
-    deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("LLM_BASE_URL")
-    model_name = os.getenv("LLM_MODEL")
+    explicit_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    model_name = (os.getenv("LLM_MODEL") or "").strip() or None
+    base_url = (os.getenv("LLM_BASE_URL") or "").strip() or None
+    llm_key = (os.getenv("LLM_API_KEY") or "").strip() or None
 
+    deepseek_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip() or None
+    groq_key = (os.getenv("GROQ_API_KEY") or "").strip() or None
+
+    # If provider is explicitly specified, resolve provider-specific configuration
+    if explicit_provider:
+        if explicit_provider == "deepseek":
+            api_key = llm_key or deepseek_key
+            if not api_key:
+                raise ValueError("DEEPSEEK_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'deepseek'")
+            return openai.LLM(
+                model=model_name or "deepseek-chat",
+                base_url=base_url or "https://api.deepseek.com",
+                api_key=api_key,
+            )
+        elif explicit_provider == "openai":
+            api_key = llm_key or openai_key
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'openai'")
+            return openai.LLM(
+                model=model_name or "gpt-4o-mini",
+                base_url=base_url,
+                api_key=api_key,
+            )
+        elif explicit_provider == "groq":
+            api_key = llm_key or groq_key
+            if not api_key:
+                raise ValueError("GROQ_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'groq'")
+            return openai.LLM(
+                model=model_name or "llama-3.3-70b-versatile",
+                base_url=base_url or "https://api.groq.com/openai/v1",
+                api_key=api_key,
+            )
+        else:
+            # Custom / generic OpenAI-compatible provider
+            provider_key_var = f"{explicit_provider.upper()}_API_KEY"
+            api_key = llm_key or os.getenv(provider_key_var)
+            if not api_key:
+                raise ValueError(
+                    f"{provider_key_var} (or LLM_API_KEY) is required when LLM_PROVIDER is '{explicit_provider}'"
+                )
+            return openai.LLM(
+                model=model_name or "deepseek-chat",
+                base_url=base_url,
+                api_key=api_key,
+            )
+
+    # Provider not explicitly specified: preserve original auto-detection behavior
     if deepseek_key and (not openai_key or base_url or "deepseek" in (model_name or "").lower()):
         return openai.LLM(
             model=model_name or "deepseek-chat",
             base_url=base_url or "https://api.deepseek.com",
-            api_key=deepseek_key,
+            api_key=llm_key or deepseek_key,
         )
 
     if openai_key:
         return openai.LLM(
             model=model_name or "gpt-4o-mini",
             base_url=base_url,
-            api_key=openai_key,
+            api_key=llm_key or openai_key,
+        )
+
+    if groq_key:
+        return openai.LLM(
+            model=model_name or "llama-3.3-70b-versatile",
+            base_url=base_url or "https://api.groq.com/openai/v1",
+            api_key=llm_key or groq_key,
+        )
+
+    if llm_key:
+        return openai.LLM(
+            model=model_name or "deepseek-chat",
+            base_url=base_url or "https://api.deepseek.com",
+            api_key=llm_key,
         )
 
     raise ValueError("Neither DEEPSEEK_API_KEY nor OPENAI_API_KEY is configured")

@@ -9,6 +9,7 @@ from agent import (
     build_system_prompt,
     build_turn_payload,
     compute_total_turnaround,
+    create_llm,
     create_stt,
     extract_metric_info,
     extract_user_transcript,
@@ -560,6 +561,112 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
              patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(None, "tts_failed")
+
+
+class TestCreateLlm(unittest.TestCase):
+    """
+    Tests for environment-driven dialogue LLM instantiation.
+    Verifies provider auto-detection, explicit LLM_PROVIDER overrides,
+    base URL mapping, model selection, and error reporting.
+    """
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_default_auto_detect_deepseek(self, mock_openai):
+        env = {
+            "DEEPSEEK_API_KEY": "dsk-test-123",
+            "OPENAI_API_KEY": "",
+            "LLM_PROVIDER": "",
+            "LLM_MODEL": "",
+            "LLM_BASE_URL": "",
+            "LLM_API_KEY": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            create_llm()
+            mock_openai.LLM.assert_called_once_with(
+                model="deepseek-chat",
+                base_url="https://api.deepseek.com",
+                api_key="dsk-test-123",
+            )
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_default_auto_detect_openai(self, mock_openai):
+        env = {
+            "DEEPSEEK_API_KEY": "",
+            "OPENAI_API_KEY": "sk-openai-456",
+            "LLM_PROVIDER": "",
+            "LLM_MODEL": "",
+            "LLM_BASE_URL": "",
+            "LLM_API_KEY": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            create_llm()
+            mock_openai.LLM.assert_called_once_with(
+                model="gpt-4o-mini",
+                base_url=None,
+                api_key="sk-openai-456",
+            )
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_explicit_groq_provider(self, mock_openai):
+        env = {
+            "LLM_PROVIDER": "groq",
+            "GROQ_API_KEY": "gsk-groq-789",
+            "LLM_MODEL": "llama-3.3-70b-versatile",
+            "LLM_BASE_URL": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            create_llm()
+            mock_openai.LLM.assert_called_once_with(
+                model="llama-3.3-70b-versatile",
+                base_url="https://api.groq.com/openai/v1",
+                api_key="gsk-groq-789",
+            )
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_explicit_provider_with_universal_llm_api_key(self, mock_openai):
+        env = {
+            "LLM_PROVIDER": "deepseek",
+            "LLM_API_KEY": "universal-key-000",
+            "LLM_MODEL": "deepseek-reasoner",
+            "LLM_BASE_URL": "https://custom.deepseek.com/v1",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            create_llm()
+            mock_openai.LLM.assert_called_once_with(
+                model="deepseek-reasoner",
+                base_url="https://custom.deepseek.com/v1",
+                api_key="universal-key-000",
+            )
+
+    @patch("agent.HAS_OPENAI", True)
+    def test_explicit_provider_missing_key_raises(self):
+        env = {
+            "LLM_PROVIDER": "groq",
+            "GROQ_API_KEY": "",
+            "LLM_API_KEY": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                create_llm()
+            self.assertIn("GROQ_API_KEY", str(ctx.exception))
+
+    @patch("agent.HAS_OPENAI", True)
+    def test_no_keys_configured_raises(self):
+        env = {
+            "DEEPSEEK_API_KEY": "",
+            "OPENAI_API_KEY": "",
+            "GROQ_API_KEY": "",
+            "LLM_API_KEY": "",
+            "LLM_PROVIDER": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                create_llm()
+            self.assertIn("Neither DEEPSEEK_API_KEY nor OPENAI_API_KEY is configured", str(ctx.exception))
 
 
 if __name__ == "__main__":
