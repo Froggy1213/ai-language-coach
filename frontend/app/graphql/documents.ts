@@ -144,3 +144,135 @@ export const REQUEST_VOICE_TOKEN_MUTATION = /* GraphQL */ `
     }
   }
 `
+
+export const VOICE_SESSION_QUERY = /* GraphQL */ `
+  query VoiceSession($id: ID!) {
+    voiceSession(id: $id) {
+      id
+      status
+      failReason
+      durationSec
+      lessonCard {
+        id
+        orderIndex
+        status
+        practicePrompt
+        grammarPoint {
+          id
+          code
+          title
+          category
+        }
+      }
+      mistakes {
+        id
+        userUtterance
+        correction
+        explanation
+        grammarPoint {
+          id
+          code
+          title
+          category
+        }
+      }
+    }
+  }
+`
+
+export const SESSION_FEEDBACK_READY_SUBSCRIPTION = /* GraphQL */ `
+  subscription SessionFeedbackReady($sessionId: ID!) {
+    sessionFeedbackReady(sessionId: $sessionId) {
+      id
+      status
+      failReason
+      durationSec
+      lessonCard {
+        id
+        orderIndex
+        status
+        practicePrompt
+        grammarPoint {
+          id
+          code
+          title
+          category
+        }
+      }
+      mistakes {
+        id
+        userUtterance
+        correction
+        explanation
+        grammarPoint {
+          id
+          code
+          title
+          category
+        }
+      }
+    }
+  }
+`
+
+export const DUE_REVIEWS_QUERY = /* GraphQL */ `
+  query DueReviews {
+    dueReviews {
+      id
+      grammarPoint {
+        id
+        code
+        title
+        category
+      }
+      easeFactor
+      intervalDays
+      repetitionNumber
+      nextReviewAt
+    }
+  }
+`
+
+export const SUBMIT_REVIEW_RESULT_MUTATION = /* GraphQL */ `
+  mutation SubmitReviewResult($grammarPointId: ID!, $quality: Int!) {
+    submitReviewResult(grammarPointId: $grammarPointId, quality: $quality) {
+      id
+      grammarPoint {
+        id
+        code
+        title
+        category
+      }
+      easeFactor
+      intervalDays
+      repetitionNumber
+      nextReviewAt
+    }
+  }
+`
+
+export const COMPLETE_LESSON_CARD_MUTATION = /* GraphQL */ `
+  mutation CompleteLessonCard($lessonCardId: ID!) {
+    completeLessonCard(lessonCardId: $lessonCardId) {
+      id
+      orderIndex
+      status
+    }
+  }
+`
+
+export const RECURRING_MISTAKES_QUERY = /* GraphQL */ `
+  query RecurringMistakes {
+    recurringMistakes {
+      grammarPoint {
+        id
+        title
+        category
+      }
+      sessionCount
+      mistakeCount
+      lastMistakeAt
+    }
+  }
+`
+

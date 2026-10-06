@@ -30,7 +30,7 @@ export interface LessonCard {
   orderIndex: number
   status: LessonCardStatus
   practicePrompt: string
-  cheatSheet: CheatSheet
+  cheatSheet?: CheatSheet
   grammarPoint: GrammarPoint
 }
 
@@ -53,12 +53,37 @@ export interface PresignedUpload {
   fields: Array<{ name: string; value: string }>
 }
 
+export interface Mistake {
+  id: string
+  userUtterance: string
+  correction: string
+  explanation: string
+  grammarPoint: GrammarPoint
+}
+
 export interface VoiceSession {
   id: string
   status: VoiceSessionStatus
-  livekitUrl: string
-  livekitToken: string | null
-  failReason: string | null
-  durationSec: number | null
+  livekitUrl?: string
+  livekitToken?: string | null
+  failReason?: string | null
+  durationSec?: number | null
   lessonCard: LessonCard
+  mistakes?: Mistake[]
+}
+
+export interface ReviewItem {
+  id: string
+  grammarPoint: GrammarPoint
+  easeFactor: number
+  intervalDays: number
+  repetitionNumber: number
+  nextReviewAt: string
+}
+
+export interface RecurringMistake {
+  grammarPoint: GrammarPoint
+  sessionCount: number
+  mistakeCount: number
+  lastMistakeAt: string
 }

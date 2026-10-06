@@ -1,5 +1,17 @@
 <script setup lang="ts">
+import { useQuery } from '@urql/vue'
+import { DUE_REVIEWS_QUERY } from '~/graphql/documents'
+import type { ReviewItem } from '~/types/graphql'
+
 const { user, logout } = useAuth()
+
+const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
+  query: DUE_REVIEWS_QUERY,
+  pause: computed(() => !user.value),
+  requestPolicy: 'cache-and-network',
+})
+
+const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
 
 const signingOut = ref(false)
 
@@ -23,6 +35,15 @@ async function signOut(): Promise<void> {
         <div class="flex items-center gap-4 text-sm text-slate-400">
           <nav class="flex items-center gap-4">
             <NuxtLink to="/roadmap" class="transition hover:text-slate-100">Роадмап</NuxtLink>
+            <NuxtLink to="/review" class="inline-flex items-center gap-1.5 transition hover:text-slate-100">
+              <span>Повторение</span>
+              <span
+                v-if="dueCount > 0"
+                class="rounded-full bg-sky-500/20 px-1.5 py-0.5 text-xs font-medium text-sky-300"
+              >
+                {{ dueCount }}
+              </span>
+            </NuxtLink>
             <NuxtLink to="/onboarding" class="transition hover:text-slate-100">Проверить уровень</NuxtLink>
           </nav>
           <span class="hidden sm:inline">{{ user.name }} · {{ user.currentLevel }}</span>

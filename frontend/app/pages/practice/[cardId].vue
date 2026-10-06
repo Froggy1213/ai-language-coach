@@ -16,7 +16,7 @@ const roadmap = computed(() => data.value?.roadmap ?? null)
 const card = computed(() => roadmap.value?.lessonCards.find((c) => c.id === cardId.value) ?? null)
 
 const audioElement = ref<HTMLAudioElement | null>(null)
-const { status, error, agentPresent, elapsedSeconds, start, leave } = useVoiceSession({
+const { status, error, sessionId, agentPresent, elapsedSeconds, start, leave } = useVoiceSession({
   audioElement,
 })
 
@@ -211,10 +211,17 @@ function startSession(): void {
           Сессия завершена (длительность: {{ elapsedLabel }}).
         </p>
         <div class="flex flex-wrap items-center gap-3">
+          <NuxtLink
+            v-if="sessionId"
+            :to="`/session/${sessionId}`"
+            class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400"
+          >
+            Разбор ошибок сессии →
+          </NuxtLink>
           <button
             type="button"
             :disabled="isStartingOrConnected"
-            class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
             @click="startSession"
           >
             Начать снова

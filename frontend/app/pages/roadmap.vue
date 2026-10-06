@@ -52,12 +52,22 @@ const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.
     </p>
 
     <template v-else-if="roadmap">
-      <header class="space-y-2">
-        <h1 class="text-2xl font-semibold">{{ roadmap.title }}</h1>
-        <p class="text-sm text-slate-400">
-          {{ roadmap.lessonCards.length }} уроков · сейчас
-          {{ readyCard ? readyCard.grammarPoint.title : 'всё пройдено' }}
-        </p>
+      <header class="flex flex-wrap items-center justify-between gap-4">
+        <div class="space-y-1">
+          <h1 class="text-2xl font-semibold">{{ roadmap.title }}</h1>
+          <p class="text-sm text-slate-400">
+            {{ roadmap.lessonCards.length }} уроков · сейчас
+            {{ readyCard ? readyCard.grammarPoint.title : 'всё пройдено' }}
+          </p>
+        </div>
+
+        <NuxtLink
+          to="/review"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
+        >
+          <span>Повторение правил</span>
+          <span class="text-slate-400">→</span>
+        </NuxtLink>
       </header>
 
       <div class="space-y-5">
@@ -95,6 +105,12 @@ const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.
           class="rounded-lg border border-slate-600 px-4 py-2 font-medium text-slate-100 transition hover:border-slate-400"
         >
           Сначала проверить уровень
+        </NuxtLink>
+        <NuxtLink
+          to="/review"
+          class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 transition hover:border-slate-500"
+        >
+          Повторение правил
         </NuxtLink>
       </div>
     </template>
