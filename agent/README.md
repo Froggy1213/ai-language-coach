@@ -48,3 +48,44 @@ cp .env.example .env
 
 python agent.py dev
 ```
+
+## Observability
+
+The voice agent integrates with Sentry for error tracking and crash reporting (plan §1, §7). It mirrors the backend convention: when `SENTRY_DSN` is unconfigured, Sentry is a complete no-op (no network attempts, no startup impact).
+
+### Enabling Sentry
+
+Supply `SENTRY_DSN` in your environment (or via Compose):
+
+```bash
+SENTRY_DSN=https://<public_key>@<org>.ingest.sentry.io/<project_id>
+SENTRY_ENVIRONMENT=production    # defaults to SENTRY_ENVIRONMENT, then APP_ENV, then 'local'
+SENTRY_RELEASE=v1.0.0            # optional release tag (e.g. git commit hash)
+SENTRY_TRACES_SAMPLE_RATE=0      # default 0 (errors only)
+```
+
+### What is and is not sent
+
+- **What IS sent**:
+  - Exception type, value, and stack trace frames.
+  - Session routing tags: `voice_session_id`, `room_name`, `grammar_point`, `target_language` (enough context to pinpoint the session without revealing its contents).
+  - Timing and latency numbers (`stt_final`, `llm_first_token`, `tts_first_chunk`, `total_turnaround`).
+- **What is NOT sent (Privacy by Design)**:
+  - Learner speech is personal data. We send the *shape* of a failure, never the learner's words.
+  - A strict `before_send` scrubber removes or redacts any event payload key that can carry speech or prompts (`transcript`, `practice_prompt`, `user_utterance`, `correction`, `explanation`, `text_content`, `raw_text_content`, `last_user_transcript`, etc.) with `[REDACTED]`.
+  - Over-long free-form strings (> 256 characters) are truncated with `... [TRUNCATED]`.
+  - `send_default_pii=False` is enforced.
+
+### Verifying a test event
+
+To verify that events reach Sentry, run a one-line Python test with your DSN:
+
+```bash
+python -c "
+import os; os.environ['SENTRY_DSN'] = 'https://<key>@<org>.ingest.sentry.io/<project>';
+from sentry_integration import init_sentry, capture_exception;
+init_sentry();
+capture_exception(RuntimeError('Sentry verification test from voice-agent'), tags={'voice_session_id': 'test'});
+"
+```
+Or trigger a simulated failure within tests using `python -m unittest agent/test_sentry.py`.

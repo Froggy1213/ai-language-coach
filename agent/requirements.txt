@@ -13,3 +13,7 @@ livekit-plugins-silero>=1.8,<2.0
 # bring their own HTTP client, but that is an implementation detail of theirs.
 aiohttp>=3.9,<4.0
 python-dotenv>=1.0,<2.0
+
+# Sentry Python SDK for error tracking and observability (plan §1, §7).
+# Initialised only when SENTRY_DSN is configured; no-op otherwise.
+sentry-sdk>=2.0,<3.0
