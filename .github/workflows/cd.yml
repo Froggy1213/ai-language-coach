@@ -24,6 +24,9 @@ name: CD
 #   LIVEKIT_SSH_PRIVATE_KEY  SSH private key authorized to connect to the LiveKit EC2 node
 #
 # Variables:
+#   AWS_DEPLOY_ENABLED       Set to `true` to arm this workflow. Until it is set, a
+#                            push reports "deployment skipped" and exits green,
+#                            because there is no AWS account to deploy into yet.
 #   AWS_REGION               AWS deployment region (default: us-east-1)
 #   NAME_PREFIX              Prefix for ECR/ECS resources (default: ai-language-coach)
 #   APP_DOMAIN               Application domain (default: coach.example.com)
@@ -44,15 +47,56 @@ permissions:
   contents: read  # Required for actions/checkout
 
 jobs:
+  # The deployment is armed by a repository variable, not by the push itself.
+  #
+  # This repository has no AWS account yet (plan §7 lists the milestone as
+  # infrastructure-as-code that was never applied), and a CD job that walks
+  # straight into `configure-aws-credentials` without a role to assume fails on
+  # every push to main — a red X that says nothing about the commit. Flipping
+  # AWS_DEPLOY_ENABLED=true after the secrets and the OIDC role exist turns the
+  # same workflow into the real deployment, with no edit to this file.
+  guard:
+    name: Is the deployment armed?
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.check.outputs.deploy }}
+    steps:
+      - id: check
+        env:
+          ARMED: ${{ vars.AWS_DEPLOY_ENABLED }}
+          ROLE: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        run: |
+          if [ "${ARMED}" = "true" ] && [ -n "${ROLE}" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Deployment is armed: role ${ROLE%%:*}… and AWS_DEPLOY_ENABLED=true."
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Deployment skipped"
+              echo
+              echo "This repository is not wired to an AWS account yet, so there is"
+              echo "nothing to deploy to. To arm CD:"
+              echo
+              echo "1. Apply \`infra/terraform\` (see \`infra/README.md\`)."
+              echo "2. Set the repository secret \`AWS_ROLE_TO_ASSUME\` to the OIDC role from the state output."
+              echo "3. Set the repository variable \`AWS_DEPLOY_ENABLED=true\`."
+              echo
+              echo "The same workflow then builds the images, migrates and deploys."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Deployment is not armed (AWS_DEPLOY_ENABLED=${ARMED:-unset}); reporting and exiting green."
+          fi
+
   deploy:
     name: Production Deployment
+    needs: guard
     runs-on: ubuntu-latest
     environment:
       name: production
       url: https://${{ vars.APP_DOMAIN || 'coach.example.com' }}
 
-    # Never deploy on pull requests or unapproved fork workflows
-    if: github.repository_owner != '' && github.event_name != 'pull_request'
+    # Never deploy on pull requests or unapproved fork workflows, and never
+    # without an account to deploy into (see the guard job).
+    if: needs.guard.outputs.deploy == 'true' && github.event_name != 'pull_request'
 
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}

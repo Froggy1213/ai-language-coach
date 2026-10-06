@@ -86,6 +86,12 @@ Before provisioning infrastructure, verify that you have:
    - Sentry DSN (Application error tracking)
 5. **GitHub OIDC Role**:
    - An IAM role with trust policy allowing `token.actions.githubusercontent.com` to assume the deployment role for GitHub Actions CD.
+   - Then arm the workflow: set the repository secret `AWS_ROLE_TO_ASSUME` to that role's ARN and the repository variable `AWS_DEPLOY_ENABLED=true`.
+     **Until the variable is set, CD deliberately does nothing**: a push to `main` runs the
+     guard job, reports «deployment skipped» in the step summary and exits green. Without
+     that guard a repository with no AWS account would show a red build on every commit —
+     a failure that says nothing about the commit. `workflow_dispatch` lets an operator
+     trigger the same pipeline by hand once it is armed.
 
 ---
 
