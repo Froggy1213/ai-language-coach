@@ -1,0 +1,7 @@
+"A grammar point the learner keeps getting wrong (plan §3, §7)."
+type RecurringMistake {
+    grammarPoint: GrammarPoint!
+    sessionCount: Int!
+    mistakeCount: Int!
+    lastMistakeAt: String!
+}

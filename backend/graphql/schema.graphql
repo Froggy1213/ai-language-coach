@@ -28,6 +28,9 @@ type Query {
         "Primary key of the voice session."
         id: ID!
     ): VoiceSession @guard @field(resolver: "App\\GraphQL\\Queries\\VoiceSession")
+
+    "Grammar points the learner got wrong in at least N distinct sessions within the rolling window."
+    recurringMistakes: [RecurringMistake!]! @guard @field(resolver: "App\\GraphQL\\Queries\\RecurringMistakes")
 }
 
 
