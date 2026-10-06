@@ -1,0 +1,187 @@
+name: CD
+
+# ==============================================================================
+# Continuous Deployment Workflow (Plan §8, Milestone 2)
+#
+# Automates production deployment:
+# 1. Assumes IAM role via GitHub OIDC (no long-lived AWS access keys).
+# 2. Builds and pushes production container images for API, Web, and Agent to ECR.
+# 3. Runs database migrations as a one-off ECS Fargate task (php artisan migrate --force).
+# 4. Triggers rolling deployment of ECS Fargate services and waits for stability.
+# 5. Upgrades the standalone LiveKit EC2 node with graceful SIGTERM drain.
+# 6. Runs post-deployment smoke verification checks.
+#
+# CONSTRAINTS & SECURITY:
+# - Protected environment 'production' with manual approval gating.
+# - Never deploys on pull requests or forks.
+# - Concurrency locked to prevent overlapping deployments.
+#
+# REQUIRED REPOSITORY CONFIGURATION:
+# ------------------------------------------------------------------------------
+# Secrets:
+#   AWS_ROLE_TO_ASSUME       IAM Role ARN with OIDC trust policy for this repository
+#                            (e.g., arn:aws:iam::123456789012:role/github-actions-cd)
+#   LIVEKIT_SSH_PRIVATE_KEY  SSH private key authorized to connect to the LiveKit EC2 node
+#
+# Variables:
+#   AWS_REGION               AWS deployment region (default: us-east-1)
+#   NAME_PREFIX              Prefix for ECR/ECS resources (default: ai-language-coach)
+#   APP_DOMAIN               Application domain (default: coach.example.com)
+#   LIVEKIT_HOST             LiveKit Elastic IP or domain (default: livekit.example.com)
+# ==============================================================================
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # Required for AWS OIDC federation
+  contents: read  # Required for actions/checkout
+
+jobs:
+  deploy:
+    name: Production Deployment
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.APP_DOMAIN || 'coach.example.com' }}
+
+    # Never deploy on pull requests or unapproved fork workflows
+    if: github.repository_owner != '' && github.event_name != 'pull_request'
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      NAME_PREFIX: ${{ vars.NAME_PREFIX || 'ai-language-coach' }}
+      APP_DOMAIN: ${{ vars.APP_DOMAIN || 'coach.example.com' }}
+      LIVEKIT_HOST: ${{ vars.LIVEKIT_HOST || 'livekit.example.com' }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials (OIDC Role Assumption)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ------------------------------------------------------------------------
+      # 1. Build and Push Container Images to ECR
+      # ------------------------------------------------------------------------
+      - name: Build and Push API Image (covers laravel-app, horizon, reverb, migrations)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-api:${{ env.IMAGE_TAG }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and Push Web Image (Nuxt 4 Nitro)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-web:${{ env.IMAGE_TAG }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and Push Voice Agent Image (Python livekit-agents)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./agent
+          file: ./agent/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-agent:${{ env.IMAGE_TAG }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-agent:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ------------------------------------------------------------------------
+      # 2. Run Database Migrations (One-off ECS Fargate Task)
+      # ------------------------------------------------------------------------
+      - name: Run Database Migrations
+        run: |
+          chmod +x ./scripts/migrate-ecs.sh
+          ./scripts/migrate-ecs.sh \
+            --cluster "${{ env.NAME_PREFIX }}-cluster" \
+            --task-def "${{ env.NAME_PREFIX }}-migration"
+
+      # ------------------------------------------------------------------------
+      # 3. Deploy ECS Fargate Services & Wait for Stability
+      # ------------------------------------------------------------------------
+      - name: Deploy ECS Services
+        run: |
+          CLUSTER="${{ env.NAME_PREFIX }}-cluster"
+          SERVICES=("laravel-app" "horizon-worker" "reverb" "voice-agent-worker" "web")
+
+          echo "Triggering new deployments across ECS services..."
+          for svc in "${SERVICES[@]}"; do
+            echo "Updating service $svc..."
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$svc" \
+              --force-new-deployment \
+              --output text > /dev/null
+          done
+
+          echo "Waiting for all ECS services to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "${SERVICES[@]}"
+          echo "All ECS services are stable and healthy."
+
+      # ------------------------------------------------------------------------
+      # 4. Deploy LiveKit EC2 Node with Native SIGTERM Drain
+      # ------------------------------------------------------------------------
+      - name: Deploy LiveKit Node
+        env:
+          SSH_KEY: ${{ secrets.LIVEKIT_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$SSH_KEY" ]]; then
+            echo "Warning: LIVEKIT_SSH_PRIVATE_KEY is unset; skipping LiveKit node update step."
+            exit 0
+          fi
+
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/livekit_deploy.pem
+          chmod 600 ~/.ssh/livekit_deploy.pem
+
+          chmod +x ./scripts/deploy-livekit.sh
+          ./scripts/deploy-livekit.sh \
+            --host "${{ env.LIVEKIT_HOST }}" \
+            --key ~/.ssh/livekit_deploy.pem \
+            --drain-timeout 900
+
+          rm -f ~/.ssh/livekit_deploy.pem
+
+      # ------------------------------------------------------------------------
+      # 5. Post-Deployment Smoke Verification (Plan §7 Checklist)
+      # ------------------------------------------------------------------------
+      - name: Run Smoke Tests
+        run: |
+          chmod +x ./scripts/smoke-test.sh
+          ./scripts/smoke-test.sh \
+            --app-url "https://${{ env.APP_DOMAIN }}" \
+            --livekit "${{ env.LIVEKIT_HOST }}"

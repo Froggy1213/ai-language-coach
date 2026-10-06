@@ -1,0 +1,43 @@
+# Example Terraform variables for AI Language Coach (Milestone 2)
+# Copy to terraform.tfvars and customize before running terraform apply.
+
+aws_region  = "us-east-1"
+environment = "production"
+name_prefix = "ai-language-coach"
+
+# Domains
+app_domain     = "coach.example.com"
+livekit_domain = "livekit.example.com"
+
+# Set to an existing ACM certificate ARN if already issued; leave empty to declare a new ACM cert
+acm_certificate_arn = ""
+
+# Database & Cache sizing (Plan §8)
+db_instance_class    = "db.t4g.small"
+db_name              = "language_coach"
+db_username          = "coach_user"
+db_allocated_storage = 20
+redis_node_type      = "cache.t4g.micro"
+
+# Standalone LiveKit EC2 node (Plan §8)
+livekit_instance_type     = "t4g.medium"
+livekit_stop_grace_period = "900s" # 15 minutes SIGTERM drain
+livekit_ssh_allowed_cidrs = ["203.0.113.10/32"] # Replace with your operator IP CIDR
+
+# Voice Agent Fleet sizing (Plan §5, §7)
+# Primary line of defence is num_idle_processes / max_processes
+# January load benchmark sets these values based on actual memory & TTFT measurements.
+voice_agent_num_idle_processes = 1
+voice_agent_max_processes      = 3
+voice_agent_stop_timeout       = 900 # 15 minutes, not shorter than a real call
+voice_agent_min_capacity       = 1
+voice_agent_max_capacity       = 5
+
+# Storage & Privacy Lifecycle (Plan §5, §7)
+cors_allowed_origins      = ["https://coach.example.com"]
+audio_retention_days      = 1  # Raw audio cleanup safety net
+transcript_retention_days = 90 # Transcript archive retention
+
+# AWS Budgets & Alerts (Plan §7, §8)
+monthly_budget_usd   = 120
+budget_alert_emails  = ["ops@example.com"]
