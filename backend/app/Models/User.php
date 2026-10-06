@@ -5,6 +5,7 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\CefrLevel;
 use App\Enums\RoadmapStatus;
+use App\Privacy\VoiceConsent;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -43,7 +44,24 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'current_level' => CefrLevel::class,
+            'voice_consent_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether the learner has given consent to voice audio recording and processing.
+     */
+    public function hasGivenVoiceConsent(): bool
+    {
+        return $this->voice_consent_at !== null;
+    }
+
+    /**
+     * Records voice consent on the user model without overwriting an existing timestamp.
+     */
+    public function recordVoiceConsent(): bool
+    {
+        return VoiceConsent::record($this);
     }
 
     /**

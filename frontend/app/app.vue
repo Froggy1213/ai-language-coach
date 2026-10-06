@@ -45,6 +45,7 @@ async function signOut(): Promise<void> {
               </span>
             </NuxtLink>
             <NuxtLink to="/onboarding" class="transition hover:text-slate-100">Проверить уровень</NuxtLink>
+            <NuxtLink to="/settings" class="transition hover:text-slate-100">Настройки</NuxtLink>
           </nav>
           <span class="hidden sm:inline">{{ user.name }} · {{ user.currentLevel }}</span>
           <button

@@ -141,6 +141,11 @@ final class StartVoiceSession
                 $session->room_name = 'lesson-'.$session->getKey();
                 $session->save();
 
+                $lockedUser = User::query()->whereKey($user->getKey())->first();
+                if ($lockedUser instanceof User) {
+                    $lockedUser->recordVoiceConsent();
+                }
+
                 return $session;
             });
         } catch (VoiceDailyLimitReached $exception) {

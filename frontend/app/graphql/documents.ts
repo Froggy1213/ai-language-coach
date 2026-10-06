@@ -11,8 +11,10 @@ export const ME_QUERY = /* GraphQL */ `
     me {
       id
       name
+      email
       targetLanguage
       currentLevel
+      voiceConsentAt
     }
   }
 `
@@ -273,6 +275,12 @@ export const RECURRING_MISTAKES_QUERY = /* GraphQL */ `
       mistakeCount
       lastMistakeAt
     }
+  }
+`
+
+export const DELETE_ACCOUNT_MUTATION = /* GraphQL */ `
+  mutation DeleteAccount($password: String!, $confirmation: String!) {
+    deleteAccount(password: $password, confirmation: $confirmation)
   }
 `
 

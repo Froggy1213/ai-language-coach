@@ -33,7 +33,7 @@ final class SubmitAssessment
         }
 
         [$assessment, $shouldDispatch] = DB::transaction(function () use ($user, $upload): array {
-            User::query()->whereKey($user->getKey())->lockForUpdate()->first();
+            $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->first();
 
             $existing = $user->assessments()
                 ->where('audio_url', $upload->fileUrl)
@@ -42,6 +42,10 @@ final class SubmitAssessment
 
             if ($existing instanceof Assessment) {
                 return [$existing, false];
+            }
+
+            if ($lockedUser instanceof User) {
+                $lockedUser->recordVoiceConsent();
             }
 
             $assessment = $user->assessments()->create([

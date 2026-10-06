@@ -117,6 +117,19 @@ type Mutation {
         @guard
         @field(resolver: "App\\GraphQL\\Mutations\\CompleteLessonCard")
         @validator(class: "App\\GraphQL\\Validators\\CompleteLessonCardValidator")
+
+    """
+    Delete the authenticated user's account and all associated personal data.
+    Requires password verification and exact confirmation string `DELETE`.
+    """
+    deleteAccount(
+        "Current account password for authentication verification."
+        password: String!
+        "Confirmation string, must be literally `DELETE`."
+        confirmation: String!
+    ): Boolean!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\DeleteAccount")
 }
 
 type Subscription {

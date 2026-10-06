@@ -6,11 +6,17 @@ type User {
     "Display name."
     name: String!
 
+    "Account email address."
+    email: String!
+
     "Language the user is learning."
     targetLanguage: String! @rename(attribute: "target_language")
 
     "Current CEFR band, set by the onboarding assessment."
     currentLevel: CefrLevel! @rename(attribute: "current_level")
+
+    "When the learner gave consent to voice audio recording and processing, if recorded."
+    voiceConsentAt: DateTime @rename(attribute: "voice_consent_at")
 
     "The roadmap generated for this user."
     roadmap: Roadmap @hasOne
