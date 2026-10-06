@@ -1,4 +1,8 @@
 import { test, expect } from '@playwright/test';
+
+// This spec is about the guest-to-learner flow itself, so it starts signed out
+// rather than inheriting the session the setup project saved.
+test.use({ storageState: { cookies: [], origins: [] } });
 import { SEEDED_USER } from './helpers';
 
 test.describe('Console and network error guards @smoke', () => {

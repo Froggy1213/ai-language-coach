@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSeededUser } from './helpers';
+import { gotoAsSeededUser } from './helpers';
 
 test.describe('Spaced repetition review screen @smoke', () => {
   test('/review renders without console errors, showing either review items or its documented empty state', async ({ page }) => {
@@ -16,11 +16,7 @@ test.describe('Spaced repetition review screen @smoke', () => {
       pageErrors.push(exception);
     });
 
-    // 1. Authenticate with seeded user
-    await loginAsSeededUser(page);
-
-    // 2. Navigate to /review
-    await page.goto('/review');
+    await gotoAsSeededUser(page, '/review');
 
     // 3. Page must not produce uncaught exceptions or console errors
     expect(pageErrors).toEqual([]);

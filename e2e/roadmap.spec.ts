@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { SEEDED_USER } from './helpers';
+import { gotoAsSeededUser } from './helpers';
 
 test.describe('Roadmap screen @smoke', () => {
-  test('after login the browser Roadmap GraphQL request answers 200 and lesson cards render', async ({ page }) => {
+  test('the browser Roadmap GraphQL request answers 200 and lesson cards render', async ({ page }) => {
     // 1. Set up listener for the browser's Roadmap GraphQL network response.
     // urql sends queries via GET by default (with query param operationName=Roadmap).
     const roadmapResponsePromise = page.waitForResponse((response) => {
@@ -13,13 +13,10 @@ test.describe('Roadmap screen @smoke', () => {
       return url.includes('Roadmap') || (response.request().postData()?.includes('Roadmap') ?? false);
     });
 
-    // 2. Perform login
-    await page.goto('/login');
-    await page.locator('input[type="email"]').fill(SEEDED_USER.email);
-    await page.locator('input[type="password"]').fill(SEEDED_USER.password);
-    await page.getByRole('button', { name: 'Войти' }).click();
-
-    await expect(page).toHaveURL(/\/roadmap$/);
+    // 2. Open the roadmap with the session the setup project saved. This spec is
+    // not about authentication — the login flow has its own specs — and an
+    // extra sign-in here would count against the ten-per-minute login limit.
+    await gotoAsSeededUser(page, '/roadmap');
 
     // 3. Assert on the response status and payload (README decision 20 defect class guard)
     const roadmapResponse = await roadmapResponsePromise;

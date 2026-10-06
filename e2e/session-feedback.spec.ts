@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSeededUser } from './helpers';
+import { gotoAsSeededUser } from './helpers';
 
 test.describe('Session feedback screen @smoke', () => {
   test('/session/999999 for a non-existent session renders a clear not-found state (no crash, no infinite spinner)', async ({ page }) => {
@@ -16,11 +16,7 @@ test.describe('Session feedback screen @smoke', () => {
       }
     });
 
-    // 1. Authenticate with seeded user
-    await loginAsSeededUser(page);
-
-    // 2. Navigate to non-existent session route
-    await page.goto('/session/999999');
+    await gotoAsSeededUser(page, '/session/999999');
 
     // 3. No uncaught runtime crashes
     expect(pageErrors).toEqual([]);

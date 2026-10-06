@@ -24,10 +24,19 @@ export default defineConfig({
     video: 'off',
   },
   projects: [
+    // One sign-in for the whole run: `login` is throttled at ten attempts per
+    // minute on purpose, so a suite where every spec authenticates on its own
+    // would hit that guard on the second consecutive run.
+    {
+      name: 'setup',
+      testMatch: /global\.setup\.ts/,
+    },
     {
       name: 'chromium',
+      dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
+        storageState: '.auth/user.json',
       },
     },
   ],

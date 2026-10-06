@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// This spec is about the guest-to-learner flow itself, so it starts signed out
+// rather than inheriting the session the setup project saved.
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe('Authentication flow @smoke', () => {
   test('guest visiting /roadmap is redirected to /login, signs in, and signs out', async ({ page }) => {
     // 1. A guest visiting /roadmap lands on /login

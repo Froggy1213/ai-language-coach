@@ -1,12 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSeededUser } from './helpers';
+import { gotoAsSeededUser } from './helpers';
 
 test.describe('Onboarding assessment screen @smoke', () => {
   test('/onboarding renders its consent step with a visible recording affordance', async ({ page }) => {
-    // 1. Authenticate and navigate to /onboarding
-    await loginAsSeededUser(page);
-
-    await page.goto('/onboarding');
+    await gotoAsSeededUser(page, '/onboarding');
     await expect(page).toHaveURL(/\/onboarding$/);
 
     // 2. Main title and consent step container

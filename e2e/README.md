@@ -88,6 +88,22 @@ E2E_BASE_URL=http://127.0.0.1:3000 npm run e2e:smoke
 
 ---
 
+## How the suite authenticates (and why not in every spec)
+
+`e2e/global.setup.ts` is a Playwright **setup project**: it signs the seeded
+learner in once, saves the session to `.auth/user.json`, and the `chromium`
+project reuses it (`storageState`). Only the specs that are *about* the flow —
+`auth.spec.ts` (guest redirect, sign-in, sign-out) and `console.spec.ts` (the
+console/network guard through the login journey) — start from a clean context
+and sign in themselves with `test.use({ storageState: { cookies: [], origins: [] } })`.
+
+This is not just speed. `login` is throttled at **ten attempts per minute** on
+purpose (plan §7), so a suite where all specs authenticated on their own would
+trip that guard on a second consecutive run and report a rate limit as an
+application failure. A run performs three sign-ins, so back-to-back runs stay
+well inside the limit. If you add a spec, use `gotoAsSeededUser(page, path)`
+unless you are specifically testing authentication.
+
 ## Seeded Test Account
 
 The tests rely on the pre-seeded account:
@@ -97,6 +113,24 @@ The tests rely on the pre-seeded account:
 Helper function `loginAsSeededUser(page)` in `e2e/helpers.ts` provides a consistent login flow across tests.
 
 ---
+
+## Rebuilding the stack before running
+
+The suite drives the **running** stack, and the `--profile full` images bake the
+application code in — there are no bind mounts. After changing backend or
+frontend code you must rebuild the image, not just restart the container:
+
+```bash
+DOCKER_BUILDKIT=0 docker compose build web api horizon reverb voice-agent
+docker compose up -d
+```
+
+Forgetting this is exactly how a suite can look broken when the application is
+fine: a stale API image served a GraphQL schema without the `User.email` field
+the new SPA asked for, so every sign-in landed back on `/login` with
+`Cannot query field "email" on type "User"`. The classic builder
+(`DOCKER_BUILDKIT=0`) is used here because buildx needs to write outside the
+workspace.
 
 ## Deliberate Non-Coverage
 

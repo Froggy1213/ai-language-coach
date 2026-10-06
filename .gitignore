@@ -31,3 +31,7 @@ storage/*.key
 test-results/
 playwright-report/
 
+
+# Playwright saved session for the e2e smoke suite
+e2e/.auth/
+.auth/
