@@ -19,7 +19,8 @@
 # 5. LiveKit EC2 compute (t4g.medium: ~$0.0336/hr):
 #    Amortized across concurrent sessions: ~$0.00056/min of capacity.
 # 6. ECS Fargate voice-agent task (1 vCPU, 2GB: ~$0.048/hr):
-#    With 3 concurrent sessions per task (var.voice_agent_max_processes):
+#    With ~3 concurrent sessions per task (bounded by the task's 1 vCPU and
+#    voice_agent_load_threshold, not by a max_processes setting — 1.8.5 has none):
 #    ~$0.00026/min per active student.
 # 7. S3 raw audio + transcripts storage & network egress:
 #    ~$0.0001/min.

@@ -18,6 +18,34 @@ try:
 except ImportError:
     pass
 
+try:
+    from sentry_integration import (
+        init_sentry,
+        set_session_tags,
+        capture_exception,
+        scrub_event,
+        is_sentry_enabled,
+    )
+except ImportError:
+    try:
+        from .sentry_integration import (  # type: ignore
+            init_sentry,
+            set_session_tags,
+            capture_exception,
+            scrub_event,
+            is_sentry_enabled,
+        )
+    except ImportError:
+        def init_sentry(*args, **kwargs): return False
+        def set_session_tags(*args, **kwargs): pass
+        def capture_exception(*args, **kwargs): return None
+        def scrub_event(ev, *args, **kwargs): return ev
+        def is_sentry_enabled(): return False
+
+# Initialise Sentry as early as possible so startup errors reach Sentry.
+# If SENTRY_DSN is unset, this is an immediate no-op.
+init_sentry()
+
 
 try:
     from livekit.agents import (
@@ -80,6 +108,51 @@ except ImportError:
 
 logger = logging.getLogger("ai-language-coach-agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer setting, keeping the default and saying so on a typo."""
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Ignoring %s=%r: not an integer", name, raw)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a numeric setting, keeping the default and saying so on a typo."""
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Ignoring %s=%r: not a number", name, raw)
+        return default
+
+
+def build_worker_options() -> Any:
+    """
+    The worker pool as the deployment configured it (plan §5, §7).
+
+    livekit-agents 1.8.5 does not read these settings from the environment: its
+    ``ServerEnvOption`` only chooses between a development and a production
+    default, and this line has no ``max_processes`` field at all. Passing the
+    values through here is what makes the capacity the benchmark chose actually
+    apply — an environment variable nobody reads is a capacity setting that only
+    exists in a Terraform file.
+    """
+    return WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        prewarm_fnc=prewarm,
+        agent_name=os.getenv("VOICE_AGENT_NAME", "ai-language-coach"),
+        num_idle_processes=_env_int("NUM_IDLE_PROCESSES", 4),
+        load_threshold=_env_float("LOAD_THRESHOLD", 0.7),
+        drain_timeout=_env_float("DRAIN_TIMEOUT_SECONDS", 360.0),
+    )
 
 
 async def report_session_failure(session_id: Optional[int], reason: str) -> None:
@@ -170,8 +243,14 @@ async def report_session_failure(session_id: Optional[int], reason: str) -> None
                     exc,
                 )
                 await asyncio.sleep(0.5)
-                continue
             logger.error("Failed to notify backend about session %s failure: %s", session_id, exc)
+            capture_exception(
+                exc,
+                tags={
+                    "voice_session_id": str(session_id) if session_id is not None else "unknown",
+                    "failure_path": "backend_report",
+                },
+            )
 
 
 def to_ms(val_in_seconds: Optional[float]) -> Optional[float]:
@@ -822,11 +901,13 @@ def create_tts():
 
 
 def prewarm(proc: JobProcess):
+    init_sentry()
     proc.userdata["vad"] = silero.VAD.load()
 
 
 async def entrypoint(ctx: JobContext):
-    logger.info("Starting voice agent job for room: %s", ctx.room.name)
+    room_name = getattr(getattr(ctx, "room", None), "name", None) or "unknown"
+    logger.info("Starting voice agent job for room: %s", room_name)
 
     # 1. Parse metadata passed from Laravel's StartVoiceSession (App\\Voice\\StartVoiceSession)
     metadata: Dict[str, Any] = {}
@@ -853,157 +934,182 @@ async def entrypoint(ctx: JobContext):
 
     grammar_point = str(metadata.get("grammar_point") or "General practice")
     practice_prompt = str(metadata.get("practice_prompt") or "Let's practice speaking.")
+    target_language = str(metadata.get("target_language") or "en")
 
-    # 2. Connect worker to LiveKit room
-    # This announces participant kind=AGENT to the room, which unblocks StartVoiceSession
-    try:
-        auto_sub = getattr(AutoSubscribe, "AUDIO_ONLY", None)
-        await ctx.connect(auto_subscribe=auto_sub)
-        logger.info("Agent successfully connected to room %s as AGENT", ctx.room.name)
-    except Exception as exc:
-        logger.error("Failed to connect to LiveKit room %s: %s", ctx.room.name, exc)
-        await report_session_failure(session_id, "agent_error")
-        return
+    # Tag every captured event with enough context to find the session without
+    # shipping its content (plan §1, §7).
+    set_session_tags(
+        session_id=session_id,
+        room_name=room_name,
+        grammar_point=grammar_point,
+        target_language=target_language,
+    )
 
-    # 3. Instantiate voice pipeline components
-    try:
-        vad = ctx.proc.userdata.get("vad") if hasattr(ctx, "proc") and hasattr(ctx.proc, "userdata") and ctx.proc.userdata is not None else None
-        if vad is None:
-            vad = silero.VAD.load()
-    except Exception as exc:
-        logger.error("Failed to load VAD: %s", exc)
-        await report_session_failure(session_id, "agent_error")
-        return
+    session_tags = {
+        "voice_session_id": str(session_id) if session_id is not None else "unknown",
+        "room_name": str(room_name),
+        "grammar_point": str(grammar_point),
+        "target_language": str(target_language),
+    }
 
     try:
-        stt = create_stt(metadata)
-    except Exception as exc:
-        logger.error("Failed to initialize STT: %s", exc)
-        await report_session_failure(session_id, "stt_failed")
-        return
+        # 2. Connect worker to LiveKit room
+        # This announces participant kind=AGENT to the room, which unblocks StartVoiceSession
+        try:
+            auto_sub = getattr(AutoSubscribe, "AUDIO_ONLY", None)
+            await ctx.connect(auto_subscribe=auto_sub)
+            logger.info("Agent successfully connected to room %s as AGENT", room_name)
+        except Exception as exc:
+            logger.error("Failed to connect to LiveKit room %s: %s", room_name, exc)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "agent_error")
+            return
 
-    try:
-        llm_instance = create_llm()
-    except Exception as exc:
-        logger.error("Failed to initialize LLM: %s", exc)
-        await report_session_failure(session_id, "llm_failed")
-        return
+        # 3. Instantiate voice pipeline components
+        try:
+            vad = ctx.proc.userdata.get("vad") if hasattr(ctx, "proc") and hasattr(ctx.proc, "userdata") and ctx.proc.userdata is not None else None
+            if vad is None:
+                vad = silero.VAD.load()
+        except Exception as exc:
+            logger.error("Failed to load VAD: %s", exc)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "agent_error")
+            return
 
-    try:
-        tts = create_tts()
-    except Exception as exc:
-        logger.error("Failed to initialize TTS: %s", exc)
-        await report_session_failure(session_id, "tts_failed")
-        return
+        try:
+            stt = create_stt(metadata)
+        except Exception as exc:
+            logger.error("Failed to initialize STT: %s", exc)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "stt_failed")
+            return
 
-    instructions = build_system_prompt(metadata)
+        try:
+            llm_instance = create_llm()
+        except Exception as exc:
+            logger.error("Failed to initialize LLM: %s", exc)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "llm_failed")
+            return
 
-    # 4. Run session
-    try:
-        if USE_AGENT_SESSION:
-            logger.info("Using LiveKit AgentSession interface")
-            agent_instance = Agent(instructions=instructions)
-            session = AgentSession(
-                vad=vad,
-                stt=stt,
-                llm=llm_instance,
-                tts=tts,
-            )
+        try:
+            tts = create_tts()
+        except Exception as exc:
+            logger.error("Failed to initialize TTS: %s", exc)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "tts_failed")
+            return
 
-            tracker = TurnMetricsTracker(session_id=session_id)
+        instructions = build_system_prompt(metadata)
 
-            if hasattr(session, "on"):
-                # NOTE: livekit-agents 1.8.4 logs a deprecation notice recommending
-                # session_usage_updated for token usage and ChatMessage.metrics for per-turn
-                # latency (Finding 7). We intentionally retain @session.on("metrics_collected") because:
-                # 1) session_usage_updated only tracks token counts/billing, not stage latencies.
-                # 2) ChatMessage.metrics['e2e_latency'] is only attached to assistant ChatMessage
-                #    after full audio playout completes (agent_activity.py wait_for_playout),
-                #    which occurs seconds later and cannot provide telemetry at the first TTS chunk
-                #    (plan §5 / README decision 32), nor during fallback timeouts or interruptions.
-                # 3) metrics_collected continues to be emitted synchronously during the turn
-                #    for EOUMetrics, LLMMetrics, and TTSMetrics with correlated speech_ids.
-                @session.on("metrics_collected")
-                def _on_metrics_collected(ev: Any):
-                    try:
-                        m = getattr(ev, "metrics", ev)
-                        if HAS_METRICS and metrics is not None and hasattr(metrics, "log_metrics"):
-                            try:
-                                metrics.log_metrics(m)
-                            except Exception:
-                                pass
-                        tracker.handle_metric(m)
-                    except Exception as exc:
-                        logger.warning("Error processing collected metric: %s", exc)
+        # 4. Run session
+        try:
+            if USE_AGENT_SESSION:
+                logger.info("Using LiveKit AgentSession interface")
+                agent_instance = Agent(instructions=instructions)
+                session = AgentSession(
+                    vad=vad,
+                    stt=stt,
+                    llm=llm_instance,
+                    tts=tts,
+                )
 
-                @session.on("conversation_item_added")
-                def _on_conversation_item_added(item: Any):
-                    try:
-                        transcript = extract_user_transcript(item)
-                        if transcript:
-                            tracker.on_user_speech(transcript)
-                    except Exception as exc:
-                        logger.debug("Error reading conversation item: %s", exc)
+                tracker = TurnMetricsTracker(session_id=session_id)
 
-                @session.on("user_input_transcribed")
-                def _on_user_input_transcribed(ev: Any):
-                    try:
-                        if getattr(ev, "is_final", False):
-                            tx = getattr(ev, "transcript", None)
-                            if isinstance(tx, str) and tx.strip():
-                                tracker.on_user_speech(tx.strip())
-                    except Exception as exc:
-                        logger.debug("Error reading user input transcription: %s", exc)
+                if hasattr(session, "on"):
+                    # NOTE: livekit-agents 1.8.4 logs a deprecation notice recommending
+                    # session_usage_updated for token usage and ChatMessage.metrics for per-turn
+                    # latency (Finding 7). We intentionally retain @session.on("metrics_collected") because:
+                    # 1) session_usage_updated only tracks token counts/billing, not stage latencies.
+                    # 2) ChatMessage.metrics['e2e_latency'] is only attached to assistant ChatMessage
+                    #    after full audio playout completes (agent_activity.py wait_for_playout),
+                    #    which occurs seconds later and cannot provide telemetry at the first TTS chunk
+                    #    (plan §5 / README decision 32), nor during fallback timeouts or interruptions.
+                    # 3) metrics_collected continues to be emitted synchronously during the turn
+                    #    for EOUMetrics, LLMMetrics, and TTSMetrics with correlated speech_ids.
+                    @session.on("metrics_collected")
+                    def _on_metrics_collected(ev: Any):
+                        try:
+                            m = getattr(ev, "metrics", ev)
+                            if HAS_METRICS and metrics is not None and hasattr(metrics, "log_metrics"):
+                                try:
+                                    metrics.log_metrics(m)
+                                except Exception:
+                                    pass
+                            tracker.handle_metric(m)
+                        except Exception as exc:
+                            logger.warning("Error processing collected metric: %s", exc)
 
-                # Kept as legacy/defensive fallback in case older/wrapped pipelines emit it
-                @session.on("user_speech_committed")
-                def _on_user_speech_committed(msg: Any):
-                    try:
-                        transcript = extract_user_transcript(msg)
-                        if transcript:
-                            tracker.on_user_speech(transcript)
-                        else:
-                            content = getattr(msg, "content", None)
-                            if isinstance(content, str):
-                                tracker.on_user_speech(content)
-                            elif isinstance(content, list):
-                                parts = [str(p) for p in content if p]
-                                if parts:
-                                    tracker.on_user_speech(" ".join(parts))
-                    except Exception as exc:
-                        logger.debug("Error reading committed user speech: %s", exc)
+                    @session.on("conversation_item_added")
+                    def _on_conversation_item_added(item: Any):
+                        try:
+                            transcript = extract_user_transcript(item)
+                            if transcript:
+                                tracker.on_user_speech(transcript)
+                        except Exception as exc:
+                            logger.debug("Error reading conversation item: %s", exc)
 
-            await session.start(room=ctx.room, agent=agent_instance)
+                    @session.on("user_input_transcribed")
+                    def _on_user_input_transcribed(ev: Any):
+                        try:
+                            if getattr(ev, "is_final", False):
+                                tx = getattr(ev, "transcript", None)
+                                if isinstance(tx, str) and tx.strip():
+                                    tracker.on_user_speech(tx.strip())
+                        except Exception as exc:
+                            logger.debug("Error reading user input transcription: %s", exc)
 
-            # Opening prompt
-            greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
-            await session.say(greeting, allow_interruptions=True)
-        else:
-            logger.info("Using LiveKit VoicePipelineAgent interface")
-            pipeline_agent = VoicePipelineAgent(
-                vad=vad,
-                stt=stt,
-                llm=llm_instance,
-                tts=tts,
-            )
-            pipeline_agent.start(ctx.room)
+                    # Kept as legacy/defensive fallback in case older/wrapped pipelines emit it
+                    @session.on("user_speech_committed")
+                    def _on_user_speech_committed(msg: Any):
+                        try:
+                            transcript = extract_user_transcript(msg)
+                            if transcript:
+                                tracker.on_user_speech(transcript)
+                            else:
+                                content = getattr(msg, "content", None)
+                                if isinstance(content, str):
+                                    tracker.on_user_speech(content)
+                                elif isinstance(content, list):
+                                    parts = [str(p) for p in content if p]
+                                    if parts:
+                                        tracker.on_user_speech(" ".join(parts))
+                        except Exception as exc:
+                            logger.debug("Error reading committed user speech: %s", exc)
 
-            greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
-            await pipeline_agent.say(greeting, allow_interruptions=True)
+                await session.start(room=ctx.room, agent=agent_instance)
 
-    except Exception as exc:
-        logger.error("Runtime error in voice agent session: %s", exc, exc_info=True)
+                # Opening prompt
+                greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
+                await session.say(greeting, allow_interruptions=True)
+            else:
+                logger.info("Using LiveKit VoicePipelineAgent interface")
+                pipeline_agent = VoicePipelineAgent(
+                    vad=vad,
+                    stt=stt,
+                    llm=llm_instance,
+                    tts=tts,
+                )
+                pipeline_agent.start(ctx.room)
+
+                greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
+                await pipeline_agent.say(greeting, allow_interruptions=True)
+
+        except Exception as exc:
+            logger.error("Runtime error in voice agent session: %s", exc, exc_info=True)
+            capture_exception(exc, tags=session_tags)
+            await report_session_failure(session_id, "agent_error")
+
+    except Exception as unhandled_exc:
+        # Capture any unhandled exception inside a job before the worker disconnects
+        logger.error("Unhandled exception in voice agent job: %s", unhandled_exc, exc_info=True)
+        capture_exception(unhandled_exc, tags=session_tags)
         await report_session_failure(session_id, "agent_error")
 
 
 if __name__ == "__main__":
+    init_sentry()
     agent_name = os.getenv("VOICE_AGENT_NAME", "ai-language-coach")
     logger.info("Registering LiveKit worker with agent_name='%s'", agent_name)
 
-    cli.run_app(
-        WorkerOptions(
-            entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,
-            agent_name=agent_name,
-        )
-    )
+    cli.run_app(build_worker_options())

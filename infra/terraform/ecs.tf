@@ -9,7 +9,7 @@
 #
 # Configuration:
 # Injected via Secrets Manager (valueFrom) rather than plaintext.
-# stopTimeout configured to allow graceful drains (Horizon 360s, voice-agent 900s).
+# stopTimeout configured to allow graceful drains (Horizon 360s, voice-agent 420s).
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.name_prefix}-cluster"
@@ -376,7 +376,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
       image       = "${aws_ecr_repository.repos["agent"].repository_url}:latest"
       essential   = true
       command     = ["python", "agent.py", "start"]
-      stopTimeout = var.voice_agent_stop_timeout # Plan §5: 900s = 15m, not shorter than a real call!
+      stopTimeout = var.voice_agent_stop_timeout # Plan §5: not shorter than voice_agent_drain_timeout
       portMappings = [
         {
           containerPort = 8081
@@ -387,9 +387,12 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
         { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
         { name = "BACKEND_INTERNAL_URL", value = "https://${var.app_domain}" },
-        # Plan §5, §7: First line of defence (honestly defaulted, January benchmark sets it)
+        # Plan §5, §7: the worker pool, as measured by load/dispatch_capacity.py.
+        # livekit-agents 1.8.5 has no max_processes field — the ceiling is
+        # load_threshold plus this task's CPU — so there is no MAX_PROCESSES here.
         { name = "NUM_IDLE_PROCESSES", value = tostring(var.voice_agent_num_idle_processes) },
-        { name = "MAX_PROCESSES", value = tostring(var.voice_agent_max_processes) }
+        { name = "LOAD_THRESHOLD", value = tostring(var.voice_agent_load_threshold) },
+        { name = "DRAIN_TIMEOUT_SECONDS", value = tostring(var.voice_agent_drain_timeout) }
       ]
       secrets = [
         { name = "LIVEKIT_API_KEY", valueFrom = "${local.secret_arn}:LIVEKIT_API_KEY::" },

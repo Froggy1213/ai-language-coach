@@ -132,25 +132,39 @@ variable "livekit_stop_grace_period" {
 # ------------------------------------------------------------------------------
 # Voice Agent Capacity & Autoscaling - Plan §5, §7, §8
 # ------------------------------------------------------------------------------
-# NOTE (Plan §5, §7): Primary line of defence is num_idle_processes / max_processes
-# within the prewarmed livekit-agents pool. Default values below are conservative.
-# The January 2027 load benchmark (§6, §7) sets the exact benchmarked value.
+# Measured on the local harness (load/dispatch_capacity.py, load/README.md):
+# four prewarmed processes answered a dispatch in ~265 ms p50 and stayed flat
+# up to four concurrent dispatches, while a process spawned on demand took
+# ~538 ms — both far inside the 5 s VOICE_AGENT_JOIN_TIMEOUT. A SIGTERM with a
+# call in flight preserved the call, refused new dispatches and exited 0.
+#
+# Plan §5 names `max_processes`, but the pinned livekit-agents 1.8.5 has no
+# such field: the concurrency ceiling is `load_threshold` plus the task's own
+# CPU, which is why there is a load_threshold variable here and no
+# max_processes one. The EC2 node's real media ceiling still has to be measured
+# there — the local run has no WebRTC audio clients at all.
 variable "voice_agent_num_idle_processes" {
   type        = number
-  description = "Number of pre-warmed idle worker processes per Fargate task (first line of defence)"
-  default     = 1
+  description = "Pre-warmed idle worker processes per Fargate task (first line of defence)"
+  default     = 4
 }
 
-variable "voice_agent_max_processes" {
+variable "voice_agent_load_threshold" {
   type        = number
-  description = "Maximum concurrent voice sessions per Fargate task before saturation"
-  default     = 3
+  description = "CPU threshold above which the worker stops accepting new jobs (livekit-agents default 0.7)"
+  default     = 0.7
+}
+
+variable "voice_agent_drain_timeout" {
+  type        = number
+  description = "Seconds an in-flight call may finish after SIGTERM (measured sprints are 3-5 minutes; the library default is an hour)"
+  default     = 360
 }
 
 variable "voice_agent_stop_timeout" {
   type        = number
-  description = "ECS task stopTimeout in seconds. Not shorter than a real call (Plan §5: 900s = 15m)"
-  default     = 900
+  description = "ECS task stopTimeout in seconds; must not be shorter than voice_agent_drain_timeout (Plan §5)"
+  default     = 420
 }
 
 variable "voice_agent_min_capacity" {

@@ -18,7 +18,7 @@ This directory contains the production Infrastructure-as-Code (Terraform) and de
        │            │            │        ▼
        ▼            ▼            ▼   [ Voice Agent Fleet — ECS Fargate ]
    [ Nuxt 4 ]  [ Laravel ]   [ Reverb ]  (Python livekit-agents, Public Subnet, no NAT)
-   (:3000)      (:8080)       (:8081)     │  num_idle_processes=1, max_processes=3
+   (:3000)      (:8080)       (:8081)     │  num_idle_processes=4, load_threshold=0.7
        │            │                     ├─► Deepgram (STT) / Cartesia (TTS) / LLM
        │            ├─────────────────────┼─► CloudWatch (P95 TURN_LATENCY)
        │            │                     └─► Webhook room_finished ──► Horizon job

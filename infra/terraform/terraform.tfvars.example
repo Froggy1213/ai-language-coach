@@ -25,11 +25,14 @@ livekit_stop_grace_period = "900s" # 15 minutes SIGTERM drain
 livekit_ssh_allowed_cidrs = ["203.0.113.10/32"] # Replace with your operator IP CIDR
 
 # Voice Agent Fleet sizing (Plan §5, §7)
-# Primary line of defence is num_idle_processes / max_processes
-# January load benchmark sets these values based on actual memory & TTFT measurements.
-voice_agent_num_idle_processes = 1
-voice_agent_max_processes      = 3
-voice_agent_stop_timeout       = 900 # 15 minutes, not shorter than a real call
+# Measured by load/dispatch_capacity.py: four prewarmed processes answer a
+# dispatch in ~265 ms p50, an on-demand spawn takes ~538 ms, and a SIGTERM with
+# a call in flight preserves the call. livekit-agents 1.8.5 has no max_processes
+# field: the ceiling is load_threshold plus the task's CPU.
+voice_agent_num_idle_processes = 4
+voice_agent_load_threshold     = 0.7
+voice_agent_drain_timeout      = 360 # 6 minutes: measured sprints are 3-5
+voice_agent_stop_timeout       = 420 # must not be shorter than the drain timeout
 voice_agent_min_capacity       = 1
 voice_agent_max_capacity       = 5
 
