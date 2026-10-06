@@ -26,3 +26,8 @@ yarn-error.log*
 .nuxt/
 .output/
 storage/*.key
+
+# Playwright
+test-results/
+playwright-report/
+
