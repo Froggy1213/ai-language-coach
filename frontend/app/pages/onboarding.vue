@@ -10,7 +10,10 @@ const error = ref<string | null>(null)
 const failureMessage = ref<string | null>(null)
 const elapsed = ref(0)
 const level = ref<string | null>(null)
+const starting = ref(false)
+const stopping = ref(false)
 
+let aborted = false
 let recorder: MediaRecorder | null = null
 let stream: MediaStream | null = null
 let chunks: Blob[] = []
@@ -25,26 +28,55 @@ const elapsedLabel = computed(() => {
 })
 
 function startRecording(): void {
+  if (starting.value || stage.value !== 'ready') {
+    return
+  }
   void beginRecording()
 }
 
+function onRecorderStop(): void {
+  void finishRecording()
+}
+
 async function beginRecording(): Promise<void> {
+  if (starting.value || stage.value !== 'ready') {
+    return
+  }
+  starting.value = true
+  stopping.value = false
   error.value = null
   failureMessage.value = null
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   } catch {
+    starting.value = false
     error.value = 'Нет доступа к микрофону. Разрешите запись в браузере и попробуйте снова.'
+    return
+  }
+
+  if (aborted) {
+    stream.getTracks().forEach((track) => track.stop())
+    stream = null
+    starting.value = false
     return
   }
 
   // Chrome and Firefox record webm/opus, Safari records mp4; the API accepts
   // both, and the codec parameter is stripped before it is signed.
-  const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
-    .find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
+  try {
+    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+      .find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 
-  recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+  } catch {
+    stream.getTracks().forEach((track) => track.stop())
+    stream = null
+    starting.value = false
+    error.value = 'Не удалось инициализировать запись звука в браузере.'
+    return
+  }
+
   chunks = []
 
   recorder.addEventListener('dataavailable', (event) => {
@@ -52,9 +84,7 @@ async function beginRecording(): Promise<void> {
       chunks.push(event.data)
     }
   })
-  recorder.addEventListener('stop', () => {
-    void finishRecording()
-  })
+  recorder.addEventListener('stop', onRecorderStop)
 
   recorder.start()
   elapsed.value = 0
@@ -62,13 +92,24 @@ async function beginRecording(): Promise<void> {
     elapsed.value += 1
   }, 1000)
   stage.value = 'recording'
+  starting.value = false
 }
 
 function stopRecording(): void {
-  recorder?.stop()
+  if (stopping.value) {
+    return
+  }
+  if (recorder && recorder.state === 'recording') {
+    stopping.value = true
+    recorder.stop()
+  }
 }
 
 async function finishRecording(): Promise<void> {
+  if (aborted) {
+    return
+  }
+
   stopTicker()
   stream?.getTracks().forEach((track) => track.stop())
   stream = null
@@ -78,6 +119,7 @@ async function finishRecording(): Promise<void> {
 
   recorder = null
   chunks = []
+  stopping.value = false
 
   if (recording.size === 0) {
     error.value = 'Запись получилась пустой — попробуйте ещё раз.'
@@ -90,6 +132,10 @@ async function finishRecording(): Promise<void> {
 }
 
 async function upload(recording: Blob, contentType: string): Promise<void> {
+  if (aborted) {
+    return
+  }
+
   stage.value = 'uploading'
   error.value = null
   failureMessage.value = null
@@ -104,6 +150,10 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
     // Subscribe first: the analysis can finish before the mutation's response
     // is even rendered.
     stopListening = await onReady(currentUser.id, (assessment) => {
+      if (aborted) {
+        return
+      }
+
       if (assessment.status === 'failed') {
         failureMessage.value = 'Не удалось расшифровать или оценить запись. Попробуйте проверить статус ещё раз или запишите рассказ заново.'
         stopListening?.()
@@ -118,9 +168,25 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       void refresh()
     })
 
+    if (aborted) {
+      stopListening?.()
+      stopListening = null
+      return
+    }
+
     await submit(recording, contentType)
-    stage.value = 'waiting'
+
+    if (aborted) {
+      return
+    }
+
+    if (stage.value === 'uploading') {
+      stage.value = 'waiting'
+    }
   } catch (failure) {
+    if (aborted) {
+      return
+    }
     error.value = failure instanceof Error ? failure.message : 'Не удалось отправить запись на разбор.'
     stage.value = 'ready'
   }
@@ -144,9 +210,26 @@ function stopTicker(): void {
 }
 
 onBeforeUnmount(() => {
+  aborted = true
   stopTicker()
-  stopListening?.()
-  stream?.getTracks().forEach((track) => track.stop())
+  if (stopListening) {
+    stopListening()
+    stopListening = null
+  }
+  if (recorder) {
+    recorder.removeEventListener('stop', onRecorderStop)
+    if (recorder.state !== 'inactive') {
+      try {
+        recorder.stop()
+      } catch {}
+    }
+    recorder = null
+  }
+  if (stream) {
+    stream.getTracks().forEach((track) => track.stop())
+    stream = null
+  }
+  chunks = []
 })
 </script>
 
@@ -193,7 +276,8 @@ onBeforeUnmount(() => {
       </p>
       <button
         type="button"
-        class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400"
+        :disabled="starting"
+        class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
         @click="startRecording"
       >
         Начать запись
@@ -208,7 +292,8 @@ onBeforeUnmount(() => {
       <p class="text-sm text-slate-300">Говорите не меньше минуты: на короткой записи оценка менее надёжна.</p>
       <button
         type="button"
-        class="rounded-lg border border-slate-600 px-4 py-2 font-medium text-slate-100 transition hover:border-slate-400"
+        :disabled="stopping"
+        class="rounded-lg border border-slate-600 px-4 py-2 font-medium text-slate-100 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
         @click="stopRecording"
       >
         Остановить и отправить

@@ -213,9 +213,44 @@ class LiveKitWebhookTest extends TestCase
             ->assertJson(['applied' => false]);
     }
 
-    public function test_an_event_without_a_room_is_rejected(): void
+    public function test_an_event_without_a_room_is_accepted_without_effect(): void
     {
-        $this->send(['event' => 'room_finished'])->assertStatus(422);
+        $this->send(['event' => 'room_finished'])
+            ->assertOk()
+            ->assertJson(['applied' => false]);
+    }
+
+    public function test_rejects_invalid_json_payload_with_bad_request(): void
+    {
+        $raw = '{invalid-json';
+        $token = JWT::encode([
+            'iss' => 'test-api-key',
+            'exp' => time() + 60,
+            'sha256' => base64_encode(hash('sha256', $raw, true)),
+        ], self::SECRET, 'HS256');
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token, 'CONTENT_TYPE' => 'application/json'],
+            content: $raw,
+        )->assertStatus(400)->assertJson(['message' => 'Invalid JSON payload.']);
+    }
+
+    public function test_rejects_a_signature_missing_exp_claim(): void
+    {
+        $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
+        $token = JWT::encode([
+            'iss' => 'test-api-key',
+            'sha256' => base64_encode(hash('sha256', json_encode($body), true)),
+        ], self::SECRET, 'HS256');
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token, 'CONTENT_TYPE' => 'application/json'],
+            content: json_encode($body),
+        )->assertUnauthorized();
     }
 
     public function test_an_unsigned_event_without_a_room_is_still_checked_for_its_signature_first(): void

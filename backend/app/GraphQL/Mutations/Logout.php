@@ -3,6 +3,7 @@
 namespace App\GraphQL\Mutations;
 
 use Illuminate\Auth\AuthManager;
+use Laravel\Sanctum\PersonalAccessToken;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 
 final class Logout
@@ -11,6 +12,15 @@ final class Logout
 
     public function __invoke(mixed $root, array $args, GraphQLContext $context): bool
     {
+        $user = $context->user();
+
+        if ($user !== null) {
+            $token = $user->currentAccessToken();
+            if ($token instanceof PersonalAccessToken) {
+                $token->delete();
+            }
+        }
+
         $this->auth->guard('web')->logout();
 
         $request = $context->request();

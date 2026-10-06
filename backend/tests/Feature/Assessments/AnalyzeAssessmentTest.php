@@ -235,6 +235,30 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertSame('Deepgram timed out', $assessment->raw_data['error']);
     }
 
+    public function test_when_roadmap_regenerate_throws_assessment_remains_processing(): void
+    {
+        $this->fakeDeepgram('Some transcript.');
+        // 'fr' has no grammar catalogue file in resources/grammar, so RoadmapGenerator::regenerate throws RuntimeException.
+        $user = User::factory()->create(['target_language' => 'fr', 'current_level' => CefrLevel::A1]);
+        $assessment = $this->assessmentFor($user);
+
+        $audio = $this->audioStore();
+        $audio->shouldNotReceive('delete');
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        try {
+            $this->runJob($assessment, $this->assessorReturning($this->b1Result()), $audio, $broadcasts);
+            $this->fail('Expected exception was not thrown.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('No grammar points are catalogued for `fr`', $exception->getMessage());
+        }
+
+        $this->assertSame(AssessmentStatus::Processing, $assessment->fresh()->status);
+        $this->assertSame(CefrLevel::A1, $user->fresh()->current_level);
+        $broadcasts->shouldNotHaveReceived('broadcast');
+    }
+
     private function runJob(
         Assessment $assessment,
         CefrAssessor $assessor,

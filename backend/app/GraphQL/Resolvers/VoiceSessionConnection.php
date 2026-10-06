@@ -21,8 +21,12 @@ final class VoiceSessionConnection
     /**
      * @param  array<string, mixed>  $args
      */
-    public function token(VoiceSession $session, array $args): string
+    public function token(VoiceSession $session, array $args): ?string
     {
+        if ($session->status->isTerminal()) {
+            return null;
+        }
+
         return $this->tokens->participant(
             roomName: $session->room_name,
             // Opaque on purpose: LiveKit records identities in its own logs and

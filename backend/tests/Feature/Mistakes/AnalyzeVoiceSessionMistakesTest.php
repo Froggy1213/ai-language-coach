@@ -276,6 +276,34 @@ class AnalyzeVoiceSessionMistakesTest extends TestCase
         $job->handle($analyzer, $broadcasts);
 
         $this->assertDatabaseCount('mistakes', 0);
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(SessionFeedbackReady::class),
+                'sessionFeedbackReady',
+                Mockery::on(static fn ($root): bool => $root instanceof VoiceSession && $root->id === $session->id),
+            );
+    }
+
+    public function test_failed_reports_and_broadcasts_session_feedback_ready(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+        ]);
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->failed(new \RuntimeException('Analysis timed out'), $broadcasts);
+
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(SessionFeedbackReady::class),
+                'sessionFeedbackReady',
+                Mockery::on(static fn ($root): bool => $root instanceof VoiceSession && $root->id === $session->id),
+            );
     }
 
     public function test_an_invalid_model_response_fails_the_job_loudly(): void

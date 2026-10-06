@@ -1,15 +1,20 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent import (
     TurnMetricsTracker,
     build_cloudwatch_turn_log,
+    build_system_prompt,
     build_turn_payload,
     compute_total_turnaround,
+    create_stt,
     extract_metric_info,
     extract_user_transcript,
+    entrypoint,
+    prewarm,
+    report_session_failure,
     to_ms,
 )
 
@@ -179,9 +184,10 @@ class TestTurnMetrics(unittest.TestCase):
         self.assertEqual(info["tts_first_chunk_sec"], 0.18)
 
     def test_extract_metric_info_stt(self):
+        # STTMetrics.duration represents audio duration, not latency, and is no longer used as stt_final_sec
         m = DummyMetric(type="stt_metrics", speech_id="speech-stt", duration=0.62)
         info = extract_metric_info(m)
-        self.assertEqual(info["stt_final_sec"], 0.62)
+        self.assertIsNone(info["stt_final_sec"])
 
     def test_extract_metric_info_degraded_metric(self):
         # Empty metric with unknown attributes should degrade to None fields
@@ -353,6 +359,207 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             # Must not be treated as a conversational turn using stale "User statement 1"
             self.assertEqual(len(dispatched_payloads), 1)
             self.assertNotIn("unprompted-say", tracker.pending_turns)
+
+    async def test_delayed_flush_dispatches_turn_without_self_cancellation(self):
+        tracker = TurnMetricsTracker(session_id=99, flush_delay=0.02)
+        tracker.on_user_speech("Checking delayed flush")
+
+        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+            # EOU arrives without TTS -> schedules delayed flush
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-delayed", end_of_utterance_delay=0.30)
+            )
+
+            self.assertIn("turn-delayed", tracker._flush_tasks)
+
+            # Wait for delayed flush timer to fire
+            await asyncio.sleep(0.05)
+
+            # Assert report_session_turn was awaited and not cancelled
+            mock_report.assert_awaited_once()
+            called_session_id, payload = mock_report.await_args.args
+            self.assertEqual(called_session_id, 99)
+            self.assertEqual(payload["turn_id"], "turn-delayed")
+            self.assertEqual(payload["transcript"], "Checking delayed flush")
+            self.assertEqual(payload["stt_final"], 300.0)
+            self.assertIsNone(payload["tts_first_chunk"])
+            self.assertNotIn("turn-delayed", tracker.pending_turns)
+
+    def test_record_completed_turn_id_deque_eviction(self):
+        tracker = TurnMetricsTracker(session_id=1)
+        for i in range(10):
+            tracker._record_completed_turn_id(f"turn-{i}", max_size=5)
+
+        self.assertEqual(len(tracker._completed_turn_ids), 5)
+        self.assertEqual(len(tracker._completed_turn_order), 5)
+        self.assertEqual(list(tracker._completed_turn_order), [f"turn-{i}" for i in range(5, 10)])
+        for i in range(5):
+            self.assertNotIn(f"turn-{i}", tracker._completed_turn_ids)
+        for i in range(5, 10):
+            self.assertIn(f"turn-{i}", tracker._completed_turn_ids)
+
+
+class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
+    def _create_mock_session_and_aiohttp(self, responses_or_effects):
+        mock_session = MagicMock()
+        side_effects = []
+        for item in responses_or_effects:
+            if isinstance(item, Exception):
+                side_effects.append(item)
+            else:
+                cm = MagicMock()
+                cm.__aenter__ = AsyncMock(return_value=item)
+                cm.__aexit__ = AsyncMock(return_value=None)
+                side_effects.append(cm)
+        mock_session.post.side_effect = side_effects
+
+        mock_aiohttp = MagicMock()
+        mock_aiohttp.ClientSession.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_aiohttp.ClientSession.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_aiohttp.ClientTimeout = MagicMock()
+        return mock_session, mock_aiohttp
+
+    async def test_report_session_failure_200(self):
+        mock_resp = AsyncMock(status=200)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp):
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 1)
+
+    async def test_report_session_failure_404_accepted_no_retry(self):
+        mock_resp = AsyncMock(status=404)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp):
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 1)
+
+    async def test_report_session_failure_500_retries_once(self):
+        mock_500 = AsyncMock(status=500)
+        mock_200 = AsyncMock(status=200)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_500, mock_200])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 2)
+            mock_sleep.assert_awaited_once_with(0.5)
+
+    async def test_report_session_failure_network_error_retries_once(self):
+        mock_200 = AsyncMock(status=200)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([Exception("network down"), mock_200])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 2)
+            mock_sleep.assert_awaited_once_with(0.5)
+
+    async def test_report_session_failure_422_no_retry(self):
+        mock_resp = AsyncMock(status=422)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp):
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 1)
+
+
+class TestMetadataAndPipeline(unittest.TestCase):
+    def test_build_system_prompt_coercion(self):
+        prompt = build_system_prompt({
+            "target_language": None,
+            "level": "",
+            "grammar_point": None,
+            "practice_prompt": None,
+        })
+        self.assertIn("Target Language: en", prompt)
+        self.assertIn("Student CEFR Level: A2", prompt)
+        self.assertIn("Target Grammar Point: General conversation", prompt)
+
+    def test_create_stt_coercion(self):
+        mock_dg = MagicMock()
+        with patch("agent.deepgram", mock_dg):
+            create_stt({"target_language": None})
+            mock_dg.STT.assert_called_once_with(model="nova-2", language="en")
+
+    def test_prewarm(self):
+        mock_proc = DummyMetric(userdata={})
+        mock_silero = MagicMock()
+        mock_silero.VAD.load.return_value = "fake_vad"
+        with patch("agent.silero", mock_silero):
+            prewarm(mock_proc)
+            self.assertEqual(mock_proc.userdata["vad"], "fake_vad")
+
+
+class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
+    async def test_entrypoint_vad_failure(self):
+        ctx = MagicMock()
+        ctx.job.metadata = '{"session_id": "42"}'
+        ctx.connect = AsyncMock()
+        ctx.proc.userdata = None
+
+        mock_silero = MagicMock()
+        mock_silero.VAD.load.side_effect = Exception("vad load failed")
+
+        with patch("agent.silero", mock_silero), \
+             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(42, "agent_error")
+
+    async def test_entrypoint_stt_failure(self):
+        ctx = MagicMock()
+        ctx.job.metadata = '{"session_id": "42"}'
+        ctx.connect = AsyncMock()
+        ctx.proc.userdata.get.return_value = "fake_vad"
+
+        with patch("agent.create_stt", side_effect=Exception("stt creation failed")), \
+             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(42, "stt_failed")
+
+    async def test_entrypoint_llm_failure(self):
+        ctx = MagicMock()
+        ctx.job.metadata = '{"session_id": 42}'
+        ctx.connect = AsyncMock()
+        ctx.proc.userdata.get.return_value = "fake_vad"
+
+        with patch("agent.create_stt", return_value="fake_stt"), \
+             patch("agent.create_llm", side_effect=Exception("llm creation failed")), \
+             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(42, "llm_failed")
+
+    async def test_entrypoint_tts_failure(self):
+        ctx = MagicMock()
+        ctx.job.metadata = '{"session_id": "42"}'
+        ctx.connect = AsyncMock()
+        ctx.proc.userdata.get.return_value = "fake_vad"
+
+        with patch("agent.create_stt", return_value="fake_stt"), \
+             patch("agent.create_llm", return_value="fake_llm"), \
+             patch("agent.create_tts", side_effect=Exception("tts creation failed")), \
+             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(42, "tts_failed")
+
+    async def test_entrypoint_non_dict_metadata(self):
+        ctx = MagicMock()
+        ctx.job.metadata = '["a", "b", "c"]'
+        ctx.connect = AsyncMock()
+        ctx.proc.userdata.get.return_value = "fake_vad"
+
+        with patch("agent.create_stt", return_value="fake_stt"), \
+             patch("agent.create_llm", return_value="fake_llm"), \
+             patch("agent.create_tts", side_effect=Exception("tts error")), \
+             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(None, "tts_failed")
 
 
 if __name__ == "__main__":

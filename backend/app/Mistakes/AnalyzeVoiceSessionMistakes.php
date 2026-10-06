@@ -61,6 +61,14 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
 
         $utterances = $this->extractLearnerUtterances($session);
         if (empty($utterances)) {
+            $this->markAnalyzed($session, 0);
+
+            try {
+                $broadcasts->broadcast(new SessionFeedbackReady, 'sessionFeedbackReady', $session->fresh());
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+
             return;
         }
 
@@ -172,5 +180,29 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
 
         $session->transcript = array_values($transcript);
         $session->save();
+    }
+
+    /**
+     * Called once the attempts are exhausted. Reports the exception and broadcasts
+     * sessionFeedbackReady so a waiting client does not hang.
+     */
+    public function failed(?Throwable $exception = null, ?BroadcastsSubscriptions $broadcasts = null): void
+    {
+        if ($exception !== null) {
+            report($exception);
+        }
+
+        $session = $this->session->fresh();
+
+        if (! $session instanceof VoiceSession) {
+            return;
+        }
+
+        try {
+            $broadcasts ??= app(BroadcastsSubscriptions::class);
+            $broadcasts->broadcast(new SessionFeedbackReady, 'sessionFeedbackReady', $session);
+        } catch (Throwable $broadcastException) {
+            report($broadcastException);
+        }
     }
 }

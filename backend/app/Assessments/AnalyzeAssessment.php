@@ -70,7 +70,13 @@ final class AnalyzeAssessment implements ShouldQueue
         $transcription = $transcriber->transcribe($recording, $user->target_language);
         $result = $assessor->assess($transcription, $user);
 
-        DB::transaction(function () use ($assessment, $user, $transcription, $result): void {
+        DB::transaction(function () use ($assessment, $user, $transcription, $result, $roadmaps): void {
+            $user->forceFill(['current_level' => $result->level])->save();
+
+            // The roadmap follows the level the analysis settled on. Regenerating
+            // archives the previous plan rather than deleting it.
+            $roadmaps->regenerate($user->refresh());
+
             $assessment->update([
                 'status' => AssessmentStatus::Done,
                 'cefr_level' => $result->level,
@@ -80,13 +86,7 @@ final class AnalyzeAssessment implements ShouldQueue
                     'analysis' => $result->toArray(),
                 ]),
             ]);
-
-            $user->update(['current_level' => $result->level]);
         });
-
-        // The roadmap follows the level the analysis settled on. Regenerating
-        // archives the previous plan rather than deleting it.
-        $roadmaps->regenerate($user->refresh());
 
         // Privacy (plan §5): the recording is kept no longer than the STT pass
         // needs it. Deliberately last — a failure above must leave the audio in

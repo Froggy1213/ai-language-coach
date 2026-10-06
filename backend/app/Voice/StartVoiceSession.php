@@ -9,9 +9,11 @@ use App\Models\User;
 use App\Models\VoiceSession;
 use GraphQL\Error\Error;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Sleep;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 
@@ -26,7 +28,6 @@ final class StartVoiceSession
 {
     public function __construct(
         private readonly LiveKitApi $api,
-        private readonly LiveKitToken $tokens,
     ) {}
 
     /**
@@ -82,9 +83,18 @@ final class StartVoiceSession
      */
     private function currentSession(User $user, LessonCard $card): ?VoiceSession
     {
+        $staleThreshold = (float) config('voice.agent.join_timeout_seconds') + 30.0;
+        $staleBefore = Date::now()->subSeconds($staleThreshold);
+
         return $user->voiceSessions()
             ->where('lesson_card_id', $card->getKey())
-            ->whereIn('status', [VoiceSessionStatus::Pending, VoiceSessionStatus::Active])
+            ->where(function (Builder $query) use ($staleBefore): void {
+                $query->where('status', VoiceSessionStatus::Active)
+                    ->orWhere(function (Builder $query) use ($staleBefore): void {
+                        $query->where('status', VoiceSessionStatus::Pending)
+                            ->where('created_at', '>=', $staleBefore);
+                    });
+            })
             ->latest('id')
             ->first();
     }
@@ -101,6 +111,18 @@ final class StartVoiceSession
                 // session limit or open duplicate rooms for the same card.
                 User::query()->whereKey($user->getKey())->lockForUpdate()->first();
 
+                $staleThreshold = (float) config('voice.agent.join_timeout_seconds') + 30.0;
+                $staleBefore = Date::now()->subSeconds($staleThreshold);
+
+                $user->voiceSessions()
+                    ->where('lesson_card_id', $card->getKey())
+                    ->where('status', VoiceSessionStatus::Pending)
+                    ->where('created_at', '<', $staleBefore)
+                    ->update([
+                        'status' => VoiceSessionStatus::Failed,
+                        'fail_reason' => 'voice_start_stale',
+                    ]);
+
                 // Re-check idempotency under lock in case a concurrent request won the race.
                 if ($existing = $this->currentSession($user, $card)) {
                     return $existing;
@@ -113,7 +135,7 @@ final class StartVoiceSession
                 $session = $user->voiceSessions()->create([
                     'lesson_card_id' => $card->getKey(),
                     'status' => VoiceSessionStatus::Pending,
-                    'room_name' => '',
+                    'room_name' => 'pending-'.Str::ulid(),
                 ]);
 
                 $session->room_name = 'lesson-'.$session->getKey();
@@ -223,8 +245,12 @@ final class StartVoiceSession
         $deadline = Date::now()->addSeconds($timeout);
 
         while (Date::now()->lessThan($deadline)) {
-            if ($this->api->participants($roomName) !== []) {
-                return;
+            try {
+                if ($this->api->participants($roomName) !== []) {
+                    return;
+                }
+            } catch (ConnectionException) {
+                // Transient connection error during polling; continue polling until deadline.
             }
 
             Sleep::usleep($interval * 1000);

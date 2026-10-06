@@ -11,6 +11,7 @@ use App\Models\VoiceSession;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use Laravel\Sanctum\Sanctum;
@@ -206,6 +207,59 @@ class RequestVoiceTokenTest extends TestCase
             VoiceSessionStatus::Active,
             VoiceSession::query()->latest('id')->firstOrFail()->status,
         );
+    }
+
+    public function test_a_stale_pending_session_is_marked_failed_and_does_not_block_new_attempt(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+
+        // join_timeout_seconds is 5.0, threshold is 5 + 30 = 35 seconds.
+        // A pending session older than 35s is stale.
+        $staleSession = VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Pending,
+            'created_at' => now()->subSeconds(45),
+        ]);
+
+        Sanctum::actingAs($user);
+        $this->fakeLiveKit(agentJoins: true);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+        $response->assertGraphQLErrorFree();
+
+        $this->assertSame(2, VoiceSession::query()->count());
+        $this->assertSame(VoiceSessionStatus::Failed, $staleSession->fresh()->status);
+        $this->assertSame('voice_start_stale', $staleSession->fresh()->fail_reason);
+
+        $newSession = VoiceSession::query()->latest('id')->firstOrFail();
+        $this->assertSame(VoiceSessionStatus::Active, $newSession->status);
+        $this->assertSame((string) $newSession->getKey(), $response->json('data.requestVoiceToken.id'));
+    }
+
+    public function test_wait_for_agent_tolerates_transient_connection_exception(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        Sanctum::actingAs($user);
+
+        $attempt = 0;
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
+            'livekit.test/twirp/livekit.AgentDispatchService/CreateDispatch' => Http::response(['id' => 'dispatch-1']),
+            'livekit.test/twirp/livekit.RoomService/ListParticipants' => function () use (&$attempt) {
+                $attempt++;
+                if ($attempt === 1) {
+                    throw new ConnectionException('Connection reset by peer');
+                }
+
+                return Http::response(['participants' => [['identity' => 'agent-1', 'kind' => 'AGENT']]]);
+            },
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame(VoiceSessionStatus::Active->value, $response->json('data.requestVoiceToken.status'));
     }
 
     public function test_a_finished_session_does_not_block_a_new_one(): void

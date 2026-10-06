@@ -3,11 +3,13 @@
 namespace Tests\Feature\Voice;
 
 use App\Enums\VoiceSessionStatus;
+use App\Mistakes\AnalyzeVoiceSessionMistakes;
 use App\Models\LessonCard;
 use App\Models\Roadmap;
 use App\Models\User;
 use App\Models\VoiceSession;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -170,6 +172,8 @@ class RecordVoiceSessionTurnTest extends TestCase
 
     public function test_accepts_turn_on_a_terminal_session_without_changing_status(): void
     {
+        Queue::fake();
+
         $session = $this->sessionWithStatus(VoiceSessionStatus::Completed);
 
         $this->recordTurn($session->getKey(), [
@@ -185,6 +189,7 @@ class RecordVoiceSessionTurnTest extends TestCase
         $this->assertSame(VoiceSessionStatus::Completed, $session->status);
         $this->assertCount(1, $session->transcript);
         $this->assertSame('final-turn', $session->transcript[0]['turn_id']);
+        Queue::assertPushed(AnalyzeVoiceSessionMistakes::class, 1);
     }
 
     public function test_an_unknown_session_yields_404(): void
@@ -248,6 +253,12 @@ class RecordVoiceSessionTurnTest extends TestCase
         $this->recordTurn($session->getKey(), [
             'turn_id' => ['nested' => 'array'],
         ])->assertJsonValidationErrors('turn_id');
+
+        $this->recordTurn($session->getKey(), [
+            'turn_id' => null,
+            'speech_id' => null,
+            'stt_final' => 200.0,
+        ])->assertStatus(422)->assertJsonValidationErrors('turn_id');
     }
 
     public function test_accepts_speech_id_as_alias_for_turn_id(): void

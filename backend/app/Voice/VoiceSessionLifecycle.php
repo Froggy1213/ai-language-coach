@@ -5,6 +5,7 @@ namespace App\Voice;
 use App\Enums\VoiceSessionStatus;
 use App\Mistakes\AnalyzeVoiceSessionMistakes;
 use App\Models\VoiceSession;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -79,14 +80,8 @@ final class VoiceSessionLifecycle
      */
     public function failed(int $sessionId, string $reason): bool
     {
-        $session = VoiceSession::query()->find($sessionId);
-
-        if (! $session instanceof VoiceSession) {
-            return false;
-        }
-
-        return $this->transition(
-            $session->room_name,
+        return $this->transitionById(
+            $sessionId,
             from: [VoiceSessionStatus::Pending, VoiceSessionStatus::Active],
             to: VoiceSessionStatus::Failed,
             attributes: ['fail_reason' => $reason],
@@ -139,6 +134,17 @@ final class VoiceSessionLifecycle
             $session->transcript = array_values($transcript);
             $session->save();
 
+            $turnTranscript = trim((string) ($turn['transcript'] ?? ''));
+            $isLearnerUtterance = ($turnTranscript !== '') && (($turn['type'] ?? null) !== 'analysis');
+
+            if ($session->status->isTerminal()
+                && $isLearnerUtterance
+                && ! $session->mistakes()->exists()
+                && ! $this->isAlreadyAnalyzed($session)
+            ) {
+                AnalyzeVoiceSessionMistakes::dispatch($session)->afterCommit();
+            }
+
             return true;
         });
     }
@@ -150,11 +156,39 @@ final class VoiceSessionLifecycle
      */
     private function transition(string $roomName, array $from, VoiceSessionStatus $to, array $attributes = []): bool
     {
-        return DB::transaction(function () use ($roomName, $from, $to, $attributes): bool {
-            $session = VoiceSession::query()
-                ->where('room_name', $roomName)
-                ->lockForUpdate()
-                ->first();
+        return $this->applyTransition(
+            VoiceSession::query()->where('room_name', $roomName),
+            $from,
+            $to,
+            $attributes,
+        );
+    }
+
+    /**
+     * @param  list<VoiceSessionStatus>  $from
+     * @param  array<string, mixed>  $attributes
+     * @return bool whether this delivery is the one that applied the transition
+     */
+    private function transitionById(int $sessionId, array $from, VoiceSessionStatus $to, array $attributes = []): bool
+    {
+        return $this->applyTransition(
+            VoiceSession::query()->where('id', $sessionId),
+            $from,
+            $to,
+            $attributes,
+        );
+    }
+
+    /**
+     * @param  Builder<VoiceSession>  $query
+     * @param  list<VoiceSessionStatus>  $from
+     * @param  array<string, mixed>  $attributes
+     * @return bool whether this delivery is the one that applied the transition
+     */
+    private function applyTransition(Builder $query, array $from, VoiceSessionStatus $to, array $attributes = []): bool
+    {
+        return DB::transaction(function () use ($query, $from, $to, $attributes): bool {
+            $session = $query->lockForUpdate()->first();
 
             if (! $session instanceof VoiceSession || ! in_array($session->status, $from, true)) {
                 return false;
@@ -165,17 +199,38 @@ final class VoiceSessionLifecycle
             $session->save();
 
             if ($to->isTerminal() && $this->hasLearnerUtterances($session)) {
-                AnalyzeVoiceSessionMistakes::dispatch($session)->afterCommit();
+                $delay = (int) config('voice.mistake_analysis_delay_seconds', 10);
+                $pending = AnalyzeVoiceSessionMistakes::dispatch($session);
+                if ($delay > 0) {
+                    $pending->delay(now()->addSeconds($delay));
+                }
+                $pending->afterCommit();
             }
 
             return true;
         });
     }
 
+    private function isAlreadyAnalyzed(VoiceSession $session): bool
+    {
+        $transcript = $session->transcript;
+        if (! is_array($transcript)) {
+            return false;
+        }
+
+        foreach ($transcript as $item) {
+            if (is_array($item) && ($item['type'] ?? null) === 'analysis') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function hasLearnerUtterances(VoiceSession $session): bool
     {
         $transcript = $session->transcript;
-        if (! is_array($transcript) || empty($transcript)) {
+        if (! is_array($transcript)) {
             return false;
         }
 

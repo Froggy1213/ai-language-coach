@@ -57,7 +57,7 @@ class GenerateRoadmapCommandTest extends TestCase
 
         $this->assertDatabaseCount('roadmaps', 1);
 
-        $user->update(['current_level' => CefrLevel::B1]);
+        $user->forceFill(['current_level' => CefrLevel::B1])->save();
         $this->artisan('roadmap:generate', ['user' => $user->email, '--regenerate' => true])->assertSuccessful();
 
         $this->assertDatabaseCount('roadmaps', 2);

@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ try:
     from livekit.agents import (
         AutoSubscribe,
         JobContext,
+        JobProcess,
         WorkerOptions,
         cli,
         metrics,
@@ -31,6 +33,7 @@ try:
 except ImportError:
     AutoSubscribe = None  # type: ignore
     JobContext = Any  # type: ignore
+    JobProcess = Any  # type: ignore
     WorkerOptions = None  # type: ignore
     cli = None  # type: ignore
     metrics = None  # type: ignore
@@ -111,22 +114,63 @@ async def report_session_failure(session_id: Optional[int], reason: str) -> None
         "Accept": "application/json",
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                endpoint,
-                json={"reason": payload_reason},
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as response:
-                logger.info(
-                    "Failure reported to backend for session %s (reason: %s): HTTP %s",
+    max_retries = 1
+    for attempt in range(max_retries + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint,
+                    json={"reason": payload_reason},
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    status = response.status
+                    if 200 <= status < 300:
+                        logger.info(
+                            "Failure reported to backend for session %s (reason: %s): HTTP %s",
+                            session_id,
+                            payload_reason,
+                            status,
+                        )
+                        return
+                    elif status == 404:
+                        logger.info(
+                            "Session %s already terminal on backend (HTTP 404)",
+                            session_id,
+                        )
+                        return
+                    elif status >= 500:
+                        if attempt < max_retries:
+                            logger.warning(
+                                "Backend error reporting failure for session %s: HTTP %s; retrying...",
+                                session_id,
+                                status,
+                            )
+                            await asyncio.sleep(0.5)
+                            continue
+                        logger.error(
+                            "Backend error reporting failure for session %s: HTTP %s",
+                            session_id,
+                            status,
+                        )
+                        return
+                    else:
+                        logger.warning(
+                            "Backend rejected failure report for session %s: HTTP %s",
+                            session_id,
+                            status,
+                        )
+                        return
+        except Exception as exc:
+            if attempt < max_retries:
+                logger.warning(
+                    "Network error notifying backend about session %s failure: %s; retrying...",
                     session_id,
-                    payload_reason,
-                    response.status,
+                    exc,
                 )
-    except Exception as exc:
-        logger.error("Failed to notify backend about session %s failure: %s", session_id, exc)
+                await asyncio.sleep(0.5)
+                continue
+            logger.error("Failed to notify backend about session %s failure: %s", session_id, exc)
 
 
 def to_ms(val_in_seconds: Optional[float]) -> Optional[float]:
@@ -345,18 +389,6 @@ def extract_metric_info(m: Any) -> Dict[str, Any]:
         if delays:
             info["stt_final_sec"] = max(delays)
 
-    # In LiveKit 1.8.4, STTMetrics does not carry speech_id and is dropped by TurnMetricsTracker
-    # (Finding 2), but we defensively support extracting duration if speech_id is present.
-    if "stt" in metric_type or type(m).__name__ == "STTMetrics":
-        if info["stt_final_sec"] is None:
-            dur = getattr(m, "duration", None)
-            if dur is not None:
-                try:
-                    dur_f = float(dur)
-                    if dur_f >= 0:
-                        info["stt_final_sec"] = dur_f
-                except (ValueError, TypeError):
-                    pass
 
     # LLM metrics: ttft (time to first token)
     if "llm" in metric_type or hasattr(m, "ttft") or type(m).__name__ == "LLMMetrics":
@@ -441,15 +473,31 @@ class TurnMetricsTracker:
     Correlates stages using speech_id, flushes to backend and CloudWatch structured logging.
     """
 
-    def __init__(self, session_id: Optional[int]):
+    def __init__(self, session_id: Optional[int], flush_delay: float = 2.0):
         self.session_id = session_id
+        self.flush_delay = flush_delay
         self.pending_turns: Dict[str, Dict[str, Any]] = {}
         self.last_user_transcript: Optional[str] = None
         self._flush_tasks: Dict[str, asyncio.Task] = {}
+        self._background_tasks: set[asyncio.Task] = set()
         # Keep a bounded set of completed turn IDs to ignore duplicate/late TTS metrics
         # across multi-sentence replies and prevent memory leaks.
         self._completed_turn_ids: set = set()
-        self._completed_turn_order: list = []
+        self._completed_turn_order: deque = deque()
+
+    def _create_background_task(self, coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+        def _log_task_exception(t: asyncio.Task) -> None:
+            if not t.cancelled():
+                exc = t.exception()
+                if exc:
+                    logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_log_task_exception)
+        return task
 
     def on_user_speech(self, text: Optional[str]) -> None:
         if not text:
@@ -468,7 +516,7 @@ class TurnMetricsTracker:
             self._completed_turn_ids.add(speech_id)
             self._completed_turn_order.append(speech_id)
             if len(self._completed_turn_order) > max_size:
-                oldest = self._completed_turn_order.pop(0)
+                oldest = self._completed_turn_order.popleft()
                 self._completed_turn_ids.discard(oldest)
 
     def handle_metric(self, m: Any) -> None:
@@ -529,31 +577,34 @@ class TurnMetricsTracker:
                 turn["tts_first_chunk_sec"] = info["tts_first_chunk_sec"]
                 # When TTS first chunk arrives, the turnaround cycle is complete.
                 self._cancel_delayed_flush(speech_id)
-                asyncio.create_task(self._dispatch_turn(speech_id))
+                self._create_background_task(self._dispatch_turn(speech_id))
             else:
                 logger.debug(
                     "Ignoring subsequent TTS chunk for speech_id=%s (first TTFB wins)",
                     speech_id,
                 )
         elif turn["tts_first_chunk_sec"] is None and speech_id not in self._flush_tasks:
-            self._schedule_delayed_flush(speech_id, delay=2.0)
+            self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
 
-    def _schedule_delayed_flush(self, speech_id: str, delay: float) -> None:
+    def _schedule_delayed_flush(self, speech_id: str, delay: Optional[float] = None) -> None:
         if speech_id in self._flush_tasks:
             return
 
+        flush_delay = self.flush_delay if delay is None else delay
+
         async def _flush_after_delay() -> None:
             try:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(flush_delay)
                 await self._dispatch_turn(speech_id)
             except asyncio.CancelledError:
                 pass
 
-        self._flush_tasks[speech_id] = asyncio.create_task(_flush_after_delay())
+        task = self._create_background_task(_flush_after_delay())
+        self._flush_tasks[speech_id] = task
 
     def _cancel_delayed_flush(self, speech_id: str) -> None:
         task = self._flush_tasks.pop(speech_id, None)
-        if task and not task.done():
+        if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
 
     async def _dispatch_turn(self, speech_id: str) -> None:
@@ -602,11 +653,11 @@ class TurnMetricsTracker:
 
 
 def build_system_prompt(metadata: Dict[str, Any]) -> str:
-    target_language = metadata.get("target_language", "en")
-    level = metadata.get("level", "A2")
-    grammar_point = metadata.get("grammar_point", "General conversation")
-    practice_prompt = metadata.get(
-        "practice_prompt", "Have a friendly conversation to practice language fluency."
+    target_language = str(metadata.get("target_language") or "en")
+    level = str(metadata.get("level") or "A2")
+    grammar_point = str(metadata.get("grammar_point") or "General conversation")
+    practice_prompt = str(
+        metadata.get("practice_prompt") or "Have a friendly conversation to practice language fluency."
     )
 
     return f"""You are an expert, empathetic AI Language Coach.
@@ -628,7 +679,7 @@ Guidelines:
 
 
 def create_stt(metadata: Dict[str, Any]):
-    target_lang = metadata.get("target_language", "en").lower()
+    target_lang = str(metadata.get("target_language") or "en").lower()
     lang = "en" if target_lang.startswith("en") else target_lang
     return deepgram.STT(model="nova-2", language=lang)
 
@@ -683,6 +734,10 @@ def create_tts():
     raise ValueError("No valid TTS provider configured (set CARTESIA_API_KEY, DEEPGRAM_API_KEY, or OPENAI_API_KEY)")
 
 
+def prewarm(proc: JobProcess):
+    proc.userdata["vad"] = silero.VAD.load()
+
+
 async def entrypoint(ctx: JobContext):
     logger.info("Starting voice agent job for room: %s", ctx.room.name)
 
@@ -690,19 +745,33 @@ async def entrypoint(ctx: JobContext):
     metadata: Dict[str, Any] = {}
     if ctx.job.metadata:
         try:
-            metadata = json.loads(ctx.job.metadata)
+            parsed = json.loads(ctx.job.metadata)
+            if isinstance(parsed, dict):
+                metadata = parsed
+            else:
+                logger.warning("Decoded job metadata is not a dict: %r", parsed)
+                metadata = {}
             logger.info("Received session metadata: %s", metadata)
         except json.JSONDecodeError as err:
             logger.warning("Failed to decode job metadata JSON: %s", err)
+            metadata = {}
 
-    session_id = metadata.get("session_id")
-    grammar_point = metadata.get("grammar_point", "General practice")
-    practice_prompt = metadata.get("practice_prompt", "Let's practice speaking.")
+    raw_session_id = metadata.get("session_id")
+    session_id: Optional[int] = None
+    if raw_session_id is not None:
+        try:
+            session_id = int(raw_session_id)
+        except (ValueError, TypeError):
+            session_id = None
+
+    grammar_point = str(metadata.get("grammar_point") or "General practice")
+    practice_prompt = str(metadata.get("practice_prompt") or "Let's practice speaking.")
 
     # 2. Connect worker to LiveKit room
     # This announces participant kind=AGENT to the room, which unblocks StartVoiceSession
     try:
-        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        auto_sub = getattr(AutoSubscribe, "AUDIO_ONLY", None)
+        await ctx.connect(auto_subscribe=auto_sub)
         logger.info("Agent successfully connected to room %s as AGENT", ctx.room.name)
     except Exception as exc:
         logger.error("Failed to connect to LiveKit room %s: %s", ctx.room.name, exc)
@@ -711,14 +780,33 @@ async def entrypoint(ctx: JobContext):
 
     # 3. Instantiate voice pipeline components
     try:
-        vad = silero.VAD.load()
+        vad = ctx.proc.userdata.get("vad") if hasattr(ctx, "proc") and hasattr(ctx.proc, "userdata") and ctx.proc.userdata is not None else None
+        if vad is None:
+            vad = silero.VAD.load()
+    except Exception as exc:
+        logger.error("Failed to load VAD: %s", exc)
+        await report_session_failure(session_id, "agent_error")
+        return
+
+    try:
         stt = create_stt(metadata)
+    except Exception as exc:
+        logger.error("Failed to initialize STT: %s", exc)
+        await report_session_failure(session_id, "stt_failed")
+        return
+
+    try:
         llm_instance = create_llm()
+    except Exception as exc:
+        logger.error("Failed to initialize LLM: %s", exc)
+        await report_session_failure(session_id, "llm_failed")
+        return
+
+    try:
         tts = create_tts()
     except Exception as exc:
-        logger.error("Failed to initialize pipeline components: %s", exc)
-        reason = "stt_failed" if "deepgram" in str(exc).lower() else "llm_failed"
-        await report_session_failure(session_id, reason)
+        logger.error("Failed to initialize TTS: %s", exc)
+        await report_session_failure(session_id, "tts_failed")
         return
 
     instructions = build_system_prompt(metadata)
@@ -828,6 +916,7 @@ if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
             agent_name=agent_name,
         )
     )

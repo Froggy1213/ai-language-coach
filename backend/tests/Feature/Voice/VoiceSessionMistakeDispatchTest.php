@@ -149,4 +149,48 @@ class VoiceSessionMistakeDispatchTest extends TestCase
 
         Queue::assertPushed(AnalyzeVoiceSessionMistakes::class, 1);
     }
+
+    public function test_it_dispatches_when_late_turn_arrives_on_already_terminal_session(): void
+    {
+        Queue::fake();
+
+        $session = VoiceSession::factory()->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [],
+        ]);
+
+        $applied = (new VoiceSessionLifecycle)->recordTurn($session->id, [
+            'turn_id' => 'late-turn',
+            'transcript' => 'A late learner utterance.',
+        ]);
+
+        $this->assertTrue($applied);
+        Queue::assertPushed(AnalyzeVoiceSessionMistakes::class, 1);
+    }
+
+    public function test_it_does_not_dispatch_when_late_turn_arrives_on_already_analyzed_session(): void
+    {
+        Queue::fake();
+
+        $session = VoiceSession::factory()->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['type' => 'analysis', 'mistakes_count' => 0],
+            ],
+        ]);
+
+        $applied = (new VoiceSessionLifecycle)->recordTurn($session->id, [
+            'turn_id' => 'late-turn-2',
+            'transcript' => 'Another late utterance.',
+        ]);
+
+        $this->assertTrue($applied);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_failed_returns_false_when_session_id_does_not_exist(): void
+    {
+        $applied = (new VoiceSessionLifecycle)->failed(999999, 'error_reason');
+        $this->assertFalse($applied);
+    }
 }

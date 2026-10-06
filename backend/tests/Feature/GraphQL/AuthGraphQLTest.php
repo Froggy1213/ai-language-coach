@@ -171,4 +171,42 @@ class AuthGraphQLTest extends TestCase
         ', [], [], self::SPA_HEADERS)
             ->assertCookie(config('session.cookie'));
     }
+
+    public function test_login_is_throttled_after_ten_attempts(): void
+    {
+        $user = User::factory()->create(['password' => 'secret-password']);
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->graphQL(/** @lang GraphQL */ '
+                mutation {
+                    login(email: "'.$user->email.'", password: "secret-password") { id }
+                }
+            ', [], [], self::SPA_HEADERS)->assertGraphQLErrorFree();
+        }
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                login(email: "'.$user->email.'", password: "secret-password") { id }
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorMessage('Rate limit for Mutation.login exceeded. Try again later.');
+    }
+
+    public function test_logout_deletes_personal_access_token_when_authenticated_by_token(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api-token');
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                logout
+            }
+        ', [], [], ['Authorization' => 'Bearer '.$token->plainTextToken])
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.logout', true);
+
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'id' => $token->accessToken->id,
+        ]);
+    }
 }

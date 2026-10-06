@@ -34,11 +34,13 @@ type Query {
 type Mutation {
     "Sign in and start a session (Sanctum SPA cookie)."
     login(email: String!, password: String!): User!
+        @throttle(maxAttempts: 10, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\Login")
         @validator(class: "App\\GraphQL\\Validators\\LoginValidator")
 
     "Create an account and sign in."
     register(name: String!, email: String!, password: String!, targetLanguage: String!): User!
+        @throttle(maxAttempts: 5, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\Register")
         @validator(class: "App\\GraphQL\\Validators\\RegisterValidator")
 
@@ -124,6 +126,7 @@ type Subscription {
         "Whose assessment to watch; must be the authenticated user."
         userId: ID!
     ): Assessment
+        @guard
         @subscription(class: "App\\GraphQL\\Subscriptions\\AssessmentReady")
 
     """
@@ -135,6 +138,7 @@ type Subscription {
         "The voice session to watch; must belong to the authenticated user."
         sessionId: ID!
     ): VoiceSession
+        @guard
         @subscription(class: "App\\GraphQL\\Subscriptions\\SessionFeedbackReady")
 }
 

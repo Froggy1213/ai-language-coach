@@ -44,6 +44,10 @@ final class LiveKitWebhook
             throw InvalidWebhookSignature::unverifiable($exception);
         }
 
+        if (! isset($claims['exp']) || ! is_int($claims['exp'])) {
+            throw InvalidWebhookSignature::unverifiable(new \UnexpectedValueException('Missing or invalid exp claim.'));
+        }
+
         // The token must be one *we* issued: a token signed with the secret but
         // minted for a different LiveKit project would otherwise pass.
         if (($claims['iss'] ?? null) !== $apiKey) {

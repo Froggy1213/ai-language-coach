@@ -9,6 +9,7 @@ const cardId = computed(() => String(route.params.cardId))
 
 const { data, fetching, error: queryError } = useQuery<{ roadmap: Roadmap | null }>({
   query: ROADMAP_QUERY,
+  requestPolicy: 'cache-and-network',
 })
 
 const roadmap = computed(() => data.value?.roadmap ?? null)
@@ -19,14 +20,22 @@ const { status, error, agentPresent, elapsedSeconds, start, leave } = useVoiceSe
   audioElement,
 })
 
+watch(cardId, () => {
+  void leave()
+})
+
 const elapsedLabel = computed(() => {
   const minutes = Math.floor(elapsedSeconds.value / 60)
   const seconds = elapsedSeconds.value % 60
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
 
+const isStartingOrConnected = computed(
+  () => status.value === 'requesting' || status.value === 'connecting' || status.value === 'connected',
+)
+
 function startSession(): void {
-  if (card.value) {
+  if (card.value && !isStartingOrConnected.value) {
     void start(card.value.id)
   }
 }
@@ -110,7 +119,8 @@ function startSession(): void {
         <div class="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            class="rounded-lg bg-rose-500 px-4 py-2 font-medium text-white transition hover:bg-rose-600"
+            :disabled="isStartingOrConnected"
+            class="rounded-lg bg-rose-500 px-4 py-2 font-medium text-white transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
             @click="startSession"
           >
             Попробовать снова
@@ -203,7 +213,8 @@ function startSession(): void {
         <div class="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400"
+            :disabled="isStartingOrConnected"
+            class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
             @click="startSession"
           >
             Начать снова
@@ -225,7 +236,8 @@ function startSession(): void {
         </div>
         <button
           type="button"
-          class="rounded-lg bg-sky-500 px-5 py-2.5 font-medium text-slate-950 transition hover:bg-sky-400"
+          :disabled="isStartingOrConnected"
+          class="rounded-lg bg-sky-500 px-5 py-2.5 font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
           @click="startSession"
         >
           Начать практику

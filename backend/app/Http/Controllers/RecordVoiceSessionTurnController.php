@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Records per-turn latency instrumentation from the voice agent (plan §5).
@@ -30,6 +31,12 @@ final class RecordVoiceSessionTurnController extends Controller
         ]);
 
         $turnId = (string) ($validated['turn_id'] ?? $validated['speech_id'] ?? '');
+
+        if ($turnId === '') {
+            throw ValidationException::withMessages([
+                'turn_id' => 'The turn identifier must not be empty.',
+            ]);
+        }
 
         $turn = [
             'turn_id' => $turnId,

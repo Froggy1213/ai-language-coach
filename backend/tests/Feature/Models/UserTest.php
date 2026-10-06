@@ -21,6 +21,15 @@ class UserTest extends TestCase
         $this->assertSame(CefrLevel::B2, $user->fresh()->current_level);
     }
 
+    public function test_current_level_is_not_mass_assignable(): void
+    {
+        $user = new User(['current_level' => CefrLevel::B2]);
+        $this->assertSame(CefrLevel::A1, $user->current_level);
+
+        $user->forceFill(['current_level' => CefrLevel::B2]);
+        $this->assertSame(CefrLevel::B2, $user->current_level);
+    }
+
     public function test_stores_the_target_language_and_timezone(): void
     {
         $user = User::factory()->create([

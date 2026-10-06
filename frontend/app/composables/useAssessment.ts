@@ -97,7 +97,12 @@ export function useAssessment() {
       }
     })
 
-    await confirmSubscription(channel)
+    try {
+      await confirmSubscription(channel)
+    } catch (err) {
+      $echo.leave(name)
+      throw err
+    }
 
     return () => {
       $echo.leave(name)
@@ -141,15 +146,20 @@ export function useAssessment() {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error('WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.')),
-        timeoutMs,
-      )
+      const pusherConnection = $echo.connector.pusher.connection
 
-      $echo.connector.pusher.connection.bind('connected', () => {
+      const onConnected = () => {
         clearTimeout(timeout)
+        pusherConnection.unbind('connected', onConnected)
         resolve()
-      })
+      }
+
+      const timeout = setTimeout(() => {
+        pusherConnection.unbind('connected', onConnected)
+        reject(new Error('WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.'))
+      }, timeoutMs)
+
+      pusherConnection.bind('connected', onConnected)
     })
 
     return $echo.socketId() ?? ''

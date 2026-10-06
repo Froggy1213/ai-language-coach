@@ -126,6 +126,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Mistake Analysis Delay
+    |--------------------------------------------------------------------------
+    |
+    | Delay in seconds before running mistake analysis after session finishes,
+    | ensuring late turn reports arriving right after room_finished are included.
+    |
+    */
+
+    'mistake_analysis_delay_seconds' => (int) env('VOICE_MISTAKE_ANALYSIS_DELAY', 10),
+
+    /*
+    |--------------------------------------------------------------------------
     | Internal Agent Endpoints
     |--------------------------------------------------------------------------
     |

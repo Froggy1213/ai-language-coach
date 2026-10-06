@@ -125,6 +125,38 @@ class AssessmentGraphQLTest extends TestCase
         );
     }
 
+    public function test_submitting_duplicate_audio_url_is_idempotent(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $fileUrl = "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/recording.webm";
+        $storage = Mockery::mock(AssessmentAudioStorage::class);
+        $storage->shouldReceive('inspect')
+            ->twice()
+            ->with(Mockery::on(static fn (User $caller): bool => $caller->is($user)), $fileUrl)
+            ->andReturn(new AudioUpload(
+                key: "assessments/{$user->id}/recording.webm",
+                fileUrl: $fileUrl,
+                sizeBytes: 2048,
+                contentType: 'audio/webm',
+            ));
+        $this->app->instance(AssessmentAudioStorage::class, $storage);
+
+        $firstResponse = $this->graphQL(self::SUBMIT, ['audioUrl' => $fileUrl]);
+        $firstResponse->assertGraphQLErrorFree();
+        $firstId = $firstResponse->json('data.submitAssessment.id');
+
+        $secondResponse = $this->graphQL(self::SUBMIT, ['audioUrl' => $fileUrl]);
+        $secondResponse->assertGraphQLErrorFree();
+        $secondId = $secondResponse->json('data.submitAssessment.id');
+
+        $this->assertSame($firstId, $secondId);
+        $this->assertSame(1, Assessment::query()->where('user_id', $user->id)->count());
+        Queue::assertPushed(AnalyzeAssessment::class, 1);
+    }
+
     public function test_it_refuses_an_upload_that_does_not_belong_to_the_learner(): void
     {
         Queue::fake();

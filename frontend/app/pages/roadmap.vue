@@ -20,17 +20,21 @@ async function generate(): Promise<void> {
   generating.value = true
   generateError.value = null
 
-  const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
+  try {
+    const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
 
-  if (failure) {
-    generateError.value = graphQLErrorMessage(failure as CombinedError) ?? 'Не удалось собрать роадмап.'
-  } else {
-    // The mutation is idempotent and only reports the title; the card list is
-    // the query's job.
-    await executeQuery({ requestPolicy: 'network-only' })
+    if (failure) {
+      generateError.value = graphQLErrorMessage(failure as CombinedError) ?? 'Не удалось собрать роадмап.'
+    } else {
+      // The mutation is idempotent and only reports the title; the card list is
+      // the query's job.
+      await executeQuery({ requestPolicy: 'network-only' })
+    }
+  } catch {
+    generateError.value = 'Не удалось собрать роадмап.'
+  } finally {
+    generating.value = false
   }
-
-  generating.value = false
 }
 
 const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.status === 'ready') ?? null)

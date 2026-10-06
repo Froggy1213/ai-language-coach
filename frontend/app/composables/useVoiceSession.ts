@@ -29,7 +29,9 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
 
   let room: Room | null = null
   let timer: ReturnType<typeof setInterval> | null = null
+  let disposed = false
   const attachedElements: HTMLMediaElement[] = []
+  const attachedTrackSids = new Set<string>()
 
   function startTimer(): void {
     stopTimer()
@@ -47,7 +49,13 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   }
 
   function attachRemoteTrack(track: RemoteTrack): void {
+    if (track.sid && attachedTrackSids.has(track.sid)) {
+      return
+    }
     if (track.kind === Track.Kind.Audio) {
+      if (track.sid) {
+        attachedTrackSids.add(track.sid)
+      }
       const el = options.audioElement?.value
         ? track.attach(options.audioElement.value)
         : track.attach()
@@ -72,6 +80,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
       } catch {}
     }
     attachedElements.length = 0
+    attachedTrackSids.clear()
   }
 
   function mapVoiceError(failure: CombinedError): string {
@@ -145,6 +154,10 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   }
 
   async function start(lessonCardId: string): Promise<void> {
+    if (disposed || status.value === 'requesting' || status.value === 'connecting' || status.value === 'connected') {
+      return
+    }
+
     error.value = null
     sessionId.value = null
     agentPresent.value = false
@@ -157,6 +170,10 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     const { data, error: failure } = await $urql
       .mutation<{ requestVoiceToken: VoiceSession }>(REQUEST_VOICE_TOKEN_MUTATION, { lessonCardId })
       .toPromise()
+
+    if (disposed) {
+      return
+    }
 
     if (failure) {
       error.value = mapVoiceError(failure as CombinedError)
@@ -210,6 +227,9 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
 
       newRoom.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
         track.detach()
+        if (track.sid) {
+          attachedTrackSids.delete(track.sid)
+        }
       })
 
       newRoom.on(RoomEvent.Reconnecting, () => {
@@ -228,19 +248,27 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
 
       await newRoom.connect(session.livekitUrl, session.livekitToken)
 
+      if (disposed) {
+        room = null
+        try {
+          await newRoom.disconnect()
+        } catch {}
+        return
+      }
+
       if (status.value === 'connecting') {
         status.value = 'connected'
         agentPresent.value = newRoom.remoteParticipants.size > 0
         startTimer()
       }
 
-      newRoom.remoteParticipants.forEach((participant) => {
-        participant.trackPublications.forEach((pub) => {
-          if (pub.track) {
-            attachRemoteTrack(pub.track as RemoteTrack)
-          }
-        })
-      })
+      if (disposed) {
+        room = null
+        try {
+          await newRoom.disconnect()
+        } catch {}
+        return
+      }
 
       try {
         await newRoom.localParticipant.setMicrophoneEnabled(true)
@@ -273,6 +301,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     window.addEventListener('beforeunload', handleBeforeUnload)
 
     onUnmounted(() => {
+      disposed = true
       window.removeEventListener('beforeunload', handleBeforeUnload)
       void leave()
     })

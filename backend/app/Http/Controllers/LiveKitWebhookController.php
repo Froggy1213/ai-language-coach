@@ -39,13 +39,17 @@ final class LiveKitWebhookController extends Controller
             return response()->json(['message' => 'Invalid signature.'], 401);
         }
 
-        /** @var array<string, mixed> $event */
-        $event = json_decode($rawBody, true, flags: JSON_THROW_ON_ERROR);
+        try {
+            /** @var array<string, mixed> $event */
+            $event = json_decode($rawBody, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return response()->json(['message' => 'Invalid JSON payload.'], 400);
+        }
 
         $roomName = data_get($event, 'room.name');
 
         if (! is_string($roomName) || $roomName === '') {
-            return response()->json(['message' => 'The event names no room.'], 422);
+            return response()->json(['applied' => false]);
         }
 
         // `applied` distinguishes "this delivery moved the session" from "this

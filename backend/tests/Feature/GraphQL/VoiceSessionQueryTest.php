@@ -90,4 +90,40 @@ class VoiceSessionQueryTest extends TestCase
         $this->graphQL(self::QUERY, ['id' => (string) $session->id])
             ->assertGraphQLErrorMessage('Unauthenticated.');
     }
+
+    public function test_token_is_null_for_terminal_sessions_and_present_for_active(): void
+    {
+        config([
+            'voice.livekit.api_key' => 'test-key',
+            'voice.livekit.api_secret' => 'test-secret-at-least-32-chars-long!',
+        ]);
+
+        $user = User::factory()->create();
+        $terminalSession = VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+        ]);
+        $activeSession = VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Active,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $query = /** @lang GraphQL */ '
+            query ($id: ID!) {
+                voiceSession(id: $id) {
+                    id
+                    status
+                    livekitToken
+                }
+            }
+        ';
+
+        $terminalResponse = $this->graphQL($query, ['id' => (string) $terminalSession->id])
+            ->assertGraphQLErrorFree();
+        $this->assertNull($terminalResponse->json('data.voiceSession.livekitToken'));
+
+        $activeResponse = $this->graphQL($query, ['id' => (string) $activeSession->id])
+            ->assertGraphQLErrorFree();
+        $this->assertNotNull($activeResponse->json('data.voiceSession.livekitToken'));
+    }
 }

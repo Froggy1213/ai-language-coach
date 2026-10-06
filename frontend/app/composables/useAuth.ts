@@ -51,10 +51,16 @@ export function useAuth() {
   async function logout(): Promise<void> {
     await $urql.mutation(LOGOUT_MUTATION, {}).toPromise()
 
-    user.value = null
-    resolved.value = true
-
-    await navigateTo('/login')
+    try {
+      user.value = null
+      resolved.value = true
+    } finally {
+      if (import.meta.client) {
+        window.location.assign('/login')
+      } else {
+        await navigateTo('/login')
+      }
+    }
   }
 
   async function ensureResolved(): Promise<void> {

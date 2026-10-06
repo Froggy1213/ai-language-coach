@@ -120,7 +120,7 @@ class RoadmapGeneratorTest extends TestCase
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
 
         $first = $this->generator()->generate($user);
-        $user->update(['current_level' => CefrLevel::B1]);
+        $user->forceFill(['current_level' => CefrLevel::B1])->save();
         $second = $this->generator()->regenerate($user->fresh());
 
         $this->assertFalse($second->is($first));
