@@ -129,6 +129,7 @@ type Mutation {
         confirmation: String!
     ): Boolean!
         @guard
+        @throttle(maxAttempts: 5, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\DeleteAccount")
 }
 
