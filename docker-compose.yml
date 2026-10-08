@@ -65,6 +65,10 @@ x-laravel-environment: &laravel-environment
   REDIS_PORT: 6379
 
   SESSION_DRIVER: database
+  # Plain http locally: a Secure cookie would be dropped by the browser and
+  # every session would silently fail to persist. Production sets this to true
+  # (infra/terraform/ecs.tf, laravel_common_env).
+  SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-false}
   CACHE_STORE: database
   QUEUE_CONNECTION: redis
   BROADCAST_CONNECTION: reverb

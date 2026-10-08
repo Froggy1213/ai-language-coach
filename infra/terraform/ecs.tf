@@ -135,6 +135,12 @@ locals {
     { name = "REDIS_HOST", value = aws_elasticache_cluster.main.cache_nodes[0].address },
     { name = "REDIS_PORT", value = "6379" },
     { name = "SESSION_DRIVER", value = "database" },
+    # The SPA and the API share one origin: the ALB routes /graphql*, /api/*,
+    # /sanctum/* and /up to Laravel and everything else to Nuxt on the same
+    # hostname. SESSION_DOMAIN therefore stays unset, which keeps the session
+    # cookie host-only instead of opening it to every subdomain. Secure is safe
+    # because the ALB terminates TLS and redirects http to https.
+    { name = "SESSION_SECURE_COOKIE", value = "true" },
     { name = "CACHE_STORE", value = "redis" },
     { name = "QUEUE_CONNECTION", value = "redis" },
     { name = "BROADCAST_CONNECTION", value = "reverb" },
