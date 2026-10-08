@@ -99,6 +99,20 @@ flowchart TD
 4. **S3 Media Purge**:
    All objects stored under `assessments/{userId}/` are deleted from S3 via `S3Client::deleteMatchingObjects()`. Any S3 errors are logged and reported (e.g., to Sentry) rather than rolling back the completed account deletion or leaving an inconsistent state.
 
+### S3 Deletion Failures and Residual Media Cleanup
+
+When deleting assessment audio objects from S3 fails during account deletion (for instance, due to an S3 API outage or transient network error), `AccountDeletionService::deleteUserAudioObjects()` catches the exception and reports it (via Laravel's `report()` to Sentry / error tracking) rather than rolling back the completed database deletion.
+
+Rolling back after the database transaction has committed would leave an inconsistent state or attempt to resurrect an account whose relational records were already cascaded and removed. Account deletion therefore completes immediately and permanently from the learner's perspective, while any un-deleted audio recordings temporarily remain in S3 under `assessments/{userId}/`.
+
+Residual audio objects are subsequently swept and removed by the scheduled orphan audio purge:
+- **Scheduler Registration**: Verified in the codebase — `backend/routes/console.php` explicitly schedules the purge command to run daily via `Schedule::command('privacy:purge-orphan-audio')->daily()`.
+- **Retention Policy**: Controlled by `config('privacy.orphan_audio_retention_days')` (`PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS`, default 7 days).
+- **Purge Logic** (`App\Console\Commands\PurgeOrphanAudio`): Scans keys under `assessments/`, keeping objects newer than the cutoff date or whose assessment is actively in `AssessmentStatus::Processing`. For a deleted account, all assessment rows have already been deleted from MySQL, so any residual files are recognized as orphans once they exceed the 7-day retention cutoff and are deleted from S3 via `S3Client::deleteObject()`.
+- **Auditing**: Supports `--dry-run` (`php artisan privacy:purge-orphan-audio --dry-run`) to preview candidates without modifying S3.
+
+Operationally, the user's account deletion is final upon execution, while any residual S3 audio objects resulting from transient storage failures are guaranteed to be cleaned up within the configured 7-day retention window.
+
 ---
 
 ## 5. What Learners Should Expect Operationally

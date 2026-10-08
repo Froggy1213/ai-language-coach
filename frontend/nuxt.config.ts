@@ -22,7 +22,7 @@ export default defineNuxtConfig({
       // Laravel backend. Override with NUXT_PUBLIC_BACKEND_URL when needed.
       // In production this is same-origin behind the ALB.
       backendUrl: 'http://localhost:8000',
-      // Reverb WebSocket server for graphql-ws subscriptions / Echo.
+      // Reverb WebSocket server for Echo subscriptions (Pusher protocol on /app/*).
       // Overridden by NUXT_PUBLIC_REVERB_APP_KEY / _HOST / _PORT / _SCHEME.
       // Env names mirror the config path (snake_case of public.reverb.appKey).
       reverb: {
