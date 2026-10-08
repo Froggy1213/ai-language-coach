@@ -24,7 +24,13 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    // Explicit origins only: a wildcard combined with supports_credentials would
+    // let any site make credentialed requests. Comma-separated, whitespace and
+    // empty entries dropped. Production sets this to the app's own origin.
+    'allowed_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')),
+    ), fn (string $origin): bool => $origin !== '')),
 
     'allowed_origins_patterns' => [],
 
@@ -34,8 +40,8 @@ return [
 
     'max_age' => 0,
 
-    // Cookie-based Sanctum SPA auth from the Nuxt dev server needs credentials;
-    // the origin list should be locked down before the AWS deploy (§7 checklist).
+    // Cookie-based Sanctum SPA auth from the Nuxt dev server needs credentials,
+    // which is why allowed_origins above must never contain '*'.
     'supports_credentials' => true,
 
 ];
