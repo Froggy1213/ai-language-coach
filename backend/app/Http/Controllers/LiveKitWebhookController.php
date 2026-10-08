@@ -7,6 +7,7 @@ use App\Voice\LiveKitWebhook;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Receives LiveKit room events (plan §5).
@@ -34,7 +35,15 @@ final class LiveKitWebhookController extends Controller
         try {
             $this->webhook->verify($request->header('Authorization') ?? '', $rawBody);
         } catch (InvalidWebhookSignature $exception) {
-            report($exception);
+            // Forged webhooks are unauthenticated and attacker-controlled. Forwarding
+            // every bad request to the error tracker creates an alert-spam amplification
+            // vector, and the exception chain can carry attacker-influenced input.
+            // Log a warning with the client IP and a stable reason code instead — the
+            // code comes from the exception, never from the message or the request.
+            Log::warning('LiveKit webhook signature verification failed.', [
+                'reason' => $exception->reason(),
+                'ip' => $request->ip(),
+            ]);
 
             return response()->json(['message' => 'Invalid signature.'], 401);
         }

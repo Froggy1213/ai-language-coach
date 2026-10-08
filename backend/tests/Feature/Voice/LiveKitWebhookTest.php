@@ -9,6 +9,8 @@ use App\Models\User;
 use App\Models\VoiceSession;
 use Firebase\JWT\JWT;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -307,6 +309,178 @@ class LiveKitWebhookTest extends TestCase
         )->assertOk()->assertJson(['applied' => true]);
 
         $this->assertSame(VoiceSessionStatus::Completed, $session->fresh()->status);
+    }
+
+    public function test_missing_signature_logs_warning_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+        Log::spy();
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return ($context['reason'] ?? null) === 'missing'
+                    && ($context['ip'] ?? null) === '198.51.100.1';
+            });
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: ['REMOTE_ADDR' => '198.51.100.1', 'CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['event' => 'room_finished']),
+        )->assertUnauthorized();
+
+        Exceptions::assertNothingReported();
+    }
+
+    public function test_unverifiable_signature_logs_warning_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+        Log::spy();
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return ($context['reason'] ?? null) === 'unverifiable'
+                    && ($context['ip'] ?? null) === '198.51.100.2';
+            });
+
+        $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer '.$this->sign($body, 'a-different-secret-that-is-long-enough'),
+                'REMOTE_ADDR' => '198.51.100.2',
+                'CONTENT_TYPE' => 'application/json',
+            ],
+            content: json_encode($body),
+        )->assertUnauthorized();
+
+        Exceptions::assertNothingReported();
+    }
+
+    public function test_wrong_issuer_signature_logs_warning_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+        Log::spy();
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return ($context['reason'] ?? null) === 'wrongIssuer'
+                    && ($context['ip'] ?? null) === '198.51.100.3';
+            });
+
+        $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
+        $token = JWT::encode([
+            'iss' => 'another-projects-key',
+            'exp' => time() + 60,
+            'sha256' => base64_encode(hash('sha256', json_encode($body), true)),
+        ], self::SECRET, 'HS256');
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer '.$token,
+                'REMOTE_ADDR' => '198.51.100.3',
+                'CONTENT_TYPE' => 'application/json',
+            ],
+            content: json_encode($body),
+        )->assertUnauthorized();
+
+        Exceptions::assertNothingReported();
+    }
+
+    public function test_missing_body_hash_signature_logs_warning_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+        Log::spy();
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return ($context['reason'] ?? null) === 'missingBodyHash'
+                    && ($context['ip'] ?? null) === '198.51.100.4';
+            });
+
+        $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
+        $token = JWT::encode([
+            'iss' => 'test-api-key',
+            'exp' => time() + 60,
+        ], self::SECRET, 'HS256');
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer '.$token,
+                'REMOTE_ADDR' => '198.51.100.4',
+                'CONTENT_TYPE' => 'application/json',
+            ],
+            content: json_encode($body),
+        )->assertUnauthorized();
+
+        Exceptions::assertNothingReported();
+    }
+
+    public function test_body_mismatch_signature_logs_warning_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+        Log::spy();
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return ($context['reason'] ?? null) === 'bodyMismatch'
+                    && ($context['ip'] ?? null) === '198.51.100.5';
+            });
+
+        $token = $this->sign(['event' => 'room_finished', 'room' => ['name' => 'lesson-1']]);
+        $tampered = ['event' => 'room_finished', 'room' => ['name' => 'lesson-99']];
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer '.$token,
+                'REMOTE_ADDR' => '198.51.100.5',
+                'CONTENT_TYPE' => 'application/json',
+            ],
+            content: json_encode($tampered),
+        )->assertUnauthorized();
+
+        Exceptions::assertNothingReported();
+    }
+
+    public function test_warning_log_context_never_contains_secret_or_raw_body(): void
+    {
+        Log::spy();
+
+        $secret = self::SECRET;
+        $body = json_encode(['event' => 'room_finished', 'room' => ['name' => 'sensitive-lesson-name']]);
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(function (string $message, array $context) use ($secret, $body): bool {
+                $contextJson = json_encode($context);
+
+                return ! str_contains($contextJson, $secret)
+                    && ! str_contains($contextJson, $body)
+                    && ! str_contains($contextJson, 'sensitive-lesson-name');
+            });
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer '.$this->sign(['event' => 'room_finished'], 'a-different-secret-that-is-long-enough'),
+                'CONTENT_TYPE' => 'application/json',
+            ],
+            content: $body,
+        )->assertUnauthorized();
     }
 
     /**
