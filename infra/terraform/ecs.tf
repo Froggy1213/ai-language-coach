@@ -145,6 +145,7 @@ locals {
     { name = "REVERB_PORT", value = "8081" },
     { name = "REVERB_SCHEME", value = "https" },
     { name = "CORS_ALLOWED_ORIGINS", value = "https://${var.app_domain}" },
+    { name = "TRUSTED_PROXIES", value = var.vpc_cidr },
     { name = "SANCTUM_STATEFUL_DOMAINS", value = "${var.app_domain},www.${var.app_domain}" },
     { name = "AWS_DEFAULT_REGION", value = var.aws_region },
     { name = "AWS_BUCKET", value = aws_s3_bucket.storage.bucket },

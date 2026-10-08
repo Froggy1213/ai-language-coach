@@ -14,7 +14,20 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Behind the ALB, REMOTE_ADDR is the balancer's address, so $request->ip()
+        // (and every @throttle keyed on it) would be one shared bucket for all
+        // users. Only the CIDRs in TRUSTED_PROXIES may set X-Forwarded-*; empty
+        // means "trust nobody" (local dev). Never default this to '*'.
+        $middleware->trustProxies(
+            at: array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('TRUSTED_PROXIES', '')),
+            ), fn (string $cidr): bool => $cidr !== '')),
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
