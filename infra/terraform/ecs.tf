@@ -156,8 +156,20 @@ locals {
     { name = "AWS_DEFAULT_REGION", value = var.aws_region },
     { name = "AWS_BUCKET", value = aws_s3_bucket.storage.bucket },
     { name = "AWS_USE_PATH_STYLE_ENDPOINT", value = "false" },
+    # TODO(livekit-tls): the LiveKit node terminates TLS for TURN only (5349); its
+    # signaling port 7880 is plaintext. The backend's LiveKit admin bearer, the
+    # room and agent-dispatch calls all travel over it, and 7880 is open to
+    # 0.0.0.0/0 — so those calls are readable and replayable by anyone on the path.
+    # LIVEKIT_PUBLIC_URL below already advertises wss://<livekit_domain> to
+    # browsers, but nothing listens for TLS on that hostname yet, so the browser
+    # path is broken as well. Fix by terminating TLS in front of 7880 (Caddy or
+    # nginx on the same host, reusing the certbot certificate, proxying to
+    # 127.0.0.1:7880) and then setting this to https://${var.livekit_domain}; or,
+    # as an interim measure, restrict 7880's ingress in security_groups.tf to the
+    # VPC CIDR. See infra/README.md -> "LiveKit signaling is not encrypted".
     { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
     { name = "LIVEKIT_PUBLIC_URL", value = "wss://${var.livekit_domain}" },
+    { name = "LIVEKIT_SERVER_TOKEN_TTL_SECONDS", value = "60" },
     { name = "VOICE_AGENT_NAME", value = "ai-language-coach" }
   ]
 
@@ -392,6 +404,8 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         }
       ]
       environment = [
+        # Same plaintext endpoint the backend dials — see the livekit-tls TODO
+        # above; the worker both signals over it and uses it for TURN.
         { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
         { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
         { name = "BACKEND_INTERNAL_URL", value = "https://${var.app_domain}" },

@@ -8,6 +8,7 @@ use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class LiveKitApiTest extends TestCase
@@ -23,6 +24,7 @@ class LiveKitApiTest extends TestCase
             'voice.livekit.api_key' => 'test-api-key',
             'voice.livekit.api_secret' => self::SECRET,
             'voice.livekit.token_ttl_minutes' => 15,
+            'voice.livekit.server_token_ttl_seconds' => 60,
             'voice.livekit.api_timeout_seconds' => 5,
             'voice.agent.name' => 'ai-language-coach',
         ]);
@@ -100,6 +102,57 @@ class LiveKitApiTest extends TestCase
             // so the server token carries only capability grants without a room claim.
             return ! isset($video->room)
                 && ($video->roomCreate ?? false) === true;
+        });
+    }
+
+    #[DataProvider('transportSchemes')]
+    public function test_maps_transport_scheme_to_expected_http_endpoint(string $configuredUrl, string $expectedEndpoint): void
+    {
+        config(['voice.livekit.url' => $configuredUrl]);
+
+        Http::fake([
+            '*' => Http::response(['sid' => 'RM_1']),
+        ]);
+
+        $this->api()->createRoom('lesson-42');
+
+        Http::assertSent(function (Request $request) use ($expectedEndpoint): bool {
+            return $request->url() === $expectedEndpoint.'/twirp/livekit.RoomService/CreateRoom';
+        });
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function transportSchemes(): array
+    {
+        return [
+            'ws maps to http' => ['ws://livekit.test:7880', 'http://livekit.test:7880'],
+            'ws maps to http with trailing slash' => ['ws://livekit.test:7880/', 'http://livekit.test:7880'],
+            'wss maps to https' => ['wss://livekit.test:7880', 'https://livekit.test:7880'],
+            'wss maps to https with trailing slash' => ['wss://livekit.test:7880/', 'https://livekit.test:7880'],
+            'http passes through' => ['http://livekit.test:7880', 'http://livekit.test:7880'],
+            'http passes through with trailing slash' => ['http://livekit.test:7880/', 'http://livekit.test:7880'],
+            'https passes through' => ['https://livekit.test:7880', 'https://livekit.test:7880'],
+            'https passes through with trailing slash' => ['https://livekit.test:7880/', 'https://livekit.test:7880'],
+        ];
+    }
+
+    public function test_server_api_requests_use_the_configured_server_token_ttl(): void
+    {
+        config(['voice.livekit.server_token_ttl_seconds' => 45]);
+
+        Http::fake([
+            'livekit.test:7880/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
+        ]);
+
+        $this->api()->createRoom('lesson-42');
+
+        Http::assertSent(function (Request $request): bool {
+            $token = $this->bearerToken($request);
+            $claims = $this->claims($token);
+
+            return ($claims['exp'] - $claims['iat']) === 45;
         });
     }
 

@@ -187,6 +187,10 @@ resource "aws_security_group" "livekit" {
   vpc_id      = aws_vpc.main.id
 
   # Signaling & API
+  # TODO(livekit-tls): 7880 is plaintext — TLS on this node covers TURN (5349)
+  # only — so this rule exposes the backend's LiveKit admin bearer to the
+  # internet. Narrow `cidr_blocks` to [var.vpc_cidr] until TLS is terminated in
+  # front of 7880; see the livekit-tls TODO in ecs.tf.
   ingress {
     description = "LiveKit HTTP/WebSocket signaling from browsers and Twirp from backend"
     from_port   = 7880

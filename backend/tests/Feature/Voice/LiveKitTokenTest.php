@@ -20,6 +20,7 @@ class LiveKitTokenTest extends TestCase
             'voice.livekit.api_key' => 'test-api-key',
             'voice.livekit.api_secret' => self::SECRET,
             'voice.livekit.token_ttl_minutes' => 15,
+            'voice.livekit.server_token_ttl_seconds' => 60,
         ]);
     }
 
@@ -77,6 +78,37 @@ class LiveKitTokenTest extends TestCase
 
         // 600 seconds, not the SDK's six-hour default (plan §5).
         $this->assertSame(600, $claims['exp'] - $claims['iat']);
+    }
+
+    public function test_the_server_token_expires_after_the_configured_server_ttl(): void
+    {
+        // Default TTL is 60 seconds (voice.livekit.server_token_ttl_seconds).
+        $defaultClaims = $this->claims($this->tokens()->server());
+        $this->assertSame(60, $defaultClaims['exp'] - $defaultClaims['iat']);
+
+        // When configured to an overridden value (e.g. 90 seconds), it proves it is read from config.
+        config(['voice.livekit.server_token_ttl_seconds' => 90]);
+
+        $overriddenClaims = $this->claims($this->tokens()->server());
+        $this->assertSame(90, $overriddenClaims['exp'] - $overriddenClaims['iat']);
+
+        // Room-scoped server tokens respect the same server TTL setting.
+        $roomScopedClaims = $this->claims($this->tokens()->server('lesson-42'));
+        $this->assertSame(90, $roomScopedClaims['exp'] - $roomScopedClaims['iat']);
+    }
+
+    public function test_the_participant_token_is_unaffected_by_server_token_ttl(): void
+    {
+        // Even when server token TTL is overridden, participant tokens remain governed
+        // solely by voice.livekit.token_ttl_minutes (15 minutes = 900 seconds).
+        config([
+            'voice.livekit.token_ttl_minutes' => 15,
+            'voice.livekit.server_token_ttl_seconds' => 90,
+        ]);
+
+        $claims = $this->claims($this->tokens()->participant('lesson-42', 'learner-7'));
+
+        $this->assertSame(900, $claims['exp'] - $claims['iat']);
     }
 
     public function test_the_identity_is_the_subject_and_the_name_is_optional(): void

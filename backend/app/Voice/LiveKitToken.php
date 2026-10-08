@@ -40,7 +40,7 @@ final class LiveKitToken
             'canPublish' => true,
             'canSubscribe' => true,
             'canPublishData' => true,
-        ], $identity, $name);
+        ], $identity, $name, ((int) config('voice.livekit.token_ttl_minutes')) * 60);
     }
 
     /**
@@ -64,13 +64,13 @@ final class LiveKitToken
             $grants['room'] = $roomName;
         }
 
-        return $this->encode($grants, 'api');
+        return $this->encode($grants, 'api', null, (int) config('voice.livekit.server_token_ttl_seconds'));
     }
 
     /**
      * @param  array<string, mixed>  $grants
      */
-    private function encode(array $grants, string $identity, ?string $name = null): string
+    private function encode(array $grants, string $identity, ?string $name, int $ttlSeconds): string
     {
         if ($this->apiKey === '' || $this->apiSecret === '') {
             throw new RuntimeException('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set to mint access tokens.');
@@ -91,7 +91,7 @@ final class LiveKitToken
             'sub' => $identity,
             'nbf' => $now,
             'iat' => $now,
-            'exp' => $now + ((int) config('voice.livekit.token_ttl_minutes')) * 60,
+            'exp' => $now + $ttlSeconds,
             'video' => $grants,
             'metadata' => '',
         ];

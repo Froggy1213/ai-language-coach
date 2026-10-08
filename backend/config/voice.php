@@ -44,10 +44,17 @@ return [
 
         /*
         | Plan §5 asks for a short TTL rather than the SDK default of six hours:
-        | the token only has to outlive the handshake, and a leaked one should
-        | not stay usable for an afternoon.
+        | the participant token only has to outlive the handshake (15 minutes),
+        | and a leaked one should not stay usable for an afternoon.
         */
         'token_ttl_minutes' => (int) env('LIVEKIT_TOKEN_TTL_MINUTES', 15),
+
+        /*
+        | The server token's TTL is much shorter: it is an admin bearer that
+        | never leaves the backend, minted per request for short Twirp POSTs.
+        | A leaked one in a log or dump must expire almost immediately (default 60s).
+        */
+        'server_token_ttl_seconds' => (int) env('LIVEKIT_SERVER_TOKEN_TTL_SECONDS', 60),
 
         /*
         | Every server API call is a short Twirp POST; a hung LiveKit node must

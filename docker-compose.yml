@@ -127,6 +127,9 @@ x-laravel-environment: &laravel-environment
   # hostname that does not exist.
   LIVEKIT_URL: ws://livekit:7880
   LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://127.0.0.1:7880}
+  # The backend's own admin token: minted per request, never sent to a client, so
+  # its TTL is deliberately much shorter than the learner's.
+  LIVEKIT_SERVER_TOKEN_TTL_SECONDS: ${LIVEKIT_SERVER_TOKEN_TTL_SECONDS:-60}
   VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
   VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:-82cba8627ffb6407e152a3baa17f586b85f213cacb9b55b9}
 
