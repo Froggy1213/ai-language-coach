@@ -15,6 +15,7 @@ use App\GraphQL\Types\NativeEnumType;
 use App\GraphQL\Validation\ValidationRulesProvider;
 use App\Mistakes\DeepSeekMistakeAnalyzer;
 use App\Mistakes\MistakeAnalyzer;
+use App\Support\ProductionSanityCheck;
 use App\Voice\LiveKitToken;
 use Aws\S3\S3Client;
 use Illuminate\Contracts\Foundation\Application;
@@ -89,6 +90,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(TypeRegistry $typeRegistry): void
     {
+        // Refuse to boot in production if unsafe development defaults or insecure
+        // configurations are active, failing fast before traffic is accepted.
+        ProductionSanityCheck::check($this->app);
+
         // The Deepgram package issues its own HTTP request, so the limit for a
         // batch transcription is global rather than per call: the framework
         // default of 30 seconds is shorter than a long recording takes, and the
