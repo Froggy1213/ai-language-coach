@@ -196,7 +196,10 @@ services:
   # long before AWS does — and unlike the real bucket this one is reachable from
   # the host, which is what makes the whole pipeline testable locally.
   minio:
-    image: quay.io/minio/minio:latest
+    # Pinned, not `latest`: a floating tag means two developers (or a developer
+    # and CI) can exercise different MinIO releases, and this one is the image
+    # the bucket rules and presigned POSTs were verified against.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: coach_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -219,7 +222,9 @@ services:
   # MinIO starts empty, and the pipeline needs the bucket to exist before the
   # first presigned POST. Runs once, then exits.
   minio-init:
-    image: quay.io/minio/mc:latest
+    # Same release as the server above; `mc` and the server share a compatibility
+    # contract, and `latest` made `mc` the only unpinned moving part of the stack.
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: coach_minio_init
     depends_on:
       minio:
@@ -241,7 +246,10 @@ services:
   # rtc.node_ip is pinned to 127.0.0.1 so that ICE candidates announced to local
   # browsers match the host loopback instead of Docker's internal bridge IP.
   livekit:
-    image: livekit/livekit-server:latest
+    # Matches the tag the deployed EC2 node runs (infra/livekit/*.tpl): the
+    # Python worker is pinned to livekit-agents 1.8.x, so a local server on a
+    # floating tag could pass a session the production pair would refuse.
+    image: livekit/livekit-server:v1.8.4
     container_name: coach_livekit
     restart: unless-stopped
     ports:
