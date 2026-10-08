@@ -13,7 +13,7 @@ Full development plan: [`ai-language-coach-plan.md`](ai-language-coach-plan.md) 
 | API | Laravel 13 + Lighthouse (GraphQL) |
 | Realtime | Laravel Reverb (1 instance, V1) |
 | Queues | Redis + Laravel Horizon |
-| DB | MySQL 8.0 (JSON columns for cheat sheet/transcript) |
+| DB | MySQL 8.4 (JSON columns for cheat sheet/transcript) |
 | Media | LiveKit Server (self-hosted EC2) |
 | Voice agent | Python `livekit-agents` (ECS Fargate) |
 | STT / TTS | Deepgram Nova-2 / Cartesia Sonic |
@@ -148,7 +148,7 @@ Prerequisites for hybrid dev loop: PHP 8.5 + Composer, Node 22 + npm, Docker, an
 ```bash
 # 1. Infrastructure (MySQL, Redis, MinIO, LiveKit Server, Voice Agent worker)
 cp .env.example .env          # optional — every value in it has a default
-docker compose up -d          # starts MySQL 8.0, Redis 7, MinIO, LiveKit and Voice Agent
+docker compose up -d          # starts MySQL 8.4, Redis 7, MinIO, LiveKit and Voice Agent
 docker compose ps             # wait until all report (healthy)
 
 # 2. Backend (http://localhost:8000)
@@ -190,7 +190,7 @@ DB_DATABASE=language_coach_testing php artisan migrate
 
 | Component | Where it runs |
 |---|---|
-| MySQL 8.0 (`coach_mysql`) | Docker, `127.0.0.1:3306` |
+| MySQL 8.4 (`coach_mysql`) | Docker, `127.0.0.1:3306` |
 | Redis 7 (`coach_redis`) | Docker, `127.0.0.1:6379` |
 | MinIO (`coach_minio`) | Docker, `127.0.0.1:9000` / `9001` |
 | LiveKit Server (`coach_livekit`) | Docker, `127.0.0.1:7880` (native alternative: `scripts/livekit-dev.sh`, same port — run one or the other) |

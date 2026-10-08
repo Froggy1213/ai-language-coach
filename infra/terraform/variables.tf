@@ -67,8 +67,14 @@ variable "acm_certificate_arn" {
 }
 
 # ------------------------------------------------------------------------------
-# Database (RDS MySQL 8.0) - Plan §3, §8
+# Database (RDS MySQL 8.4) - Plan §3, §8
 # ------------------------------------------------------------------------------
+variable "protect_data" {
+  type        = bool
+  description = "Guards production data by enabling RDS deletion protection, taking a final DB snapshot on destroy, and enabling ALB deletion protection. Set to false for a throwaway test stand."
+  default     = true
+}
+
 variable "db_instance_class" {
   type        = string
   description = "RDS MySQL instance class (Plan §8: db.t4g.micro or db.t4g.small)"

@@ -22,7 +22,7 @@ This directory contains the production Infrastructure-as-Code (Terraform) and de
        │            │                     ├─► Deepgram (STT) / Cartesia (TTS) / LLM
        │            ├─────────────────────┼─► CloudWatch (P95 TURN_LATENCY)
        │            │                     └─► Webhook room_finished ──► Horizon job
-       │            ├─► RDS MySQL 8.0 (Private)
+       │            ├─► RDS MySQL 8.4 (Private)
        │            └─► ElastiCache Redis 7.0 (Private)
        ▼
    [ S3 Storage Bucket ]
@@ -34,7 +34,7 @@ This directory contains the production Infrastructure-as-Code (Terraform) and de
 - **Single LiveKit EC2 Node**: Self-hosted on an EC2 instance with an Elastic IP and native SIGTERM drain (`stop_grace_period: 15m`). No multi-node clustering or HA in V1.
 - **ALB Placement**: The ALB and ACM certificate terminate traffic **only** for `web` (Nuxt), `laravel-app` (API), and `reverb` (WebSockets). WebRTC media and TURN/TLS never pass through the ALB.
 - **Single Reverb Instance**: 1 replica with Lighthouse subscription state maintained in private Redis.
-- **Private Data Layer**: RDS MySQL 8.0 and ElastiCache Redis 7.0 reside in isolated private subnets with no public IPs and ingress restricted to authorized ECS security groups.
+- **Private Data Layer**: RDS MySQL 8.4 and ElastiCache Redis 7.0 reside in isolated private subnets with no public IPs and ingress restricted to authorized ECS security groups.
 
 ---
 
@@ -54,7 +54,7 @@ infra/
 │   ├── alb.tf                 # ALB, target groups, HTTPS listener, WSS routing
 │   ├── ecs.tf                 # Fargate cluster, 5 services, task definitions, autoscaling
 │   ├── ecr.tf                 # ECR repos for api, web, and agent with lifecycle policies
-│   ├── rds.tf                 # MySQL 8.0 with utf8mb4 parameter group, KMS encryption
+│   ├── rds.tf                 # MySQL 8.4 with utf8mb4 parameter group, KMS encryption
 │   ├── elasticache.tf         # Redis 7.0 for Horizon queues, cache, and Lighthouse
 │   ├── s3.tf                  # Storage bucket, CORS for presigned POST, lifecycle rules
 │   ├── secrets.tf             # Secrets Manager entries and IAM policies
@@ -248,7 +248,7 @@ Pin the previous image tag in `/opt/livekit/docker-compose.yml` on the EC2 insta
 ### Fixed Monthly Baseline (AWS Infrastructure)
 | Resource | Specification | Estimated Monthly Cost |
 |---|---|---|
-| **RDS MySQL 8.0** | `db.t4g.small`, 20GB gp3 storage | ~$26.00 |
+| **RDS MySQL 8.4** | `db.t4g.small`, 20GB gp3 storage | ~$26.00 |
 | **ElastiCache Redis** | `cache.t4g.micro`, 1 node | ~$12.50 |
 | **LiveKit EC2** | `t4g.medium`, 30GB gp3, Elastic IP | ~$27.00 |
 | **Application Load Balancer** | 1 ALB, ~1 LCU baseline | ~$18.00 |

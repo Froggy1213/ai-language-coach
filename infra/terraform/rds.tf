@@ -1,10 +1,11 @@
-# RDS MySQL 8.0 Configuration (Plan §3, §8)
+# RDS MySQL 8.4 Configuration (Plan §3, §8)
 #
 # Requirements:
-# - Engine: MySQL 8.0 with utf8mb4 collation matching the app schema (§3).
+# - Engine: MySQL 8.4 with utf8mb4 collation matching the app schema (§3).
 # - Instance class: db.t4g.micro or db.t4g.small (Plan §8).
 # - Security: In private subnets, encrypted at rest via KMS, no public IP.
 # - Automated backups enabled (7-day retention).
+# - Data protection: Deletion protection and final snapshots controlled by var.protect_data.
 
 resource "aws_db_subnet_group" "rds" {
   name        = "${var.name_prefix}-rds-subnet-group"
@@ -17,10 +18,10 @@ resource "aws_db_subnet_group" "rds" {
 }
 
 # Parameter group enforcing utf8mb4 character set & unicode collation (Plan §3)
-resource "aws_db_parameter_group" "mysql80" {
-  name        = "${var.name_prefix}-mysql80-params"
-  family      = "mysql8.0"
-  description = "Custom parameters for MySQL 8.0 enforcing utf8mb4"
+resource "aws_db_parameter_group" "mysql84" {
+  name        = "${var.name_prefix}-mysql84-params"
+  family      = "mysql8.4"
+  description = "Custom parameters for MySQL 8.4 enforcing utf8mb4"
 
   parameter {
     name  = "character_set_server"
@@ -58,7 +59,7 @@ resource "aws_db_parameter_group" "mysql80" {
   }
 
   tags = {
-    Name = "${var.name_prefix}-mysql80-params"
+    Name = "${var.name_prefix}-mysql84-params"
   }
 }
 
@@ -72,7 +73,7 @@ resource "aws_db_instance" "main" {
   identifier = "${var.name_prefix}-mysql"
 
   engine         = "mysql"
-  engine_version = "8.0"
+  engine_version = "8.4"
   instance_class = var.db_instance_class
 
   allocated_storage     = var.db_allocated_storage
@@ -86,7 +87,7 @@ resource "aws_db_instance" "main" {
 
   db_subnet_group_name   = aws_db_subnet_group.rds.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  parameter_group_name   = aws_db_parameter_group.mysql80.name
+  parameter_group_name   = aws_db_parameter_group.mysql84.name
 
   publicly_accessible = false
   multi_az            = false # Plan §0, §8: Single instance in V1
@@ -96,8 +97,10 @@ resource "aws_db_instance" "main" {
   maintenance_window      = "Sun:04:30-Sun:05:30"
 
   auto_minor_version_upgrade = true
-  deletion_protection        = false
-  skip_final_snapshot        = true
+  deletion_protection        = var.protect_data
+  skip_final_snapshot        = !var.protect_data
+  # A final snapshot makes a mistaken terraform destroy recoverable.
+  final_snapshot_identifier = var.protect_data ? "${var.name_prefix}-mysql-final" : null
 
   tags = {
     Name = "${var.name_prefix}-mysql"

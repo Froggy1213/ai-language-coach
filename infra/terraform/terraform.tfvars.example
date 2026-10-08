@@ -12,6 +12,13 @@ livekit_domain = "livekit.example.com"
 # Set to an existing ACM certificate ARN if already issued; leave empty to declare a new ACM cert
 acm_certificate_arn = ""
 
+# Data Protection (Plan §8)
+# protect_data = true is the production default: enables RDS deletion protection,
+# takes a final DB snapshot on destroy, and enables ALB deletion protection.
+# For a disposable test stand, set protect_data = false so the ALB and the
+# database can then be destroyed without a final snapshot.
+protect_data = true
+
 # Database & Cache sizing (Plan §8)
 db_instance_class    = "db.t4g.small"
 db_name              = "language_coach"

@@ -16,7 +16,7 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
-  enable_deletion_protection = false
+  enable_deletion_protection = var.protect_data
 
   tags = {
     Name = "${var.name_prefix}-alb"

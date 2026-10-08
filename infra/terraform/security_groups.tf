@@ -153,7 +153,7 @@ resource "aws_security_group" "voice_agent_worker" {
 # ------------------------------------------------------------------------------
 resource "aws_security_group" "rds" {
   name        = "${var.name_prefix}-rds-sg"
-  description = "Security group for private RDS MySQL 8.0 cluster"
+  description = "Security group for private RDS MySQL 8.4 cluster"
   vpc_id      = aws_vpc.main.id
 
   # Egress: None (Database never initiates outbound connections)

@@ -10,12 +10,12 @@ The application collects and processes only the data strictly necessary for lang
 
 | Data Category | Purpose | Storage Location | Schema Model / Table |
 |---|---|---|---|
-| **Account Information** | User identification, authentication, and CEFR level tracking | MySQL 8.0 | `users` (`name`, `email`, `password` hash, `target_language`, `timezone`, `current_level`) |
-| **Voice Consent Timestamp** | Evidencing server-side consent for audio recording and speech processing | MySQL 8.0 | `users.voice_consent_at` |
+| **Account Information** | User identification, authentication, and CEFR level tracking | MySQL 8.4 | `users` (`name`, `email`, `password` hash, `target_language`, `timezone`, `current_level`) |
+| **Voice Consent Timestamp** | Evidencing server-side consent for audio recording and speech processing | MySQL 8.4 | `users.voice_consent_at` |
 | **Onboarding Audio Recordings** | Speech-to-text transcription and CEFR level assessment | S3 / MinIO (`assessments/{userId}/{ulid}.{ext}`) | `assessments.audio_url` |
-| **Spoken Session Transcripts & Latency** | Pedagogical review, mistake detection, and turn performance telemetry | MySQL 8.0 | `voice_sessions.transcript` (JSON array of turns and telemetry) |
-| **Grammar Mistakes & Feedback** | Tracking learner mistakes, providing corrections, and generating explanations | MySQL 8.0 | `mistakes` (`user_utterance`, `correction`, `explanation`, `grammar_point_id`) |
-| **Spaced Repetition Schedule** | Scheduling flashcards and review intervals using the SM-2 algorithm | MySQL 8.0 | `review_items` (`ease_factor`, `interval_days`, `repetition_number`, `next_review_at`) |
+| **Spoken Session Transcripts & Latency** | Pedagogical review, mistake detection, and turn performance telemetry | MySQL 8.4 | `voice_sessions.transcript` (JSON array of turns and telemetry) |
+| **Grammar Mistakes & Feedback** | Tracking learner mistakes, providing corrections, and generating explanations | MySQL 8.4 | `mistakes` (`user_utterance`, `correction`, `explanation`, `grammar_point_id`) |
+| **Spaced Repetition Schedule** | Scheduling flashcards and review intervals using the SM-2 algorithm | MySQL 8.4 | `review_items` (`ease_factor`, `interval_days`, `repetition_number`, `next_review_at`) |
 | **Realtime Subscriptions** | Realtime broadcast delivery for assessment results and session feedback | Redis 7 | `graphql.topic.*` sets and `graphql.subscriber.*` entries |
 
 ---
