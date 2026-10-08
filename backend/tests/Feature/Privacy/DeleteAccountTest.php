@@ -111,6 +111,17 @@ class DeleteAccountTest extends TestCase
 
     public function test_it_clears_genuine_lighthouse_subscribers_before_deleting_user_row(): void
     {
+        $otherUser = User::factory()->create();
+        Sanctum::actingAs($otherUser);
+        $otherSubscribeResponse = $this->graphQL(
+            self::SUBSCRIBE_ASSESSMENT,
+            ['userId' => (string) $otherUser->id],
+            [],
+            self::SPA_HEADERS,
+        )->assertGraphQLErrorFree();
+        $otherChannel = $otherSubscribeResponse->json('extensions.lighthouse_subscriptions.channel');
+        $this->assertNotNull($otherChannel);
+
         $user = User::factory()->create(['password' => 'secret123']);
         Sanctum::actingAs($user);
 
@@ -129,6 +140,7 @@ class DeleteAccountTest extends TestCase
         $storage = $this->app->make(StoresSubscriptions::class);
         $subscriber = $storage->subscriberByChannel($channel);
         $this->assertNotNull($subscriber);
+        $this->assertNotNull($storage->subscriberByChannel($otherChannel));
 
         // 2. Set up S3 client mock
         $s3Mock = Mockery::mock(S3Client::class);
@@ -145,11 +157,13 @@ class DeleteAccountTest extends TestCase
         $deleteResponse->assertGraphQLErrorFree();
         $this->assertTrue($deleteResponse->json('data.deleteAccount'));
 
-        // 4. Assert subscriber is GONE from Redis
+        // 4. Assert subscriber is GONE from Redis while other user's subscriber survives
         $this->assertNull($storage->subscriberByChannel($channel));
+        $this->assertNotNull($storage->subscriberByChannel($otherChannel));
 
-        // 5. Assert user row is GONE from database
+        // 5. Assert user row is GONE from database while other user remains
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
+        $this->assertDatabaseHas('users', ['id' => $otherUser->id]);
     }
 
     public function test_fk_on_delete_cascade_removes_all_associated_records(): void

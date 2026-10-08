@@ -7,7 +7,6 @@ use App\Models\VoiceSession;
 use Aws\S3\S3Client;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Nuwave\Lighthouse\Schema\SchemaBuilder;
 use Nuwave\Lighthouse\Subscriptions\Contracts\StoresSubscriptions;
@@ -85,7 +84,7 @@ final class AccountDeletionService
     }
 
     /**
-     * Discovers all active and schema-defined subscription topics.
+     * Discovers all schema-defined and known subscription topics.
      *
      * @return list<string>
      */
@@ -107,21 +106,6 @@ final class AccountDeletionService
             } catch (Throwable) {
                 // Fall back to known topics
             }
-        }
-
-        try {
-            $connectionName = (string) config('lighthouse.subscriptions.broadcasters.echo.connection', 'default');
-            $redis = Redis::connection($connectionName);
-            $prefix = (string) config('database.redis.options.prefix', '');
-
-            foreach ($redis->keys('*graphql.topic.*') as $key) {
-                $rawKey = str_starts_with($key, $prefix) ? substr($key, strlen($prefix)) : $key;
-                if (preg_match('/graphql\.topic\.(.+)$/', $rawKey, $matches)) {
-                    $topics[] = $matches[1];
-                }
-            }
-        } catch (Throwable) {
-            // Redis scanning is best-effort
         }
 
         return array_values(array_unique($topics));
