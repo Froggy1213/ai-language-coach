@@ -85,6 +85,8 @@ x-laravel-environment: &laravel-environment
   LIGHTHOUSE_BROADCASTER: reverb
   LIGHTHOUSE_SUBSCRIPTION_STORAGE: redis
   LIGHTHOUSE_QUERY_CACHE_MODE: opcache
+  LIGHTHOUSE_MAX_QUERY_DEPTH: ${LIGHTHOUSE_MAX_QUERY_DEPTH:-10}
+  LIGHTHOUSE_MAX_QUERY_COMPLEXITY: ${LIGHTHOUSE_MAX_QUERY_COMPLEXITY:-50}
 
   # Reverb's host and port here are the *server-side* target: inside the network
   # the service is `reverb:8081`. The browser is told a different address by the

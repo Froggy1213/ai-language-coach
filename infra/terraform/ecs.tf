@@ -147,6 +147,8 @@ locals {
     { name = "LIGHTHOUSE_BROADCASTER", value = "reverb" },
     { name = "LIGHTHOUSE_SUBSCRIPTION_STORAGE", value = "redis" },
     { name = "LIGHTHOUSE_QUERY_CACHE_MODE", value = "opcache" },
+    { name = "LIGHTHOUSE_MAX_QUERY_DEPTH", value = "10" },
+    { name = "LIGHTHOUSE_MAX_QUERY_COMPLEXITY", value = "50" },
     { name = "REVERB_HOST", value = "127.0.0.1" },
     { name = "REVERB_PORT", value = "8081" },
     { name = "REVERB_SCHEME", value = "https" },

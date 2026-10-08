@@ -12,6 +12,7 @@ use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
 use App\Enums\VoiceSessionStatus;
 use App\GraphQL\Types\NativeEnumType;
+use App\GraphQL\Validation\ValidationRulesProvider;
 use App\Mistakes\DeepSeekMistakeAnalyzer;
 use App\Mistakes\MistakeAnalyzer;
 use App\Voice\LiveKitToken;
@@ -20,6 +21,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
 use Nuwave\Lighthouse\Schema\TypeRegistry;
+use Nuwave\Lighthouse\Support\Contracts\ProvidesValidationRules;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -69,6 +71,17 @@ class AppServiceProvider extends ServiceProvider
             apiKey: (string) $this->app['config']->get('voice.livekit.api_key'),
             apiSecret: (string) $this->app['config']->get('voice.livekit.api_secret'),
         ));
+
+        // Lighthouse builds its validation rules — including the query depth
+        // limit — from `lighthouse.security`. Its stock QueryDepth rule counts the
+        // standard introspection query as deeper than any product query, which
+        // would refuse the introspection Lighthouse's own test helper performs;
+        // the replacement mirrors webonyx's handling of `__schema`. `extend`, not
+        // `bind`, because Lighthouse registers its own binding after this provider.
+        $this->app->extend(
+            ProvidesValidationRules::class,
+            fn (): ProvidesValidationRules => new ValidationRulesProvider($this->app['config']),
+        );
     }
 
     /**
