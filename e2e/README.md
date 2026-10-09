@@ -147,13 +147,21 @@ To keep the smoke suite fast, deterministic, and runnable without third-party ve
 2. Add `@smoke` to the test suite or test description:
    ```ts
    import { test, expect } from '@playwright/test';
-   import { loginAsSeededUser } from './helpers';
+   import { gotoAsSeededUser, trackPageErrors } from './helpers';
 
    test.describe('My Feature @smoke', () => {
      test('verifies key interaction', async ({ page }) => {
-       await loginAsSeededUser(page);
+       const tracker = trackPageErrors(page);
+       await gotoAsSeededUser(page, '/roadmap');
        // ... assertions
+       tracker.assertClean();
      });
    });
    ```
-3. Ensure the test is independent and leaves no corrupted state for subsequent tests.
+3. **Page and console error tracking**: Use `trackPageErrors(page)` from `./helpers` instead of hand-rolling listeners. It registers listeners for `pageerror`, `console` errors, and `/graphql` responses with status >= 400, exposing `pageErrors`, `consoleErrors`, and `failedGraphqlResponses` along with an `assertClean()` method to assert that none occurred:
+   ```ts
+   const tracker = trackPageErrors(page);
+   await gotoAsSeededUser(page, '/roadmap');
+   tracker.assertClean();
+   ```
+4. Ensure the test is independent and leaves no corrupted state for subsequent tests.

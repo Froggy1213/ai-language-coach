@@ -107,6 +107,18 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # Regenerate GraphQL types and verify the committed file is not stale.
+      # The diff check is what keeps the generated file honest.
+      - name: Verify generated GraphQL types
+        working-directory: frontend
+        run: |
+          npm run codegen
+          git diff --exit-code -- app/types/graphql.ts
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
       - name: Build
         working-directory: frontend
         run: npm run build

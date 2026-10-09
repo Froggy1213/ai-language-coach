@@ -1,6 +1,13 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
+import type { ChannelAuthorizationCallback } from 'pusher-js'
 import { csrfAwareFetch } from '~/utils/csrf-fetch'
+
+declare global {
+  interface Window {
+    Pusher: typeof Pusher
+  }
+}
 
 /**
  * Echo over Reverb ($echo), used for GraphQL subscriptions.
@@ -28,7 +35,7 @@ export default defineNuxtPlugin(() => {
     enabledTransports: ['ws', 'wss'],
     authEndpoint: `${backendUrl}/graphql/subscriptions/auth`,
     authorizer: (channel: { name: string }) => ({
-      authorize: async (socketId: string, callback: (error: Error | null, data: unknown) => void) => {
+      authorize: async (socketId: string, callback: ChannelAuthorizationCallback) => {
         try {
           const response = await csrfAwareFetch(backendUrl, `${backendUrl}/graphql/subscriptions/auth`, {
             method: 'POST',

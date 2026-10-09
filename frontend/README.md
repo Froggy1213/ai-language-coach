@@ -1,75 +1,91 @@
-# Nuxt Minimal Starter
+# AI Language Coach — Frontend
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Nuxt 4 Single-Page Application (SPA, `ssr: false`) for the AI Language Coach.
+
+Provides the learner-facing interface: onboarding assessment recording, personalized roadmap visualization, interactive voice practice with the LiveKit conversational agent, spaced repetition reviews (SM-2), session feedback, and account privacy settings.
+
+## Stack & Architecture
+
+- **Framework**: Nuxt 4 in SPA mode (`ssr: false` in `nuxt.config.ts`, as auth session cookies live in the browser).
+- **Styling**: Tailwind CSS v4 via `@tailwindcss/vite` (`app/assets/css/main.css`).
+- **Auth**: Laravel Sanctum SPA session cookies via double-submit CSRF handshake (`app/utils/csrf-fetch.ts`).
+- **API**: GraphQL via `@urql/vue` (`app/plugins/urql.ts`), installed both as `$urql` and into Vue's `provide`/`inject`.
+- **Realtime**: Laravel Reverb WebSockets via `laravel-echo` and `pusher-js` (`app/plugins/echo.ts`), orchestrated through `app/composables/useLighthouseSubscription.ts`.
+- **Voice Calls**: WebRTC voice streaming directly to self-hosted LiveKit Server via `livekit-client` (`app/composables/useVoiceSession.ts`).
 
 ## Setup
 
-Make sure to install dependencies:
+Install dependencies:
 
 ```bash
-# npm
-npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+npm ci
 ```
 
-## Development Server
+*(Note: peer dependencies are managed via `frontend/.npmrc`).*
 
-Start the development server on `http://localhost:3000`:
+### Environment Variables
 
-```bash
-# npm
-npm run dev
+Configuration is declared in `nuxt.config.ts` under `runtimeConfig.public` and can be overridden via `frontend/.env` (see `frontend/.env.example`):
 
-# pnpm
-pnpm dev
+| Variable | Default | Purpose |
+|---|---|---|
+| `NUXT_PUBLIC_BACKEND_URL` | `http://localhost:8000` | Base URL of the Laravel API backend. |
+| `NUXT_PUBLIC_REVERB_APP_KEY` | `""` | Reverb application key for Pusher protocol. |
+| `NUXT_PUBLIC_REVERB_HOST` | `localhost` | Reverb WebSocket host. |
+| `NUXT_PUBLIC_REVERB_PORT` | `8080` | Reverb WebSocket port (`8081` in Docker `--profile full`). |
+| `NUXT_PUBLIC_REVERB_SCHEME` | `http` | Reverb protocol scheme (`http` or `https`). |
+| `NUXT_PUBLIC_LIVEKIT_URL` | `ws://localhost:7880` | LiveKit Server WebRTC signaling endpoint. |
 
-# yarn
-yarn dev
+## Scripts
 
-# bun
-bun run dev
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Starts Vite local development server on `http://localhost:3000`. |
+| `npm run build` | Compiles production SPA build (`nuxt build`). |
+| `npm run preview` | Previews the compiled production build locally (`nuxt preview`). |
+| `npm run codegen` | Generates `app/types/graphql.ts` from backend GraphQL SDL and enums (`graphql-codegen --config codegen.ts`). |
+| `npm run typecheck` | Runs Vue and TypeScript type checking (`nuxt typecheck` via `vue-tsc`). |
+
+## Directory Map
+
+```
+frontend/
+├── app/
+│   ├── assets/css/        # Tailwind v4 main stylesheet (main.css)
+│   ├── components/        # Reusable UI components (UiAlert.vue, UiSpinner.vue)
+│   ├── composables/       # Vue composables (useAuth, useAssessment, useElapsedTimer,
+│   │                      #   useLighthouseSubscription, usePrivacy, useReviews,
+│   │                      #   useSessionFeedback, useVoiceSession)
+│   ├── constants/         # Shared constants (languages.ts)
+│   ├── graphql/           # GraphQL queries, mutations, subscriptions (documents.ts)
+│   ├── middleware/        # Global navigation route guards (auth.global.ts)
+│   ├── pages/             # File-based SPA routes:
+│   │   ├── login.vue              # Sign-in
+│   │   ├── register.vue           # Registration
+│   │   ├── roadmap.vue            # Active learning roadmap & cards
+│   │   ├── onboarding.vue         # CEFR voice assessment & upload
+│   │   ├── practice/[cardId].vue  # LiveKit voice practice room
+│   │   ├── review.vue             # Spaced repetition reviews & recurring mistakes
+│   │   ├── session/[id].vue       # Post-session feedback & mistakes
+│   │   └── settings.vue           # Consent & account deletion
+│   ├── plugins/           # Client plugins (echo.ts, urql.ts)
+│   ├── types/             # TypeScript type definitions:
+│   │   ├── graphql.ts             # Generated GraphQL types (never edit manually!)
+│   │   ├── view-models.ts         # Hand-written UI projections (CurrentUser)
+│   │   └── nuxt.d.ts              # Nuxt runtime ambient declarations
+│   └── utils/             # Shared helper utilities (csrf-fetch.ts, format.ts,
+│                          #   graphql-error.ts, pluralize.ts)
+├── codegen.ts             # GraphQL Code Generator configuration
+├── nuxt.config.ts         # Nuxt configuration and runtimeConfig
+└── package.json           # Dependencies and scripts
 ```
 
-## Production
+## Conventions
 
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+- **Code formatting**: 2-space indentation, single quotes (`'`), and no semicolons (`;`).
+- **Nuxt auto-imports**: Utilities in `app/utils/`, composables in `app/composables/`, and components in `app/components/` are auto-imported by Nuxt.
+- **Generated GraphQL types**: `app/types/graphql.ts` is fully generated by GraphQL Code Generator (`npm run codegen`). **Never edit this file manually.** When backend schema or `codegen-enums.graphql` changes, re-run `npm run codegen`.
+- **UI view models**: Types specific to UI projections that should not match full backend entities (e.g. `CurrentUser`, which is limited to fields selected by `ME_QUERY`) reside in `app/types/view-models.ts`.
+- **`UiAlert` padding prop**: `UiAlert` defines an explicit `padding` prop (`'sm' | 'md' | 'lg'`) rather than taking arbitrary caller classes. This is necessary because Tailwind CSS emits `p-*` utilities before `px-*`/`py-*` in the stylesheet cascade, so caller-supplied padding classes would silently lose against default box styling.
+- **GraphQL error mapping**: All user-facing error messages are resolved through `graphQLErrorMessageFor(error, { codes, messages, fallback })` (`app/utils/graphql-error.ts`), ensuring `UNAUTHENTICATED` / `Unauthenticated.` errors consistently display `AUTH_EXPIRED_MESSAGE` in Russian.
+- **Lighthouse subscriptions**: Realtime subscriptions must always be opened through `app/composables/useLighthouseSubscription.ts` (`openLighthouseSubscription` or `useLighthouseSubscription`), which handles waiting for the Pusher socket ID, awaiting Echo channel authorization (`channel.subscribed()`), unwrapping Lighthouse's `{ more, result }` envelope, and tearing down subscriptions cleanly on scope disposal.

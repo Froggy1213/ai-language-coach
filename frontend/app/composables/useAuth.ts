@@ -1,6 +1,6 @@
 import type { CombinedError } from '@urql/vue'
 import { LOGIN_MUTATION, LOGOUT_MUTATION, ME_QUERY, REGISTER_MUTATION } from '~/graphql/documents'
-import type { CurrentUser } from '~/types/graphql'
+import type { CurrentUser } from '~/types/view-models'
 
 /**
  * Session state for the SPA, shared through `useState` so the header, the

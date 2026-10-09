@@ -1,0 +1,39 @@
+# These enums reach GraphQL through App\GraphQL\Types\NativeEnumType registered on
+# Lighthouse's TypeRegistry (AppServiceProvider), never through the SDL (README decision 6).
+# This file exists ONLY as codegen/IDE input and is NOT part of the served schema
+# (config/lighthouse.php schema_path is the single file graphql/schema.graphql).
+# CodegenEnumsTest fails if it drifts from the PHP enums.
+
+enum CefrLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+}
+
+enum RoadmapStatus {
+  active
+  completed
+  archived
+}
+
+enum LessonCardStatus {
+  locked
+  ready
+  completed
+}
+
+enum AssessmentStatus {
+  processing
+  done
+  failed
+}
+
+enum VoiceSessionStatus {
+  pending
+  active
+  completed
+  failed
+  abandoned
+}
