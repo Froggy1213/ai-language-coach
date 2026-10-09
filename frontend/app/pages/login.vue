@@ -16,7 +16,7 @@ async function submit(): Promise<void> {
     await login(email.value, password.value)
     await navigateTo('/roadmap')
   } catch (failure) {
-    error.value = graphQLErrorMessage(failure as CombinedError) ?? 'Не удалось войти.'
+    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось войти.' })
   } finally {
     pending.value = false
   }
@@ -53,9 +53,7 @@ async function submit(): Promise<void> {
         >
       </label>
 
-      <p v-if="error" class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-        {{ error }}
-      </p>
+      <UiAlert :message="error" />
 
       <button
         type="submit"

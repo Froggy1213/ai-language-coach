@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoAsSeededUser } from './helpers';
+import { gotoAsSeededUser, trackPageErrors } from './helpers';
 
 /**
  * The settings screen is where a learner sees what was recorded about them and
@@ -10,18 +10,7 @@ import { gotoAsSeededUser } from './helpers';
  */
 test.describe('Account settings screen @smoke', () => {
   test('/settings shows the consent record and the guarded deletion flow', async ({ page }) => {
-    const consoleErrors: string[] = [];
-    const pageErrors: Error[] = [];
-
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
-      }
-    });
-
-    page.on('pageerror', (exception) => {
-      pageErrors.push(exception);
-    });
+    const tracker = trackPageErrors(page);
 
     await gotoAsSeededUser(page, '/settings');
 
@@ -39,7 +28,7 @@ test.describe('Account settings screen @smoke', () => {
     await expect(page.getByPlaceholder('DELETE')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Удалить аккаунт' })).toBeVisible();
 
-    expect(pageErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
+    expect(tracker.pageErrors).toEqual([]);
+    expect(tracker.consoleErrors).toEqual([]);
   });
 });

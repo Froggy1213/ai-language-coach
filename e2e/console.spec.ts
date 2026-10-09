@@ -3,36 +3,11 @@ import { test, expect } from '@playwright/test';
 // This spec is about the guest-to-learner flow itself, so it starts signed out
 // rather than inheriting the session the setup project saved.
 test.use({ storageState: { cookies: [], origins: [] } });
-import { SEEDED_USER } from './helpers';
+import { SEEDED_USER, trackPageErrors } from './helpers';
 
 test.describe('Console and network error guards @smoke', () => {
   test('walking login -> roadmap -> onboarding produces no uncaught errors, no console errors, and no failed graphql responses', async ({ page }) => {
-    const pageErrors: Error[] = [];
-    const consoleErrors: string[] = [];
-    const failedGraphqlResponses: { url: string; status: number; statusText: string }[] = [];
-
-    // Capture uncaught exceptions
-    page.on('pageerror', (exception) => {
-      pageErrors.push(exception);
-    });
-
-    // Capture console errors
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
-      }
-    });
-
-    // Guard against any >= 400 GraphQL response (catches Decision 21/34 defects)
-    page.on('response', (response) => {
-      if (response.url().includes('/graphql') && response.status() >= 400) {
-        failedGraphqlResponses.push({
-          url: response.url(),
-          status: response.status(),
-          statusText: response.statusText(),
-        });
-      }
-    });
+    const tracker = trackPageErrors(page);
 
     // 1. Visit /login and authenticate
     await page.goto('/login');
@@ -57,8 +32,6 @@ test.describe('Console and network error guards @smoke', () => {
     await expect(page.getByText('Прежде чем записывать')).toBeVisible();
 
     // 4. Assert clean execution
-    expect(pageErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
-    expect(failedGraphqlResponses).toEqual([]);
+    tracker.assertClean();
   });
 });

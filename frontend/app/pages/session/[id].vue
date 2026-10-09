@@ -62,18 +62,6 @@ function getStatusMeta(status: VoiceSessionStatus | undefined): StatusMeta {
   }
 }
 
-function formatDuration(sec: number | null | undefined): string | null {
-  if (sec == null || sec <= 0) {
-    return null
-  }
-  const mins = Math.floor(sec / 60)
-  const remainingSec = sec % 60
-  if (mins === 0) {
-    return `${remainingSec} сек`
-  }
-  return `${mins} мин ${remainingSec > 0 ? `${remainingSec} сек` : ''}`.trim()
-}
-
 function formatFailReason(reason: string | null | undefined): string {
   if (!reason) {
     return 'Сессия завершилась непредвиденной ошибкой.'
@@ -89,15 +77,6 @@ function formatFailReason(reason: string | null | undefined): string {
     agent_error: 'Внутренняя ошибка голосового агента.',
   }
   return map[reason] ?? `Причина ошибки: ${reason}`
-}
-
-function pluralizeMistakes(count: number): string {
-  const abs = Math.abs(count) % 100
-  const rem = abs % 10
-  if (abs > 10 && abs < 20) return 'ошибок'
-  if (rem > 1 && rem < 5) return 'ошибки'
-  if (rem === 1) return 'ошибка'
-  return 'ошибок'
 }
 
 interface MistakeGroup {
@@ -133,7 +112,7 @@ const groupedMistakes = computed<MistakeGroup[]>(() => {
     <!-- Initial Loading State -->
     <div v-if="loading && !session" class="space-y-3">
       <div class="flex items-center gap-3 text-slate-400">
-        <span class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+        <UiSpinner />
         <p>Загружаем данные сессии…</p>
       </div>
     </div>
@@ -207,10 +186,10 @@ const groupedMistakes = computed<MistakeGroup[]>(() => {
             </span>
 
             <span
-              v-if="formatDuration(session.durationSec)"
+              v-if="formatDuration(session.durationSec ?? 0)"
               class="rounded-full border border-slate-800 bg-slate-800/80 px-3 py-1 text-xs text-slate-300"
             >
-              Длительность: {{ formatDuration(session.durationSec) }}
+              Длительность: {{ formatDuration(session.durationSec ?? 0) }}
             </span>
           </div>
         </div>
@@ -222,13 +201,13 @@ const groupedMistakes = computed<MistakeGroup[]>(() => {
         </div>
 
         <!-- Session Failure Reason Alert -->
-        <div
+        <UiAlert
           v-if="session.status === 'failed' || session.failReason"
-          class="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200"
+          padding="md"
         >
           <p class="font-medium text-rose-300">Причина сбоя:</p>
           <p class="mt-0.5 text-rose-100/90">{{ formatFailReason(session.failReason) }}</p>
-        </div>
+        </UiAlert>
       </div>
 
       <!-- Handshake / Request Error Banner -->
@@ -308,7 +287,7 @@ const groupedMistakes = computed<MistakeGroup[]>(() => {
         <template v-else>
           <header class="flex items-center justify-between">
             <h2 class="text-lg font-semibold text-slate-100">
-              Найденные ошибки ({{ mistakes.length }} {{ pluralizeMistakes(mistakes.length) }})
+              Найденные ошибки ({{ mistakes.length }} {{ pluralize(mistakes.length, ['ошибка', 'ошибки', 'ошибок']) }})
             </h2>
           </header>
 
@@ -325,7 +304,7 @@ const groupedMistakes = computed<MistakeGroup[]>(() => {
                   <h3 class="text-base font-medium text-slate-100">{{ group.title }}</h3>
                 </div>
                 <span class="rounded-full bg-rose-500/10 px-2.5 py-0.5 text-xs text-rose-300 border border-rose-500/30">
-                  {{ group.mistakes.length }} {{ pluralizeMistakes(group.mistakes.length) }}
+                  {{ group.mistakes.length }} {{ pluralize(group.mistakes.length, ['ошибка', 'ошибки', 'ошибок']) }}
                 </span>
               </div>
 

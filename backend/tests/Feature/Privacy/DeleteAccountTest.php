@@ -17,15 +17,16 @@ use Aws\CommandInterface;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Support\Facades\Redis;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Nuwave\Lighthouse\Subscriptions\Contracts\StoresSubscriptions;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
+use Tests\Support\ClearsSubscriptionStorage;
 use Tests\TestCase;
 
 class DeleteAccountTest extends TestCase
 {
+    use ClearsSubscriptionStorage;
     use LazilyRefreshDatabase;
     use MakesGraphQLRequests;
 
@@ -57,14 +58,6 @@ class DeleteAccountTest extends TestCase
             'filesystems.disks.s3.bucket' => 'coach-audio',
             'assessments.key_prefix' => 'assessments',
         ]);
-
-        $redis = Redis::connection(config('lighthouse.subscriptions.broadcasters.echo.connection', 'default'));
-        $prefix = (string) config('database.redis.options.prefix', '');
-
-        foreach ($redis->keys('*graphql.*') as $key) {
-            $unprefixed = str_starts_with($key, $prefix) ? substr($key, strlen($prefix)) : $key;
-            $redis->del($unprefixed);
-        }
     }
 
     public function test_guests_cannot_delete_account(): void

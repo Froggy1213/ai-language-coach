@@ -3,7 +3,7 @@ import type { CombinedError } from '@urql/vue'
 import { useQuery } from '@urql/vue'
 import { GENERATE_ROADMAP_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
 import type { Roadmap } from '~/types/graphql'
-import { graphQLErrorMessage } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 const { $urql } = useNuxtApp()
 
@@ -24,7 +24,7 @@ async function generate(): Promise<void> {
     const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
 
     if (failure) {
-      generateError.value = graphQLErrorMessage(failure as CombinedError) ?? 'Не удалось собрать роадмап.'
+      generateError.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось собрать роадмап.' })
     } else {
       // The mutation is idempotent and only reports the title; the card list is
       // the query's job.
@@ -44,12 +44,10 @@ const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.
   <section class="space-y-8">
     <p v-if="fetching && !roadmap" class="text-slate-400">Загружаем роадмап…</p>
 
-    <p
+    <UiAlert
       v-else-if="error && !roadmap"
-      class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
-    >
-      {{ graphQLErrorMessage(error) ?? 'Не удалось загрузить роадмап.' }}
-    </p>
+      :message="graphQLErrorMessageFor(error, { fallback: 'Не удалось загрузить роадмап.' })"
+    />
 
     <template v-else-if="roadmap">
       <header class="flex flex-wrap items-center justify-between gap-4">
@@ -84,12 +82,7 @@ const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.
         </p>
       </header>
 
-      <p
-        v-if="generateError"
-        class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
-      >
-        {{ generateError }}
-      </p>
+      <UiAlert :message="generateError" />
 
       <div class="flex flex-wrap items-center gap-3">
         <button

@@ -6,7 +6,7 @@ import {
   SUBMIT_REVIEW_RESULT_MUTATION,
 } from '~/graphql/documents'
 import type { RecurringMistake, ReviewItem } from '~/types/graphql'
-import { graphQLErrorCode, graphQLErrorMessage } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 /**
  * Manages the spaced repetition review queue and SM-2 quality submission (plan §4–6).
@@ -29,30 +29,14 @@ export function useReviews() {
   const dueCount = computed(() => dueReviews.value.length)
 
   function mapReviewError(failure: CombinedError | null | undefined): string {
-    if (!failure) {
-      return 'Не удалось сохранить результат повторения.'
-    }
-
-    const code = graphQLErrorCode(failure)
-
-    if (code === 'REVIEW_ITEM_NOT_FOUND') {
-      return 'Материал для повторения не найден.'
-    }
-
-    if (code === 'GRAMMAR_POINT_NOT_FOUND') {
-      return 'Грамматическое правило не найдено.'
-    }
-
-    if (code === 'UNAUTHENTICATED') {
-      return 'Сессия истекла. Пожалуйста, выполните вход снова.'
-    }
-
-    const serverMessage = graphQLErrorMessage(failure)
-    if (serverMessage === 'Unauthenticated.') {
-      return 'Сессия истекла. Пожалуйста, выполните вход снова.'
-    }
-
-    return serverMessage ?? 'Не удалось сохранить результат повторения.'
+    return graphQLErrorMessageFor(failure, {
+      codes: {
+        REVIEW_ITEM_NOT_FOUND: 'Материал для повторения не найден.',
+        GRAMMAR_POINT_NOT_FOUND: 'Грамматическое правило не найдено.',
+        UNAUTHENTICATED: 'Сессия истекла. Пожалуйста, выполните вход снова.',
+      },
+      fallback: 'Не удалось сохранить результат повторения.',
+    })
   }
 
   async function fetchDueReviews(): Promise<void> {

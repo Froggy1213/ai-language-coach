@@ -65,6 +65,15 @@ class User extends Authenticatable
     }
 
     /**
+     * Resolve the human-readable display name of the user's target language,
+     * falling back to the uppercased language code when unconfigured.
+     */
+    public function targetLanguageName(): string
+    {
+        return config("languages.names.{$this->target_language}") ?? mb_strtoupper($this->target_language);
+    }
+
+    /**
      * The roadmap the learner is working through now.
      *
      * Regeneration archives the previous roadmap instead of deleting it, so the

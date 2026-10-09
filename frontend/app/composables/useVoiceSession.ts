@@ -3,7 +3,8 @@ import { Room, RoomEvent, Track, type RemoteTrack } from 'livekit-client'
 import { ref, onUnmounted, type Ref } from 'vue'
 import { REQUEST_VOICE_TOKEN_MUTATION } from '~/graphql/documents'
 import type { VoiceSession } from '~/types/graphql'
-import { graphQLErrorCode, graphQLErrorMessage } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { useElapsedTimer } from '~/composables/useElapsedTimer'
 
 export type VoiceSessionUiStatus = 'idle' | 'requesting' | 'connecting' | 'connected' | 'ended' | 'error'
 
@@ -25,27 +26,26 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   const error = ref<string | null>(null)
   const sessionId = ref<string | null>(null)
   const agentPresent = ref(false)
-  const elapsedSeconds = ref(0)
+
+  const {
+    elapsed: elapsedSeconds,
+    start: startTimerTicker,
+    stop: stopTimerTicker,
+    reset: resetTimer,
+  } = useElapsedTimer()
 
   let room: Room | null = null
-  let timer: ReturnType<typeof setInterval> | null = null
   let disposed = false
   const attachedElements: HTMLMediaElement[] = []
   const attachedTrackSids = new Set<string>()
 
   function startTimer(): void {
-    stopTimer()
-    elapsedSeconds.value = 0
-    timer = setInterval(() => {
-      elapsedSeconds.value += 1
-    }, 1000)
+    resetTimer()
+    startTimerTicker()
   }
 
   function stopTimer(): void {
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
+    stopTimerTicker()
   }
 
   function attachRemoteTrack(track: RemoteTrack): void {
@@ -84,48 +84,22 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   }
 
   function mapVoiceError(failure: CombinedError): string {
-    const code = graphQLErrorCode(failure)
-
-    if (code === 'VOICE_FLEET_BUSY') {
-      return 'Голосовой агент пока не запущен. Серверная часть и комната готовы к работе, но воркер голосового агента еще не запущен. Попробуйте позже.'
-    }
-
-    if (code === 'VOICE_START_FAILED') {
-      return 'Не удалось начать голосовую сессию на сервере. Попробуйте позже.'
-    }
-
-    if (code === 'VOICE_DAILY_LIMIT_REACHED') {
-      return 'Дневной лимит голосовых сессий исчерпан. Попробуйте снова завтра.'
-    }
-
-    if (code === 'LESSON_CARD_NOT_FOUND') {
-      return 'Этот урок не найден в вашем роадмапе.'
-    }
-
-    if (code === 'LESSON_CARD_LOCKED') {
-      return 'Этот урок пока заблокирован.'
-    }
-
-    if (code === 'REVIEW_ITEM_NOT_FOUND') {
-      return 'Материал для повторения не найден.'
-    }
-
-    if (code === 'GRAMMAR_POINT_NOT_FOUND') {
-      return 'Грамматическое правило не найдено.'
-    }
-
-    const serverMessage = graphQLErrorMessage(failure)
-    if (serverMessage === 'This lesson card does not exist.') {
-      return 'Этот урок не найден в вашем роадмапе.'
-    }
-    if (serverMessage === 'This lesson card is not ready to practise yet.') {
-      return 'Этот урок пока недоступен для практики.'
-    }
-    if (serverMessage === 'Unauthenticated.') {
-      return 'Сессия истекла. Пожалуйста, выполните вход снова.'
-    }
-
-    return serverMessage ?? 'Не удалось запросить голосовую сессию.'
+    return graphQLErrorMessageFor(failure, {
+      codes: {
+        VOICE_FLEET_BUSY: 'Голосовой агент пока не запущен. Серверная часть и комната готовы к работе, но воркер голосового агента еще не запущен. Попробуйте позже.',
+        VOICE_START_FAILED: 'Не удалось начать голосовую сессию на сервере. Попробуйте позже.',
+        VOICE_DAILY_LIMIT_REACHED: 'Дневной лимит голосовых сессий исчерпан. Попробуйте снова завтра.',
+        LESSON_CARD_NOT_FOUND: 'Этот урок не найден в вашем роадмапе.',
+        LESSON_CARD_LOCKED: 'Этот урок пока заблокирован.',
+        REVIEW_ITEM_NOT_FOUND: 'Материал для повторения не найден.',
+        GRAMMAR_POINT_NOT_FOUND: 'Грамматическое правило не найдено.',
+      },
+      messages: {
+        'This lesson card does not exist.': 'Этот урок не найден в вашем роадмапе.',
+        'This lesson card is not ready to practise yet.': 'Этот урок пока недоступен для практики.',
+      },
+      fallback: 'Не удалось запросить голосовую сессию.',
+    })
   }
 
   async function leave(): Promise<void> {

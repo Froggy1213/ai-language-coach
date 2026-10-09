@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CombinedError } from '@urql/vue'
+import { SUPPORTED_LANGUAGES, languageOptionLabel } from '~/constants/languages'
 
 const { register } = useAuth()
 
@@ -18,7 +19,7 @@ async function submit(): Promise<void> {
     await register(name.value, email.value, password.value, targetLanguage.value)
     await navigateTo('/roadmap')
   } catch (failure) {
-    error.value = graphQLErrorMessage(failure as CombinedError) ?? 'Не удалось создать аккаунт.'
+    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось создать аккаунт.' })
   } finally {
     pending.value = false
   }
@@ -74,13 +75,11 @@ async function submit(): Promise<void> {
           v-model="targetLanguage"
           class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
         >
-          <option value="en">Английский</option>
+          <option v-for="code in SUPPORTED_LANGUAGES" :key="code" :value="code">{{ languageOptionLabel(code) }}</option>
         </select>
       </label>
 
-      <p v-if="error" class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-        {{ error }}
-      </p>
+      <UiAlert :message="error" />
 
       <button
         type="submit"

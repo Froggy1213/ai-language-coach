@@ -138,7 +138,7 @@ final class RoadmapGenerator
      */
     private function title(User $user, array $contents): string
     {
-        $language = config("languages.names.{$user->target_language}") ?? mb_strtoupper($user->target_language);
+        $language = $user->targetLanguageName();
 
         // Contents are ordered weakest first, so the last one is the strongest
         // band the catalogue actually covers for this learner — which is not

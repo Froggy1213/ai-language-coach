@@ -1,4 +1,5 @@
 import { DELETE_ACCOUNT_MUTATION } from '~/graphql/documents'
+import { graphQLErrorCode } from '~/utils/graphql-error'
 
 export function usePrivacy() {
   const { $urql } = useNuxtApp()
@@ -31,7 +32,7 @@ export function usePrivacy() {
         .toPromise()
 
       if (result.error) {
-        const code = result.error.graphQLErrors[0]?.extensions?.code as string | undefined
+        const code = graphQLErrorCode(result.error) ?? undefined
         error.value = translateError(code)
         return false
       }

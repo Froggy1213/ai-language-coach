@@ -1,5 +1,57 @@
 import { expect, type Page } from '@playwright/test';
 
+export interface PageErrorTracker {
+  pageErrors: Error[];
+  consoleErrors: string[];
+  failedGraphqlResponses: { url: string; status: number; statusText: string }[];
+  assertClean: () => void;
+}
+
+/**
+ * Registers listeners for uncaught page errors, console errors, and failed
+ * GraphQL responses (status >= 400), exposing the captured arrays and an
+ * assertClean() helper to assert that all three remain empty.
+ */
+export function trackPageErrors(page: Page): PageErrorTracker {
+  const pageErrors: Error[] = [];
+  const consoleErrors: string[] = [];
+  const failedGraphqlResponses: { url: string; status: number; statusText: string }[] = [];
+
+  // Capture uncaught exceptions
+  page.on('pageerror', (exception) => {
+    pageErrors.push(exception);
+  });
+
+  // Capture console errors
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
+    }
+  });
+
+  // Guard against any >= 400 GraphQL response (catches Decision 21/34 defects)
+  page.on('response', (response) => {
+    if (response.url().includes('/graphql') && response.status() >= 400) {
+      failedGraphqlResponses.push({
+        url: response.url(),
+        status: response.status(),
+        statusText: response.statusText(),
+      });
+    }
+  });
+
+  return {
+    pageErrors,
+    consoleErrors,
+    failedGraphqlResponses,
+    assertClean: () => {
+      expect(pageErrors).toEqual([]);
+      expect(consoleErrors).toEqual([]);
+      expect(failedGraphqlResponses).toEqual([]);
+    },
+  };
+}
+
 export const SEEDED_USER = {
   email: 'test@example.com',
   password: 'password',

@@ -70,7 +70,7 @@ final class DeepSeekMistakeAnalyzer implements MistakeAnalyzer
      */
     private function instructions(User $user, Collection $grammarPoints): string
     {
-        $languageName = config("languages.names.{$user->target_language}") ?? mb_strtoupper($user->target_language);
+        $languageName = $user->targetLanguageName();
 
         $catalogueLines = [];
         foreach ($grammarPoints as $gp) {

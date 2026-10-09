@@ -5,8 +5,8 @@ import {
   VOICE_SESSION_QUERY,
 } from '~/graphql/documents'
 import type { Mistake, VoiceSession } from '~/types/graphql'
-import { csrfAwareFetch } from '~/utils/csrf-fetch'
-import { graphQLErrorCode, graphQLErrorMessage } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { useLighthouseSubscription } from '~/composables/useLighthouseSubscription'
 
 /**
  * Manages the feedback and async mistake analysis for a voice session (plan §4–6).
@@ -17,9 +17,8 @@ import { graphQLErrorCode, graphQLErrorMessage } from '~/utils/graphql-error'
  * handshakes honestly, and providing manual refresh fallback.
  */
 export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
-  const { $urql, $echo } = useNuxtApp()
-  const config = useRuntimeConfig()
-  const backendUrl = String(config.public.backendUrl).replace(/\/$/, '')
+  const { $urql } = useNuxtApp()
+  const lighthouse = useLighthouseSubscription()
 
   const session = ref<VoiceSession | null>(null)
   const loading = ref(true)
@@ -39,102 +38,13 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   }
 
   function mapSessionError(failure: CombinedError | null | undefined): string {
-    if (!failure) {
-      return 'Не удалось загрузить данные сессии.'
-    }
-
-    const code = graphQLErrorCode(failure)
-
-    if (code === 'VOICE_SESSION_NOT_FOUND') {
-      return 'Голосовая сессия не найдена.'
-    }
-
-    if (code === 'LESSON_CARD_NOT_FOUND') {
-      return 'Урок не найден в вашем роадмапе.'
-    }
-
-    if (code === 'UNAUTHENTICATED') {
-      return 'Сессия истекла. Пожалуйста, выполните вход снова.'
-    }
-
-    const serverMessage = graphQLErrorMessage(failure)
-    if (serverMessage === 'Unauthenticated.') {
-      return 'Сессия истекла. Пожалуйста, выполните вход снова.'
-    }
-
-    return serverMessage ?? 'Не удалось загрузить данные сессии.'
-  }
-
-  /**
-   * Resolves the Pusher connection socket ID, waiting up to `timeoutMs` for
-   * the socket to connect if it is not yet ready.
-   */
-  async function connectedSocketId(timeoutMs = 5000): Promise<string> {
-    const socketId = $echo.socketId()
-
-    if (socketId) {
-      return socketId
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const pusherConnection = $echo.connector.pusher.connection
-
-      const onConnected = () => {
-        clearTimeout(timeout)
-        pusherConnection.unbind('connected', onConnected)
-        resolve()
-      }
-
-      const timeout = setTimeout(() => {
-        pusherConnection.unbind('connected', onConnected)
-        reject(
-          new Error(
-            'WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.',
-          ),
-        )
-      }, timeoutMs)
-
-      pusherConnection.bind('connected', onConnected)
-    })
-
-    return $echo.socketId() ?? ''
-  }
-
-  /**
-   * Echo reports a private channel as subscribed only after pusher-js has
-   * authorized it via /graphql/subscriptions/auth and the server has confirmed.
-   */
-  async function confirmSubscription(
-    channel: ReturnType<typeof $echo.private>,
-    timeoutMs = 10000,
-  ): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () =>
-          reject(
-            new Error(
-              'Не удалось подписаться на результат: проверьте, что запущен reverb:start и что '
-              + '/graphql/subscriptions/auth доступен браузеру.',
-            ),
-          ),
-        timeoutMs,
-      )
-
-      channel.subscribed(() => {
-        clearTimeout(timeout)
-        resolve()
-      })
-
-      if (typeof (channel as any).error === 'function') {
-        ;(channel as any).error((err: any) => {
-          clearTimeout(timeout)
-          reject(
-            new Error(
-              err?.message ?? 'Ошибка авторизации канала подписки на результат анализа.',
-            ),
-          )
-        })
-      }
+    return graphQLErrorMessageFor(failure, {
+      codes: {
+        VOICE_SESSION_NOT_FOUND: 'Голосовая сессия не найдена.',
+        LESSON_CARD_NOT_FOUND: 'Урок не найден в вашем роадмапе.',
+        UNAUTHENTICATED: 'Сессия истекла. Пожалуйста, выполните вход снова.',
+      },
+      fallback: 'Не удалось загрузить данные сессии.',
     })
   }
 
@@ -149,60 +59,24 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
     }
 
     try {
-      const socketId = await connectedSocketId()
+      const handle = await lighthouse.open<VoiceSession>({
+        query: SESSION_FEEDBACK_READY_SUBSCRIPTION,
+        variables: { sessionId: id },
+        event: 'sessionFeedbackReady',
+        onEvent: (updated) => {
+          session.value = updated
+          analyzing.value = false
+          teardownSubscription()
+        },
+      })
 
       if (disposed) {
+        handle.stop()
         return
       }
 
-      const response = await csrfAwareFetch(backendUrl, `${backendUrl}/graphql`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Socket-ID': socketId },
-        body: JSON.stringify({
-          query: SESSION_FEEDBACK_READY_SUBSCRIPTION,
-          variables: { sessionId: id },
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Сервер отклонил запрос на подписку (${response.status}).`)
-      }
-
-      const body = await response.json()
-
-      if (body?.errors && body.errors.length > 0) {
-        throw new Error(body.errors[0]?.message ?? 'Ошибка подписки на результат анализа.')
-      }
-
-      const channelName = body?.extensions?.lighthouse_subscriptions?.channel as
-        | string
-        | undefined
-
-      if (!channelName) {
-        throw new Error('Сервер не подтвердил канал подписки на результат.')
-      }
-
-      const name = channelName.replace(/^private-/, '')
-      const channel = $echo.private(name)
-
-      // Lighthouse wraps broadcast result in `{ more, result }` envelope (decision 21)
-      channel.listen(
-        '.lighthouse-subscription',
-        (payload: { result?: { data?: { sessionFeedbackReady?: VoiceSession | null } } }) => {
-          const updated = payload?.result?.data?.sessionFeedbackReady
-
-          if (updated) {
-            session.value = updated
-            analyzing.value = false
-            teardownSubscription()
-          }
-        },
-      )
-
-      await confirmSubscription(channel)
-
       stopSubscription = () => {
-        $echo.leave(name)
+        handle.stop()
       }
     } catch (subErr: any) {
       // Failed handshake: report on screen instead of waiting forever

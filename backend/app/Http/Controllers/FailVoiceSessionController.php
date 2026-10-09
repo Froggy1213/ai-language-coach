@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\VoiceSessionFailReason;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * The voice agent's failure report (plan §5 — `POST /internal/sessions/{id}/fail`).
@@ -16,23 +18,25 @@ use Illuminate\Http\Request;
  */
 final class FailVoiceSessionController extends Controller
 {
-    /**
-     * The reasons the agent is allowed to report. An allowlist rather than free
-     * text: these values land in `voice_sessions.fail_reason`, which is read
-     * back on the history screen, and an arbitrary string from another service
-     * does not belong there.
-     */
-    private const REASONS = ['stt_failed', 'tts_failed', 'llm_failed', 'agent_error'];
-
     public function __construct(private readonly VoiceSessionLifecycle $lifecycle) {}
 
     public function __invoke(Request $request, int $session): JsonResponse
     {
         $validated = $request->validate([
-            'reason' => ['required', 'string', 'in:'.implode(',', self::REASONS)],
+            'reason' => [
+                'required',
+                'string',
+                Rule::in(array_map(
+                    static fn (VoiceSessionFailReason $reason): string => $reason->value,
+                    VoiceSessionFailReason::agentReported(),
+                )),
+            ],
         ]);
 
-        $applied = $this->lifecycle->failed($session, $validated['reason']);
+        $applied = $this->lifecycle->failed(
+            $session,
+            VoiceSessionFailReason::from($validated['reason']),
+        );
 
         // 404 covers both "no such session" and "already finished": the agent
         // gains nothing from telling them apart, and a repeated report is not a

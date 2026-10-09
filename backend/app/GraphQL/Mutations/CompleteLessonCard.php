@@ -6,7 +6,6 @@ use App\Enums\LessonCardStatus;
 use App\Models\LessonCard;
 use App\Models\User;
 use GraphQL\Error\Error;
-use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 
@@ -28,7 +27,7 @@ final class CompleteLessonCard
         return DB::transaction(function () use ($user, $lessonCardId): LessonCard {
             $card = LessonCard::query()
                 ->whereKey($lessonCardId)
-                ->whereHas('roadmap', static fn (Builder $query): Builder => $query->where('user_id', $user->getKey()))
+                ->forUser($user)
                 ->lockForUpdate()
                 ->first();
 

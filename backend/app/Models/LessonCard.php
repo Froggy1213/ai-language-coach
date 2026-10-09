@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\LessonCardStatus;
 use Database\Factories\LessonCardFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,6 +29,18 @@ class LessonCard extends Model
             'cheat_sheet' => 'array',
             'order_index' => 'integer',
         ];
+    }
+
+    /**
+     * Scope the query to lesson cards belonging to the given user's roadmaps.
+     *
+     * @param  Builder<LessonCard>  $query
+     */
+    public function scopeForUser(Builder $query, User|int $user): void
+    {
+        $userId = $user instanceof User ? $user->getKey() : $user;
+
+        $query->whereHas('roadmap', static fn (Builder $roadmapQuery): Builder => $roadmapQuery->where('user_id', $userId));
     }
 
     /**

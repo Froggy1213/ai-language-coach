@@ -2,6 +2,7 @@
 
 namespace App\Voice;
 
+use App\Enums\VoiceSessionFailReason;
 use App\Enums\VoiceSessionStatus;
 use App\Mistakes\AnalyzeVoiceSessionMistakes;
 use App\Models\VoiceSession;
@@ -56,8 +57,8 @@ final class VoiceSessionLifecycle
     {
         [$status, $failReason] = match ($reason) {
             'ROOM_END_IDLE_TIMEOUT' => [VoiceSessionStatus::Abandoned, null],
-            'ROOM_END_SERVER_SHUTDOWN' => [VoiceSessionStatus::Failed, 'livekit_server_shutdown'],
-            'ROOM_END_OPEN_FAILED' => [VoiceSessionStatus::Failed, 'livekit_room_open_failed'],
+            'ROOM_END_SERVER_SHUTDOWN' => [VoiceSessionStatus::Failed, VoiceSessionFailReason::LivekitServerShutdown->value],
+            'ROOM_END_OPEN_FAILED' => [VoiceSessionStatus::Failed, VoiceSessionFailReason::LivekitRoomOpenFailed->value],
             default => [VoiceSessionStatus::Completed, null],
         };
 
@@ -80,13 +81,13 @@ final class VoiceSessionLifecycle
      * Only a session that is still in flight can fail: a session already marked
      * completed by a webhook that arrived first must not be downgraded.
      */
-    public function failed(int $sessionId, string $reason): bool
+    public function failed(int $sessionId, VoiceSessionFailReason|string $reason): bool
     {
         return $this->transitionById(
             $sessionId,
             from: [VoiceSessionStatus::Pending, VoiceSessionStatus::Active],
             to: VoiceSessionStatus::Failed,
-            attributes: ['fail_reason' => $reason],
+            attributes: ['fail_reason' => $reason instanceof VoiceSessionFailReason ? $reason->value : $reason],
         );
     }
 

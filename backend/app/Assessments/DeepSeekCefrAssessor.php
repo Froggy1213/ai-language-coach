@@ -44,7 +44,7 @@ final class DeepSeekCefrAssessor implements CefrAssessor
 
     private function instructions(User $user): string
     {
-        $language = config("languages.names.{$user->target_language}") ?? mb_strtoupper($user->target_language);
+        $language = $user->targetLanguageName();
 
         return <<<PROMPT
         You are an experienced CEFR examiner judging unscripted spoken {$language}.

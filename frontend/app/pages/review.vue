@@ -65,59 +65,6 @@ const grades = [
       'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 active:bg-emerald-500/30',
   },
 ]
-
-function formatReviewDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return 'Срок настал'
-  try {
-    const d = new Date(dateStr)
-    if (Number.isNaN(d.getTime())) return dateStr
-    const now = new Date()
-    if (d <= now) return 'Срок настал'
-    return d.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return dateStr
-  }
-}
-
-function pluralizeDays(days: number): string {
-  const abs = Math.abs(days) % 100
-  const rem = abs % 10
-  if (abs > 10 && abs < 20) return 'дней'
-  if (rem > 1 && rem < 5) return 'дня'
-  if (rem === 1) return 'день'
-  return 'дней'
-}
-
-function pluralizeRepetitions(n: number): string {
-  const abs = Math.abs(n) % 100
-  const rem = abs % 10
-  if (abs > 10 && abs < 20) return 'повторений'
-  if (rem > 1 && rem < 5) return 'повторения'
-  if (rem === 1) return 'повторение'
-  return 'повторений'
-}
-
-function pluralizeSessionsIn(count: number): string {
-  const abs = Math.abs(count) % 100
-  const rem = abs % 10
-  if (abs > 10 && abs < 20) return 'занятиях'
-  if (rem === 1) return 'занятии'
-  return 'занятиях'
-}
-
-function pluralizeMistakes(count: number): string {
-  const abs = Math.abs(count) % 100
-  const rem = abs % 10
-  if (abs > 10 && abs < 20) return 'ошибок'
-  if (rem > 1 && rem < 5) return 'ошибки'
-  if (rem === 1) return 'ошибка'
-  return 'ошибок'
-}
 </script>
 
 <template>
@@ -169,7 +116,7 @@ function pluralizeMistakes(count: number): string {
     <!-- Loading State -->
     <div v-if="loading && dueReviews.length === 0" class="space-y-3">
       <div class="flex items-center gap-3 text-slate-400">
-        <span class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+        <UiSpinner />
         <p>Загружаем очередь повторений…</p>
       </div>
     </div>
@@ -227,13 +174,13 @@ function pluralizeMistakes(count: number): string {
 
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span class="rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-300">
-                Интервал: {{ item.intervalDays }} {{ pluralizeDays(item.intervalDays) }}
+                Интервал: {{ item.intervalDays }} {{ pluralize(item.intervalDays, ['день', 'дня', 'дней']) }}
               </span>
               <span class="rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-300">
                 Ease: {{ item.easeFactor.toFixed(2) }}
               </span>
               <span class="rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-300">
-                {{ item.repetitionNumber }} {{ pluralizeRepetitions(item.repetitionNumber) }}
+                {{ item.repetitionNumber }} {{ pluralize(item.repetitionNumber, ['повторение', 'повторения', 'повторений']) }}
               </span>
               <span class="rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-sky-300">
                 {{ formatReviewDate(item.nextReviewAt) }}
@@ -303,13 +250,13 @@ function pluralizeMistakes(count: number): string {
               </h3>
             </div>
             <span class="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-300">
-              Повторяется в {{ rec.sessionCount }} {{ pluralizeSessionsIn(rec.sessionCount) }}
+              Повторяется в {{ rec.sessionCount }} {{ pluralize(rec.sessionCount, ['занятии', 'занятиях', 'занятиях']) }}
             </span>
           </div>
 
           <div class="flex flex-wrap items-center gap-3 border-t border-slate-800/80 pt-2.5 text-xs text-slate-400">
             <span>
-              Всего: <strong class="text-slate-200">{{ rec.mistakeCount }} {{ pluralizeMistakes(rec.mistakeCount) }}</strong>
+              Всего: <strong class="text-slate-200">{{ rec.mistakeCount }} {{ pluralize(rec.mistakeCount, ['ошибка', 'ошибки', 'ошибок']) }}</strong>
             </span>
             <span v-if="rec.lastMistakeAt">
               · Последняя: {{ formatReviewDate(rec.lastMistakeAt) }}

@@ -3,6 +3,7 @@
 namespace App\Voice;
 
 use App\Enums\LessonCardStatus;
+use App\Enums\VoiceSessionFailReason;
 use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
 use App\Models\User;
@@ -60,7 +61,7 @@ final class StartVoiceSession
     {
         $card = LessonCard::query()
             ->whereKey($lessonCardId)
-            ->whereHas('roadmap', static fn (Builder $query): Builder => $query->where('user_id', $user->getKey()))
+            ->forUser($user)
             ->first();
 
         if (! $card instanceof LessonCard) {
@@ -120,7 +121,7 @@ final class StartVoiceSession
                     ->where('created_at', '<', $staleBefore)
                     ->update([
                         'status' => VoiceSessionStatus::Failed,
-                        'fail_reason' => 'voice_start_stale',
+                        'fail_reason' => VoiceSessionFailReason::VoiceStartStale->value,
                     ]);
 
                 // Re-check idempotency under lock in case a concurrent request won the race.
@@ -173,7 +174,7 @@ final class StartVoiceSession
             // handing this dead room back on the next attempt.
             $session->update([
                 'status' => VoiceSessionStatus::Failed,
-                'fail_reason' => 'voice_fleet_busy',
+                'fail_reason' => VoiceSessionFailReason::VoiceFleetBusy->value,
             ]);
 
             throw new Error(
@@ -189,7 +190,7 @@ final class StartVoiceSession
             // next attempt. Failing it here is what keeps the guard honest.
             $session->update([
                 'status' => VoiceSessionStatus::Failed,
-                'fail_reason' => 'voice_start_failed',
+                'fail_reason' => VoiceSessionFailReason::VoiceStartFailed->value,
             ]);
 
             report($exception);

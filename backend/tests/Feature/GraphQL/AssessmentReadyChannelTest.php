@@ -7,7 +7,6 @@ use App\GraphQL\Subscriptions\AssessmentReady;
 use App\Models\Assessment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Laravel\Sanctum\Sanctum;
@@ -16,6 +15,7 @@ use Nuwave\Lighthouse\Subscriptions\BroadcastDriverManager;
 use Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions;
 use Nuwave\Lighthouse\Subscriptions\Subscriber;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
+use Tests\Support\ClearsSubscriptionStorage;
 use Tests\TestCase;
 
 /**
@@ -28,6 +28,7 @@ use Tests\TestCase;
  */
 class AssessmentReadyChannelTest extends TestCase
 {
+    use ClearsSubscriptionStorage;
     use LazilyRefreshDatabase;
     use MakesGraphQLRequests;
 
@@ -44,24 +45,6 @@ class AssessmentReadyChannelTest extends TestCase
             }
         }
     ';
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // Subscriptions outlive the test database — they live in Redis — and a
-        // subscriber whose user has been wiped cannot be restored (its context
-        // holds the model), so reading it back throws. Start each test from an
-        // empty subscription storage instead; deleting the raw keys avoids the
-        // restore that `subscribersByTopic()` would do.
-        $redis = Redis::connection(config('lighthouse.subscriptions.broadcasters.echo.connection', 'default'));
-        $prefix = (string) config('database.redis.options.prefix', '');
-
-        foreach ($redis->keys('*graphql.*') as $key) {
-            $unprefixed = str_starts_with($key, $prefix) ? substr($key, strlen($prefix)) : $key;
-            $redis->del($unprefixed);
-        }
-    }
 
     public function test_the_subscription_response_names_the_channel_to_listen_on(): void
     {

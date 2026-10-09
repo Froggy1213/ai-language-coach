@@ -8,7 +8,7 @@ const stage = ref<Stage>('consent')
 const consented = ref(false)
 const error = ref<string | null>(null)
 const failureMessage = ref<string | null>(null)
-const elapsed = ref(0)
+const { elapsed, start: startTimer, stop: stopTimer, reset: resetTimer } = useElapsedTimer()
 const level = ref<string | null>(null)
 const starting = ref(false)
 const stopping = ref(false)
@@ -17,15 +17,9 @@ let aborted = false
 let recorder: MediaRecorder | null = null
 let stream: MediaStream | null = null
 let chunks: Blob[] = []
-let ticker: ReturnType<typeof setInterval> | null = null
 let stopListening: (() => void) | null = null
 
-const elapsedLabel = computed(() => {
-  const minutes = Math.floor(elapsed.value / 60)
-  const seconds = elapsed.value % 60
-
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-})
+const elapsedLabel = computed(() => formatClock(elapsed.value))
 
 function startRecording(): void {
   if (starting.value || stage.value !== 'ready') {
@@ -87,10 +81,8 @@ async function beginRecording(): Promise<void> {
   recorder.addEventListener('stop', onRecorderStop)
 
   recorder.start()
-  elapsed.value = 0
-  ticker = setInterval(() => {
-    elapsed.value += 1
-  }, 1000)
+  resetTimer()
+  startTimer()
   stage.value = 'recording'
   starting.value = false
 }
@@ -161,7 +153,7 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
         return
       }
 
-      level.value = assessment.cefrLevel
+      level.value = assessment.cefrLevel ?? null
       stage.value = 'done'
       stopListening?.()
       stopListening = null
@@ -203,10 +195,7 @@ async function checkNow(): Promise<void> {
 }
 
 function stopTicker(): void {
-  if (ticker) {
-    clearInterval(ticker)
-    ticker = null
-  }
+  stopTimer()
 }
 
 onBeforeUnmount(() => {
@@ -243,9 +232,7 @@ onBeforeUnmount(() => {
       </p>
     </header>
 
-    <p v-if="error" class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-      {{ error }}
-    </p>
+    <UiAlert :message="error" />
 
     <div v-if="stage === 'consent'" class="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
       <h2 class="font-medium">Прежде чем записывать</h2>
@@ -310,10 +297,7 @@ onBeforeUnmount(() => {
         {{ failureMessage }}
       </p>
       <div class="flex flex-wrap items-center gap-3">
-        <span
-          v-if="!failureMessage"
-          class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400"
-        />
+        <UiSpinner v-if="!failureMessage" />
         <button
           type="button"
           class="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 transition hover:border-slate-400"

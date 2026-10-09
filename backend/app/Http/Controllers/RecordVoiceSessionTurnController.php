@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Observability\PublishTurnMetrics;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,11 +42,13 @@ final class RecordVoiceSessionTurnController extends Controller
         $turn = [
             'turn_id' => $turnId,
             'transcript' => $validated['transcript'] ?? null,
-            'stt_final' => array_key_exists('stt_final', $validated) && $validated['stt_final'] !== null ? (float) $validated['stt_final'] : null,
-            'llm_first_token' => array_key_exists('llm_first_token', $validated) && $validated['llm_first_token'] !== null ? (float) $validated['llm_first_token'] : null,
-            'tts_first_chunk' => array_key_exists('tts_first_chunk', $validated) && $validated['tts_first_chunk'] !== null ? (float) $validated['tts_first_chunk'] : null,
-            'total_turnaround' => array_key_exists('total_turnaround', $validated) && $validated['total_turnaround'] !== null ? (float) $validated['total_turnaround'] : null,
         ];
+
+        foreach (PublishTurnMetrics::STAGES as $stage) {
+            $turn[$stage] = array_key_exists($stage, $validated) && $validated[$stage] !== null
+                ? (float) $validated[$stage]
+                : null;
+        }
 
         $applied = $this->lifecycle->recordTurn($session, $turn);
 

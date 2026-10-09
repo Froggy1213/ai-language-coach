@@ -1,26 +1,15 @@
 import { test, expect } from '@playwright/test';
-import { gotoAsSeededUser } from './helpers';
+import { gotoAsSeededUser, trackPageErrors } from './helpers';
 
 test.describe('Spaced repetition review screen @smoke', () => {
   test('/review renders without console errors, showing either review items or its documented empty state', async ({ page }) => {
-    const consoleErrors: string[] = [];
-    const pageErrors: Error[] = [];
-
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
-      }
-    });
-
-    page.on('pageerror', (exception) => {
-      pageErrors.push(exception);
-    });
+    const tracker = trackPageErrors(page);
 
     await gotoAsSeededUser(page, '/review');
 
     // 3. Page must not produce uncaught exceptions or console errors
-    expect(pageErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
+    expect(tracker.pageErrors).toEqual([]);
+    expect(tracker.consoleErrors).toEqual([]);
 
     // 4. The screen itself must be there — asserted on its own heading rather
     // than on "something that mentions review", so a blank page cannot pass.
@@ -37,7 +26,7 @@ test.describe('Spaced repetition review screen @smoke', () => {
     await expect(page.getByText('Page not found: /review')).toHaveCount(0);
 
     // 7. Final assert that no console errors or page errors were produced
-    expect(pageErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
+    expect(tracker.pageErrors).toEqual([]);
+    expect(tracker.consoleErrors).toEqual([]);
   });
 });

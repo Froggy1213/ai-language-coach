@@ -4,7 +4,7 @@ import {
   SUBMIT_ASSESSMENT_MUTATION,
 } from '~/graphql/documents'
 import type { Assessment, PresignedUpload } from '~/types/graphql'
-import { csrfAwareFetch } from '~/utils/csrf-fetch'
+import { openLighthouseSubscription } from '~/composables/useLighthouseSubscription'
 
 /**
  * The onboarding assessment, from the browser's side (plan §5).
@@ -15,9 +15,7 @@ import { csrfAwareFetch } from '~/utils/csrf-fetch'
  * Lighthouse subscription rather than as the mutation's answer.
  */
 export function useAssessment() {
-  const { $urql, $echo } = useNuxtApp()
-  const config = useRuntimeConfig()
-  const backendUrl = String(config.public.backendUrl).replace(/\/$/, '')
+  const { $urql } = useNuxtApp()
 
   async function submit(recording: Blob, contentType: string): Promise<Assessment> {
     const presigned = await $urql
@@ -58,111 +56,20 @@ export function useAssessment() {
   /**
    * Wait for the analysis to finish.
    *
-   * The subscription is opened over HTTP with the socket id in a header, which
-   * is how Lighthouse knows which Pusher connection the result belongs to; the
-   * returned channel is then authorized through Echo.
-   *
-   * The authorization is what makes this channel real, so it is awaited: the
-   * upload starts only once Echo reports the subscription as live. Without that
-   * wait a failed handshake — a refused origin, a 419, a missing Reverb — is
-   * invisible here, and the screen waits for a push that can never arrive.
+   * Delegates subscription opening, socket ID resolution, and channel handshake
+   * confirmation to `openLighthouseSubscription`.
    */
   async function onReady(userId: string, handler: (assessment: Assessment) => void): Promise<() => void> {
-    const socketId = await connectedSocketId()
-
-    const response = await csrfAwareFetch(backendUrl, `${backendUrl}/graphql`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Socket-ID': socketId },
-      body: JSON.stringify({ query: ASSESSMENT_READY_SUBSCRIPTION, variables: { userId } }),
+    const handle = await openLighthouseSubscription<Assessment>({
+      query: ASSESSMENT_READY_SUBSCRIPTION,
+      variables: { userId },
+      event: 'assessmentReady',
+      onEvent: handler,
     })
-
-    const body = await response.json()
-    const channelName = body?.extensions?.lighthouse_subscriptions?.channel as string | undefined
-
-    if (!channelName) {
-      throw new Error('Сервер не подтвердил подписку на результат.')
-    }
-
-    const name = channelName.replace(/^private-/, '')
-    const channel = $echo.private(name)
-
-    // Lighthouse's Pusher broadcaster wraps the execution result as
-    // `{ more, result }` — the assessment is under `result.data`, not `data`,
-    // so reading `payload.data` here is a listener that never fires.
-    channel.listen('.lighthouse-subscription', (payload: { result?: { data?: { assessmentReady?: Assessment | null } } }) => {
-      const assessment = payload?.result?.data?.assessmentReady
-
-      if (assessment) {
-        handler(assessment)
-      }
-    })
-
-    try {
-      await confirmSubscription(channel)
-    } catch (err) {
-      $echo.leave(name)
-      throw err
-    }
 
     return () => {
-      $echo.leave(name)
+      handle.stop()
     }
-  }
-
-  /**
-   * Echo reports a private channel as subscribed only after pusher-js has
-   * authorized it and the server has confirmed; until then nothing is listening
-   * on the other end of a push.
-   */
-  async function confirmSubscription(
-    channel: ReturnType<typeof $echo.private>,
-    timeoutMs = 10000,
-  ): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error(
-          'Не удалось подписаться на результат: проверьте, что запущен reverb:start и что '
-          + '/graphql/subscriptions/auth доступен браузеру.',
-        )),
-        timeoutMs,
-      )
-
-      channel.subscribed(() => {
-        clearTimeout(timeout)
-        resolve()
-      })
-    })
-  }
-
-  /**
-   * The socket id has to exist before the subscription is registered, otherwise
-   * the result is pushed to a connection nobody is listening on.
-   */
-  async function connectedSocketId(timeoutMs = 5000): Promise<string> {
-    const socketId = $echo.socketId()
-
-    if (socketId) {
-      return socketId
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const pusherConnection = $echo.connector.pusher.connection
-
-      const onConnected = () => {
-        clearTimeout(timeout)
-        pusherConnection.unbind('connected', onConnected)
-        resolve()
-      }
-
-      const timeout = setTimeout(() => {
-        pusherConnection.unbind('connected', onConnected)
-        reject(new Error('WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.'))
-      }, timeoutMs)
-
-      pusherConnection.bind('connected', onConnected)
-    })
-
-    return $echo.socketId() ?? ''
   }
 
   return { submit, onReady }

@@ -1,25 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { gotoAsSeededUser } from './helpers';
+import { gotoAsSeededUser, trackPageErrors } from './helpers';
 
 test.describe('Session feedback screen @smoke', () => {
   test('/session/999999 for a non-existent session renders a clear not-found state (no crash, no infinite spinner)', async ({ page }) => {
-    const pageErrors: Error[] = [];
-    const consoleErrors: string[] = [];
-
-    page.on('pageerror', (exception) => {
-      pageErrors.push(exception);
-    });
-
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
-      }
-    });
+    const tracker = trackPageErrors(page);
 
     await gotoAsSeededUser(page, '/session/999999');
 
     // 3. No uncaught runtime crashes
-    expect(pageErrors).toEqual([]);
+    expect(tracker.pageErrors).toEqual([]);
 
     // 4. Must not remain stuck in an infinite spinner
     const spinner = page.locator('.animate-spin, [role="progressbar"], [data-testid="loading"]');
@@ -33,6 +22,6 @@ test.describe('Session feedback screen @smoke', () => {
     await expect(page.getByText('Page not found: /session/999999')).toHaveCount(0);
 
     // 7. Must not log unhandled errors
-    expect(consoleErrors).toEqual([]);
+    expect(tracker.consoleErrors).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@
 import { useQuery } from '@urql/vue'
 import { ROADMAP_QUERY } from '~/graphql/documents'
 import type { Roadmap } from '~/types/graphql'
-import { graphQLErrorMessage } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 const route = useRoute()
 const cardId = computed(() => String(route.params.cardId))
@@ -24,11 +24,7 @@ watch(cardId, () => {
   void leave()
 })
 
-const elapsedLabel = computed(() => {
-  const minutes = Math.floor(elapsedSeconds.value / 60)
-  const seconds = elapsedSeconds.value % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-})
+const elapsedLabel = computed(() => formatClock(elapsedSeconds.value))
 
 const isStartingOrConnected = computed(
   () => status.value === 'requesting' || status.value === 'connecting' || status.value === 'connected',
@@ -45,12 +41,10 @@ function startSession(): void {
   <section class="space-y-8">
     <p v-if="fetching && !roadmap" class="text-slate-400">Загружаем данные урока…</p>
 
-    <p
+    <UiAlert
       v-else-if="queryError && !roadmap"
-      class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
-    >
-      {{ graphQLErrorMessage(queryError) ?? 'Не удалось загрузить данные роадмапа.' }}
-    </p>
+      :message="graphQLErrorMessageFor(queryError, { fallback: 'Не удалось загрузить данные роадмапа.' })"
+    />
 
     <div v-else-if="!card" class="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
       <h1 class="text-xl font-semibold text-slate-100">Урок не найден</h1>
@@ -183,7 +177,7 @@ function startSession(): void {
         class="space-y-4 rounded-xl border border-sky-500/30 bg-slate-900/60 p-5"
       >
         <div class="flex items-center gap-3">
-          <span class="inline-block size-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+          <UiSpinner />
           <p class="font-medium text-slate-200">
             {{ status === 'requesting' ? 'Запрашиваем голосовую сессию…' : 'Подключаемся к комнате…' }}
           </p>
