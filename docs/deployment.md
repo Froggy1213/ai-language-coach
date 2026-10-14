@@ -208,8 +208,10 @@ on the machine it backs up is not a backup.
 
 - **TURN/TLS for WebRTC.** Learners behind a restrictive network need a TURN
   relay on 5349. `infra/livekit/` provisions it; the bundled server cannot.
-- **Off-host backups, monitoring and log shipping.** Run `docker compose logs`
-  into something that keeps them, or point `SENTRY_*` at a Sentry project.
+- **Off-host backups, monitoring and log shipping.** `docker compose --env-file
+  .env.production -f docker-compose.yml -f docker-compose.prod.yml logs -f` is a
+  terminal, not a log store: point it (or the Docker log driver) at something
+  that keeps the lines, or set `SENTRY_*` for errors.
 - **Zero-downtime deploys.** `up -d` recreates containers, so a deploy has a few
   seconds of 502 through the proxy. Run two hosts behind a load balancer, or
   accept a short window.
