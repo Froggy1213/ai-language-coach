@@ -28,10 +28,20 @@ declare global {
  * catch. The cost of the honest version is one connection and — only when Reverb
  * is not running, which is not a production state — one console error per page
  * load. That is the better trade.
+ *
+ * The host is aligned with the page for the same reason the API origin is: the
+ * image ships one configured name (`127.0.0.1` in compose, `localhost` on the
+ * host) while the learner can arrive through either, and a socket dialled at the
+ * other name is a cross-origin connection whose authorizer would then post to a
+ * third.
  */
 export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig()
-  const backendUrl = String(config.public.backendUrl).replace(/\/$/, '')
+  const backendUrl = useBackendUrl()
+  const reverbHost = alignLoopbackName(
+    String(config.public.reverb.host),
+    import.meta.client ? window.location.hostname : null,
+  )
 
   // pusher-js looks for a global Pusher when it runs in the browser.
   window.Pusher = Pusher
@@ -39,7 +49,7 @@ export default defineNuxtPlugin(() => {
   const echo = new Echo({
     broadcaster: 'reverb',
     key: String(config.public.reverb.appKey),
-    wsHost: String(config.public.reverb.host),
+    wsHost: reverbHost,
     wsPort: Number(config.public.reverb.port),
     wssPort: Number(config.public.reverb.port),
     forceTLS: String(config.public.reverb.scheme) === 'https',

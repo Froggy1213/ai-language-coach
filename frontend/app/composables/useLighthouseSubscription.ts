@@ -172,11 +172,10 @@ function resolveTransport(transport?: LighthouseTransport): LighthouseTransport 
   }
 
   const { $echo } = useNuxtApp()
-  const config = useRuntimeConfig()
 
   return {
     echo: $echo,
-    backendUrl: String(config.public.backendUrl).replace(/\/$/, ''),
+    backendUrl: useBackendUrl(),
   }
 }
 

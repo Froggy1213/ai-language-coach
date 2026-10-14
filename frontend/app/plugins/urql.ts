@@ -22,13 +22,17 @@ import { csrfAwareFetch } from '~/utils/csrf-fetch'
  * Every request goes through the Sanctum double-submit helper, which keeps the
  * CSRF cookie fresh and the `X-XSRF-TOKEN` header in step with it.
  *
+ * The origin comes from `useBackendUrl()`, not straight from the runtime config:
+ * the configured value is loopback-aligned with the page's own hostname, because
+ * a `localhost` page calling a `127.0.0.1` API is a cross-site request and its
+ * `SameSite=Lax` session cookie is never sent (see `utils/backend-endpoint.ts`).
+ *
  * Subscriptions are not an exchange here: Lighthouse speaks the Pusher
  * protocol, so `useAssessment()` drives them through Echo instead (README,
  * plan §5).
  */
 export default defineNuxtPlugin((nuxtApp) => {
-  const config = useRuntimeConfig()
-  const backendUrl = String(config.public.backendUrl).replace(/\/$/, '')
+  const backendUrl = useBackendUrl()
 
   const client = createClient({
     url: `${backendUrl}/graphql`,
