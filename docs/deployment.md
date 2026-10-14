@@ -199,6 +199,7 @@ on the machine it backs up is not a backup.
 |---|---|
 | Container exits immediately, log says `Production sanity check failed: SESSION_SECURE_COOKIE` | A development default reached production. The message names the setting; `ProductionSanityCheck` also refuses a committed `APP_KEY`, `LIVEKIT_API_SECRET` or `VOICE_INTERNAL_SECRET`. |
 | Sign-in works, the next click returns 419 | The SPA and the API are on different origins, or `SANCTUM_STATEFUL_DOMAINS` does not list the browser's host. On loopback, `app/utils/backend-endpoint.ts` aligns the two automatically; behind a proxy they must be the same origin. |
+| `http://[::1]:3000` loads a page whose requests all fail | Alignment makes the API origin match the page's hostname, so an IPv6-loopback page expects an API on `[::1]` — and the published ports are IPv4 loopback. Browse `localhost` or `127.0.0.1`. |
 | The page loads but every asset 404s, or the SPA is served instead of the API | The proxy's path routing sent the request to the wrong service. `/graphql`, `/api/*`, `/sanctum/*` and `/up` belong to `api:8080`, `/app/*` and `/apps/*` to `reverb:8081`, everything else to `web:3000`. |
 | `docker compose config` fails with `required variable ... is missing` | A value marked REQUIRED is empty in `.env.production`. That is the check working. |
 | A container boots with a value that looks like a sentence | Compose does **not** strip inline comments in an env file: `KEY=value # note` sets the literal `value # note`. Keep the explanation on its own line, as `.env.production.example` does. |

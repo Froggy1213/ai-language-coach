@@ -38,6 +38,15 @@ export function alignLoopbackName(configuredHost: string, pageHostname?: string 
  * cannot know which name the learner typed, so the value is aligned here at
  * runtime instead of being duplicated per entry point in the proxy config.
  *
+ * `::1` is in the alias set for the same reason, and it comes with the same
+ * requirement: alignment makes the API origin *match the page*, so an `[::1]`
+ * page expects an API listening on `[::1]`. The compose stack publishes on IPv4
+ * loopback only, so a browser opened at `http://[::1]:3000` is aligned to a port
+ * nothing answers on — a connection failure rather than a cookie failure, but a
+ * failure either way. Browse `localhost` or `127.0.0.1` against this stack; an
+ * all-IPv6 development setup (a dev server on `[::1]` for both) works as
+ * intended.
+ *
  * A no-op unless both sides are loopback aliases: a real hostname (production,
  * staging, a LAN address, a tunnel) is returned untouched, so this cannot move a
  * deployed origin.
