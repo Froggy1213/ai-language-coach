@@ -1,0 +1,69 @@
+# Reverse proxy for the single-host production stack
+# (docker-compose.prod.yml). Terminates TLS and puts every service on one origin,
+# which is the arrangement the application is actually written for: the ALB does
+# exactly this routing in the AWS deployment (infra/terraform/alb.tf).
+#
+# One origin matters more than it looks. The SPA authenticates with a Sanctum
+# session cookie, so any split between "the origin that set the cookie" and "the
+# origin the API answers on" turns into a 419 on the first mutation — and a
+# `SameSite=Lax` cookie is not sent across sites at all.
+#
+# Caddy obtains a certificate for $APP_DOMAIN automatically as soon as DNS for it
+# points at this host (ACME HTTP-01 or TLS-ALPN-01 on ports 80/443). For a
+# deployment with no public DNS, add `tls internal` to the site block below and
+# distribute Caddy's local root CA.
+#
+# A global options block would go here (`{ email you@example.com }`) if you want
+# ACME expiry mail; it is omitted rather than left empty, because an empty
+# options block is a configuration error and the address is optional.
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	# Laravel: GraphQL (queries, mutations and the subscription authorization
+	# endpoint the Echo client posts to), the REST surface (LiveKit webhooks,
+	# the agent's internal callbacks), Sanctum's CSRF-cookie route, and the
+	# health route a load balancer would probe.
+	@laravel path /graphql /graphql/* /api/* /sanctum/* /up
+	handle @laravel {
+		reverse_proxy api:8080
+	}
+
+	# Reverb speaks the Pusher protocol: `/app/<key>` is the WebSocket the Echo
+	# client opens, `/apps/<key>/events` is its HTTP publish path. Both have to
+	# share the application origin — a browser will not hold a `wss://` socket
+	# to a host it was not served from without a fresh CORS negotiation.
+	@reverb path /app/* /apps/*
+	handle @reverb {
+		reverse_proxy reverb:8081
+	}
+
+	# Everything else is the Nuxt SPA.
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+# ------------------------------------------------------------------------------
+# Self-hosted object storage (optional).
+#
+# The assessment pipeline presigns a POST that the *browser* sends straight to
+# the bucket, so object storage needs a public address of its own. The simpler
+# answer is a real S3 bucket: set AWS_ENDPOINT and AWS_PUBLIC_ENDPOINT empty and
+# fill in the AWS_* keys. If you would rather keep the bundled MinIO, point a
+# second DNS record at this host, set STORAGE_DOMAIN and AWS_PUBLIC_ENDPOINT, and
+# uncomment the block below.
+#
+# Path-style access is required (AWS_USE_PATH_STYLE_ENDPOINT=true), and the
+# public endpoint must be a bare origin with no path prefix —
+# `S3AssessmentAudioStorage` refuses a prefix, because a prefix cannot be told
+# apart from a bucket that belongs in the path.
+# ------------------------------------------------------------------------------
+# {$STORAGE_DOMAIN} {
+# 	reverse_proxy minio:9000
+# }

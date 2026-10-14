@@ -1,0 +1,280 @@
+# Production overlay for a single Docker host.
+#
+# It is an *overlay*, not a second stack: run it on top of docker-compose.yml so
+# the service definitions stay in one place.
+#
+#   cp .env.production.example .env.production     # fill it in
+#   docker compose --env-file .env.production \
+#     -f docker-compose.yml -f docker-compose.prod.yml \
+#     --profile full up -d \
+#     mysql redis api horizon reverb web proxy
+#
+# The explicit service list is deliberate: `livekit` and `voice-agent` are the two
+# services a single host usually should not run (see "LiveKit" below), and naming
+# the services is clearer than a second profile that has to stay in sync with the
+# first. `docker compose --profile full up -d` starts everything, LiveKit included.
+#
+# What this overlay changes, and why:
+#
+#   * Every Laravel role runs with APP_ENV=production, APP_DEBUG=false and a
+#     Secure session cookie. `ProductionSanityCheck` (AppServiceProvider::boot)
+#     refuses to start on a development default, so a missing key is a crash on
+#     boot rather than a silently insecure deployment.
+#   * `CORS_ALLOWED_ORIGINS` and `SANCTUM_STATEFUL_DOMAINS` become the single
+#     application origin. The proxy below serves the SPA, the API and Reverb on
+#     that one origin, which is the arrangement the cookie-based auth requires —
+#     and what the ALB does in the AWS deployment.
+#   * `TRUSTED_PROXIES` becomes the compose network, so X-Forwarded-* is honoured
+#     from the proxy (and from nothing else). Every @throttle rule is keyed on
+#     the client IP, so trusting nobody would rate-limit the whole internet as one
+#     bucket, and trusting everybody would let a client forge its own IP.
+#   * A `proxy` service (Caddy) terminates TLS on 80/443 and routes by path.
+#   * The voice agent reports to the API *service* (`http://api:8080`) rather than
+#     to the host's published port, which is what `host.docker.internal` means in
+#     the development profile.
+#
+# Values with no safe default are written `${VAR:?message}`: compose refuses to
+# render the file at all until they are set, which is the only moment where a
+# mistake is cheap to fix. See `.env.production.example` for the full list.
+
+# ---------------------------------------------------------------------------
+# The environment every Laravel role shares. One anchor, because a value missing
+# from one of the three roles (api, horizon, reverb) does not look like a missing
+# value — it looks like a feature that works for the web request and not for the
+# queue worker, or the other way round.
+# ---------------------------------------------------------------------------
+x-prod-laravel-environment: &prod-laravel-environment
+  APP_ENV: production
+  APP_DEBUG: "false"
+  # Backend/.env is excluded from the image on purpose, so the deployment supplies
+  # everything. APP_KEY signs sessions, cookies and signed URLs.
+  APP_KEY: ${APP_KEY:?set APP_KEY (php artisan key:generate --show)}
+  APP_NAME: ${APP_NAME:-AI Language Coach}
+
+  # A Secure cookie is only sent over HTTPS, which is what the proxy terminates.
+  # Setting this false in production is refused by ProductionSanityCheck.
+  SESSION_SECURE_COOKIE: "true"
+
+  # One origin: the SPA, the API and Reverb are all served from $APP_DOMAIN.
+  CORS_ALLOWED_ORIGINS: https://${APP_DOMAIN:?set APP_DOMAIN, e.g. coach.example.com}
+  SANCTUM_STATEFUL_DOMAINS: ${APP_DOMAIN}
+
+  # The proxy's address range. `trustProxies` reads a comma-separated CIDR list;
+  # the subnet is pinned in `networks:` below so this value is stable across
+  # `docker compose up` runs instead of drifting with compose's own allocator.
+  TRUSTED_PROXIES: ${DOCKER_SUBNET:-172.28.0.0/16}
+
+  # Database credentials (the mysql service is created from the same variables).
+  DB_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+
+  # LiveKit. Two addresses for two audiences, exactly as the development profile
+  # has it: the API dials LIVEKIT_URL, the learner's browser dials
+  # LIVEKIT_PUBLIC_URL.
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET (32+ chars)}
+  LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL (wss://livekit.example.com for the EC2 node)}
+  LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:?set LIVEKIT_PUBLIC_URL (wss://livekit.example.com)}
+  VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:?set VOICE_INTERNAL_SECRET (openssl rand -hex 32)}
+
+  # Object storage. The assessment pipeline hands the learner's browser a
+  # presigned POST, so the public endpoint is the browser's address for the
+  # bucket: a real S3 bucket needs both empty, the bundled MinIO needs the
+  # address that the proxy (or its published port) exposes.
+  AWS_ENDPOINT: ${AWS_ENDPOINT:-}
+  AWS_PUBLIC_ENDPOINT: ${AWS_PUBLIC_ENDPOINT:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+  AWS_BUCKET: ${AWS_BUCKET:?set AWS_BUCKET}
+  AWS_USE_PATH_STYLE_ENDPOINT: ${AWS_USE_PATH_STYLE_ENDPOINT:-false}
+
+  # Speech and analysis providers. The API needs Deepgram for the batch
+  # transcription of the onboarding recording and an analysis model for the CEFR
+  # judgement; neither has a development fallback that would work.
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set DEEPGRAM_API_KEY}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+
+  # Sessions are shared state between php-fpm processes here, so the database
+  # driver the development stack uses is right, while the queue is Redis because
+  # Horizon consumes nothing else.
+  SESSION_DRIVER: database
+  CACHE_STORE: database
+  QUEUE_CONNECTION: redis
+  BROADCAST_CONNECTION: reverb
+
+  REVERB_APP_ID: ${REVERB_APP_ID:?set REVERB_APP_ID}
+  REVERB_APP_KEY: ${REVERB_APP_KEY:?set REVERB_APP_KEY}
+  REVERB_APP_SECRET: ${REVERB_APP_SECRET:?set REVERB_APP_SECRET}
+  REVERB_HOST: reverb
+  REVERB_PORT: 8081
+  REVERB_SCHEME: http
+
+  LIGHTHOUSE_BROADCASTER: reverb
+  LIGHTHOUSE_SUBSCRIPTION_STORAGE: redis
+  LIGHTHOUSE_QUERY_CACHE_MODE: opcache
+
+  # Error tracking and metrics: inert while the DSN is empty.
+  SENTRY_LARAVEL_DSN: ${SENTRY_LARAVEL_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+  SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+  CLOUDWATCH_METRICS_ENABLED: ${CLOUDWATCH_METRICS_ENABLED:-false}
+
+  # Retention windows for the scheduled purges (plan §5, §7).
+  PRIVACY_TRANSCRIPT_RETENTION_DAYS: ${PRIVACY_TRANSCRIPT_RETENTION_DAYS:-90}
+  PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS: ${PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS:-7}
+
+services:
+  api:
+    environment:
+      <<: *prod-laravel-environment
+      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+
+  horizon:
+    environment:
+      <<: *prod-laravel-environment
+      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+
+  # ---------------------------------------------------------------------------
+  # The scheduler. `routes/console.php` registers the two retention purges
+  # (privacy:purge-transcripts, privacy:purge-orphan-audio) as daily tasks, and
+  # nothing else in this stack runs them: Horizon consumes queues, it does not
+  # read the schedule. Without this service a deployment keeps every transcript
+  # and every orphaned recording forever while the privacy policy says otherwise,
+  # and nothing reports an error — the tasks simply never fire.
+  #
+  # `schedule:work` is Laravel's own foreground scheduler loop, so this needs no
+  # host cron. One replica only: two schedulers would run each task twice.
+  # ---------------------------------------------------------------------------
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach_scheduler
+    restart: unless-stopped
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      # Inherits the image's /up probe otherwise, which this role does not serve.
+      test: ["CMD-SHELL", "pgrep -f 'artisan schedule:work' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - api
+    environment:
+      <<: *prod-laravel-environment
+      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+
+  reverb:
+    environment:
+      <<: *prod-laravel-environment
+      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+
+  web:
+    environment:
+      # Same origin, so `useBackendUrl()` has nothing to align: the SPA calls the
+      # proxy it was served from, and the session cookie is first-party.
+      NUXT_PUBLIC_BACKEND_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+      NUXT_PUBLIC_REVERB_APP_KEY: ${REVERB_APP_KEY:?set REVERB_APP_KEY}
+      NUXT_PUBLIC_REVERB_HOST: ${APP_DOMAIN}
+      NUXT_PUBLIC_REVERB_PORT: "443"
+      NUXT_PUBLIC_REVERB_SCHEME: https
+
+  # ---------------------------------------------------------------------------
+  # LiveKit.
+  #
+  # The recommended deployment keeps the media server on its own node
+  # (infra/livekit, infra/terraform/livekit.tf) with a public address and TURN/TLS:
+  # WebRTC needs the learner's browser to reach it directly, and a single-host
+  # compose file cannot offer TURN on 5349 or a stable public IP. With an external
+  # node, do not start this service at all — pass LIVEKIT_URL and
+  # LIVEKIT_PUBLIC_URL as wss://livekit.example.com and the rest of the stack is
+  # unchanged.
+  #
+  # If you do run LiveKit on this host instead, it needs a public node address and
+  # its RTC ports published on the public interface rather than on loopback, which
+  # is what `!override` replaces (Compose >= 2.24):
+  # ---------------------------------------------------------------------------
+  livekit:
+    environment:
+      # Deliberately not the Laravel anchor: this is the media server, and it has
+      # no business holding the application key or the database password. It needs
+      # the same key pair the API signs tokens with, and a webhook target it can
+      # reach inside the network.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
+      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
+      VOICE_WEBHOOK_URL: http://api:8080/api/webhooks/livekit
+    ports: !override
+      - "${LIVEKIT_PORT:-7880}:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
+  voice-agent:
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
+      LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL}
+      VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
+      # The API's own address inside the network. In the development profile this
+      # is host.docker.internal, which does not exist once the API is a service.
+      BACKEND_INTERNAL_URL: http://api:8080
+      VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:?set VOICE_INTERNAL_SECRET}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set DEEPGRAM_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      ALLOW_SLOW_DIALOGUE_LLM: ${ALLOW_SLOW_DIALOGUE_LLM:-false}
+      DEEPGRAM_STT_MODEL: ${DEEPGRAM_STT_MODEL:-nova-3}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: production
+
+  # ---------------------------------------------------------------------------
+  # TLS termination and path routing. Everything the browser needs is served from
+  # one origin: /graphql, /api, /sanctum and /up to the API, /app and /apps to
+  # Reverb, everything else to the SPA.
+  # ---------------------------------------------------------------------------
+  proxy:
+    image: caddy:2.10-alpine
+    container_name: coach_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Read by docker/Caddyfile as {$APP_DOMAIN}.
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME state: without a volume, every recreate requests a
+      # fresh certificate and Let's Encrypt starts rate-limiting.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - reverb
+      - web
+    healthcheck:
+      # Caddy's admin API answers on localhost:2019 while the config is loaded.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # Pinned so TRUSTED_PROXIES above names a range that does not move. Change both
+  # together, or not at all.
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.28.0.0/16}
+
+volumes:
+  caddy_data:
+  caddy_config:
