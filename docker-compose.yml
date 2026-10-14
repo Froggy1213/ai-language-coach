@@ -54,6 +54,14 @@ x-laravel-environment: &laravel-environment
   # takes the real key from Secrets Manager.
   APP_KEY: ${APP_KEY:-base64:/z0ptXSDQvAl3H0G0+Yn+HjGr+x+kaKcXBkzrEv2iZE=}
 
+  # Not decoration: Laravel derives the session cookie's *name* from APP_NAME
+  # (`Str::slug(APP_NAME) . '-session'`), so leaving this unset made the API
+  # container issue `laravel-session` while the host, whose backend/.env says
+  # "AI Language Coach", issued `ai-language-coach-session`. Same database, same
+  # APP_KEY, and the browser still sent a cookie the other process ignored —
+  # which is the exact parity the root .env claims when it copies APP_KEY across.
+  APP_NAME: ${APP_NAME:-AI Language Coach}
+
   DB_CONNECTION: mysql
   DB_HOST: mysql
   DB_PORT: 3306
@@ -201,11 +209,20 @@ services:
   # pipeline presigns POSTs and reads the object back, so a bucket has to exist
   # long before AWS does — and unlike the real bucket this one is reachable from
   # the host, which is what makes the whole pipeline testable locally.
+  #
+  # A `docker login quay.io` may be needed before the first `up`: MinIO deleted
+  # its Docker Hub repositories on 2025-09-11 and quay.io stopped serving its
+  # repositories anonymously on 2025-09-24, so a clean machine gets
+  # `unauthorized: access to the requested resource is not authorized` rather
+  # than a 404. The account is free and the images are still AGPL-licensed;
+  # MINIO_IMAGE/MINIO_MC_IMAGE exist so a mirror or an already-cached tag can be
+  # substituted without editing this file. None of this affects a deployment,
+  # which uses a real bucket (see docs/deployment.md).
   minio:
     # Pinned, not `latest`: a floating tag means two developers (or a developer
     # and CI) can exercise different MinIO releases, and this one is the image
     # the bucket rules and presigned POSTs were verified against.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
     container_name: coach_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -230,7 +247,7 @@ services:
   minio-init:
     # Same release as the server above; `mc` and the server share a compatibility
     # contract, and `latest` made `mc` the only unpinned moving part of the stack.
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}
     container_name: coach_minio_init
     depends_on:
       minio:
