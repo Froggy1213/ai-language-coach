@@ -190,6 +190,7 @@ on the machine it backs up is not a backup.
 | Sign-in works, the next click returns 419 | The SPA and the API are on different origins, or `SANCTUM_STATEFUL_DOMAINS` does not list the browser's host. On loopback, `app/utils/backend-endpoint.ts` aligns the two automatically; behind a proxy they must be the same origin. |
 | The page loads but every asset 404s, or the SPA is served instead of the API | The proxy's path routing sent the request to the wrong service. `/graphql`, `/api/*`, `/sanctum/*` and `/up` belong to `api:8080`, `/app/*` and `/apps/*` to `reverb:8081`, everything else to `web:3000`. |
 | `docker compose config` fails with `required variable ... is missing` | A value marked REQUIRED is empty in `.env.production`. That is the check working. |
+| A container boots with a value that looks like a sentence | Compose does **not** strip inline comments in an env file: `KEY=value # note` sets the literal `value # note`. Keep the explanation on its own line, as `.env.production.example` does. |
 | Certificate errors in the Caddy log | DNS for `APP_DOMAIN` does not point here yet, or port 80/443 is blocked. |
 | Subscriptions never arrive | `reverb` is down, or `/app/*` is not routed to it. The browser console shows the failed WebSocket. |
 | Retention purges never run | The `scheduler` service is not in the `up` list. |
