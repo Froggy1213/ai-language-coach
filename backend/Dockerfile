@@ -11,8 +11,13 @@
 #   migrations         php artisan migrate --force
 #
 # Build:  docker build -t ai-language-coach/api ./backend
-# Smoke:  docker run --rm -p 8080:8080 -e APP_KEY=base64:... ai-language-coach/api
+# Smoke:  docker run --rm -p 8080:8080 -e APP_KEY=base64:... \
+#           -e SESSION_SECURE_COOKIE=true ai-language-coach/api
 #         then: curl -i localhost:8080/up
+#
+#         SESSION_SECURE_COOKIE is required because a bare `docker run` has no
+#         APP_ENV, so the image boots as production and ProductionSanityCheck
+#         refuses the dev-default `false`. Any deployment supplies it too.
 #
 # Local development does NOT use this image: Laravel runs natively against the
 # docker-compose MySQL/Redis (see README -> "Local setup"). This image exists for
@@ -63,8 +68,19 @@ COPY . .
 
 # Finishes the autoloader and runs the post-autoload-dump hook
 # (artisan package:discover, which needs bootstrap/cache to exist).
+#
+# APP_ENV=local is load-bearing, not cosmetic. With no APP_ENV and no .env in the
+# build context, Laravel's default is `production`, and `AppServiceProvider::boot()`
+# runs `ProductionSanityCheck` on every boot — including a build-time
+# `package:discover`. The check therefore fails the *build* with
+# "SESSION_SECURE_COOKIE must be true in production", which is a true statement
+# about a deployment and a false one about compiling an autoloader. Marking this
+# one invocation as what it is (a build step, with no runtime configuration at
+# all) keeps the guard intact where it matters: the container's own `php artisan`
+# commands still boot with whatever APP_ENV the deployment supplies, and refuse
+# to start on development defaults.
 RUN mkdir -p bootstrap/cache \
-    && composer dump-autoload --no-dev --optimize --no-interaction
+    && APP_ENV=local composer dump-autoload --no-dev --optimize --no-interaction
 
 # ---------------------------------------------------------------------------
 # Stage 3 — assets: Laravel's Vite bundle.
