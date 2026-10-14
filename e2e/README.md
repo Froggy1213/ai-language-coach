@@ -10,7 +10,11 @@ It guards against full-stack integration defects that cannot be surfaced by back
 
 - **Test Runner**: Playwright (`@playwright/test`).
 - **Browser Execution**: Configured for Chromium (`workers: 1`, `fullyParallel: false` to avoid database session contention on the shared seeded user).
-- **Cached Engine**: The `@playwright/test` version matches the cached Chromium revision (`chromium-1243` at `~/Library/Caches/ms-playwright`), avoiding any browser binary download. Google Chrome (`/Applications/Google Chrome.app`) can also be targeted via `channel: 'chrome'` if desired.
+- **Browser Binary**: Playwright's own Chromium download is **not** installed on this machine, so the suite is run against the installed Google Chrome with `E2E_CHANNEL=chrome` (the config forwards it as `channel: 'chrome'`). Run it with:
+  ```bash
+  E2E_CHANNEL=chrome npx playwright test --project=chromium
+  ```
+  Without `E2E_CHANNEL=chrome` the run fails at browser launch, not in the application.
 
 ---
 
@@ -35,14 +39,14 @@ Verify services:
 
 Run the tests:
 ```bash
-# Run all E2E specs
-npm run e2e
+# Run all E2E specs (Chrome; see "Browser Binary" above)
+E2E_CHANNEL=chrome npx playwright test --project=chromium
 
 # Run only @smoke tagged specs
-npm run e2e:smoke
+E2E_CHANNEL=chrome npm run e2e:smoke
 
 # Run with headed browser for interactive inspection
-npm run e2e:headed
+E2E_CHANNEL=chrome npm run e2e:headed
 
 # Open HTML test report
 npm run e2e:report
@@ -66,7 +70,7 @@ npm run dev
 
 From repository root, run:
 ```bash
-npm run e2e:smoke
+E2E_CHANNEL=chrome npm run e2e:smoke
 ```
 
 ---
@@ -77,25 +81,57 @@ The suite supports environment overrides via standard environment variables:
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `E2E_BASE_URL` | `http://127.0.0.1:3000` | Nuxt SPA frontend URL. **Crucial**: Always use `127.0.0.1:3000` instead of `localhost:3000` to maintain Laravel Sanctum cookie stateful domain alignment. |
+| `E2E_BASE_URL` | `http://localhost:3000` | Nuxt SPA frontend URL. **Crucial**: use `localhost:3000`, not `127.0.0.1:3000`. The Nuxt dev server binds `localhost` (IPv6 `::1` on macOS) and the backend's Sanctum stateful-domain list contains `localhost:3000`; the base URL and the browser's cookie jar have to agree on that hostname or the session cookie is set for one origin and never sent to the other. |
+| `E2E_CHANNEL` | `undefined` | Set to `chrome` to run against the installed Google Chrome instead of Playwright's bundled Chromium (which is not installed here). |
 | `E2E_API_URL` | `http://127.0.0.1:8000` | Laravel GraphQL / REST API URL. |
 | `CI` | `undefined` | When set to `true`, enables retry on failure (`retries: 1`) and forbids `.only`. |
 
 Example:
 ```bash
-E2E_BASE_URL=http://127.0.0.1:3000 npm run e2e:smoke
+E2E_CHANNEL=chrome E2E_BASE_URL=http://localhost:3000 npm run e2e:smoke
 ```
+
+---
+
+## Routes under test
+
+The interface was redesigned (Japanese copy, new route map), so these are the
+addresses the specs drive:
+
+| Route | Screen |
+| :--- | :--- |
+| `/` | 今日 — the daily home screen; where sign-in lands |
+| `/roadmap` | ロードマップ — the lesson rail, one `<li>` per lesson |
+| `/talk`, `/talk/:cardId` | 会話 — the conversation screen; bare `/talk` resolves the current lesson and redirects to `/talk/:cardId` |
+| `/reflect/:sessionId` | 振り返り — the post-conversation breakdown |
+| `/session/:id` | redirect to `/reflect/:id` (legacy) |
+| `/practice/:cardId` | redirect to `/talk/:cardId` (legacy) |
+| `/review` | 復習 — spaced repetition |
+| `/level` | レベル判定 — CEFR placement recording (replaced `/onboarding`) |
+| `/onboarding` | redirect to `/level` (legacy) |
+| `/settings` | 設定 — account, theme, sign-out, delete account |
+| `/login`, `/register` | auth forms; sign-in submits `ログイン`, registration submits `アカウントを作成` |
+
+Interface copy lives in `frontend/app/constants/strings.ts` (Japanese) and is the
+source of truth for every string the specs assert; the *learning* content
+(grammar titles, prompts, cheat sheets) stays English and comes from the API.
 
 ---
 
 ## How the suite authenticates (and why not in every spec)
 
 `e2e/global.setup.ts` is a Playwright **setup project**: it signs the seeded
-learner in once, saves the session to `.auth/user.json`, and the `chromium`
-project reuses it (`storageState`). Only the specs that are *about* the flow —
-`auth.spec.ts` (guest redirect, sign-in, sign-out) and `console.spec.ts` (the
-console/network guard through the login journey) — start from a clean context
-and sign in themselves with `test.use({ storageState: { cookies: [], origins: [] } })`.
+learner in once (through `loginAsSeededUser`), saves the session to
+`.auth/user.json`, and the `chromium` project reuses it (`storageState`). Only the
+specs that are *about* the flow — `auth.spec.ts` (guest redirect, sign-in,
+sign-out) and `console.spec.ts` (the console/network guard through the login
+journey) — start from a clean context and sign in themselves with
+`test.use({ storageState: { cookies: [], origins: [] } })`.
+
+Sign-out now lives on `/settings`. `auth.spec.ts` is the spec that presses it, and
+it does so on the session it created itself: `logout` invalidates only the session
+that made the request, so the session every other spec inherits survives. No other
+spec may press `ログアウト` for that reason.
 
 This is not just speed. `login` is throttled at **ten attempts per minute** on
 purpose (plan §7), so a suite where all specs authenticated on their own would
@@ -111,6 +147,17 @@ The tests rely on the pre-seeded account:
 - **Password**: `password`
 
 Helper function `loginAsSeededUser(page)` in `e2e/helpers.ts` provides a consistent login flow across tests.
+
+---
+
+## Tolerated external noise
+
+`pusher-js` opens the Echo/Reverb WebSocket at bootstrap, so the browser logs a
+failed WebSocket transport on every page when nothing is listening on the
+configured Reverb port (8080). That message is external to the app and is the only
+console error `trackPageErrors` filters out, matched by an exact
+`ws://localhost:8080/app/…` signature; every other console error still fails a
+spec. See `IGNORED_EXTERNAL_CONSOLE_ERRORS` in `e2e/helpers.ts`.
 
 ---
 
@@ -137,7 +184,7 @@ workspace.
 To keep the smoke suite fast, deterministic, and runnable without third-party vendor accounts:
 1. **Physical Microphone / Audio Hardware**: Browser media permissions are evaluated through UI affordances and consent states rather than piping simulated audio hardware.
 2. **Third-Party AI Vendor Calls**: External live pipelines (Deepgram STT transcription, DeepSeek LLM reasoning, Cartesia TTS voice generation) are deliberately not invoked in smoke runs to prevent billing and external network instability.
-3. **Seeded Live Voice Session**: Live WebRTC voice sessions with real agent dispatch (`/practice/{cardId}`) require a live agent worker and audio stream lifecycle, which are exercised in dedicated voice integration harnesses rather than fast UI smoke tests.
+3. **Seeded Live Voice Session**: Live WebRTC voice sessions with real agent dispatch (`/talk/{cardId}`) require a live agent worker and audio stream lifecycle, which are exercised in dedicated voice integration harnesses rather than fast UI smoke tests.
 
 ---
 
@@ -158,10 +205,11 @@ To keep the smoke suite fast, deterministic, and runnable without third-party ve
      });
    });
    ```
-3. **Page and console error tracking**: Use `trackPageErrors(page)` from `./helpers` instead of hand-rolling listeners. It registers listeners for `pageerror`, `console` errors, and `/graphql` responses with status >= 400, exposing `pageErrors`, `consoleErrors`, and `failedGraphqlResponses` along with an `assertClean()` method to assert that none occurred:
+3. **Page and console error tracking**: Use `trackPageErrors(page)` from `./helpers` instead of hand-rolling listeners. It registers listeners for `pageerror`, `console` errors, and `/graphql` responses with status >= 400, exposing `pageErrors`, `consoleErrors`, `failedGraphqlResponses` (plus `ignoredConsoleErrors` for the tolerated external Reverb transport message) along with an `assertClean()` method to assert that none occurred:
    ```ts
    const tracker = trackPageErrors(page);
    await gotoAsSeededUser(page, '/roadmap');
    tracker.assertClean();
    ```
-4. Ensure the test is independent and leaves no corrupted state for subsequent tests.
+4. Ensure the test is independent and leaves no corrupted state for subsequent tests. In particular, never press `ログアウト` or `アカウントを削除` on the inherited session.
+5. Prefer exact strings over anchored regular expressions when asserting copy: `getByText(/^記録あり$/)` does **not** match a text node that keeps its template indentation, while `getByText('記録あり', { exact: true })` does. (Playwright's `toHaveText` normalizes whitespace; `getByText` with a regex does not.)

@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import type { CombinedError } from '@urql/vue'
 import { useQuery } from '@urql/vue'
+import type { CombinedError } from '@urql/vue'
 import { GENERATE_ROADMAP_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
 import type { Roadmap } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { roadmap as copy } from '~/constants/strings'
+import { count, COUNTER } from '~/utils/format'
 
+/**
+ * ロードマップ — the learning path.
+ *
+ * A **Compare/Explore** surface: the learner is reading a sequence to understand
+ * where they are in it. So it is one continuous vertical path with the current
+ * stop marked, not a grid of equal-weight cards.
+ */
 const { $urql } = useNuxtApp()
 
 const { data, fetching, error, executeQuery } = useQuery<{ roadmap: Roadmap | null }>({
@@ -13,6 +22,15 @@ const { data, fetching, error, executeQuery } = useQuery<{ roadmap: Roadmap | nu
 })
 
 const roadmap = computed(() => data.value?.roadmap ?? null)
+
+const completedCount = computed(
+  () => roadmap.value?.lessonCards.filter((card) => card.status === 'completed').length ?? 0,
+)
+
+const totalCount = computed(() => roadmap.value?.lessonCards.length ?? 0)
+
+const allDone = computed(() => totalCount.value > 0 && completedCount.value >= totalCount.value)
+
 const generating = ref(false)
 const generateError = ref<string | null>(null)
 
@@ -24,88 +42,80 @@ async function generate(): Promise<void> {
     const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
 
     if (failure) {
-      generateError.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось собрать роадмап.' })
+      generateError.value = graphQLErrorMessageFor(failure as CombinedError, {
+        fallback: copy.buildError,
+      })
     } else {
-      // The mutation is idempotent and only reports the title; the card list is
+      // The mutation is idempotent and reports only the title; the card list is
       // the query's job.
       await executeQuery({ requestPolicy: 'network-only' })
     }
   } catch {
-    generateError.value = 'Не удалось собрать роадмап.'
+    generateError.value = copy.buildError
   } finally {
     generating.value = false
   }
 }
-
-const readyCard = computed(() => roadmap.value?.lessonCards.find((card) => card.status === 'ready') ?? null)
 </script>
 
 <template>
   <section class="space-y-8">
-    <p v-if="fetching && !roadmap" class="text-slate-400">Загружаем роадмап…</p>
+    <!-- The page title is ours, not the API's: `roadmap.title` is generated
+         server-side in the learner's *old* interface language. -->
+    <PageHeader :title="copy.title" :lead="copy.subtitle" />
 
-    <UiAlert
+    <p v-if="fetching && !roadmap" class="flex items-center gap-3 text-[0.9375rem] text-[var(--ink-muted)]">
+      <UiSpinner />
+      {{ copy.title }}…
+    </p>
+
+    <UiNotice
       v-else-if="error && !roadmap"
-      :message="graphQLErrorMessageFor(error, { fallback: 'Не удалось загрузить роадмап.' })"
+      :message="graphQLErrorMessageFor(error, { fallback: copy.loadError })"
     />
 
     <template v-else-if="roadmap">
-      <header class="flex flex-wrap items-center justify-between gap-4">
-        <div class="space-y-1">
-          <h1 class="text-2xl font-semibold">{{ roadmap.title }}</h1>
-          <p class="text-sm text-slate-400">
-            {{ roadmap.lessonCards.length }} уроков · сейчас
-            {{ readyCard ? readyCard.grammarPoint.title : 'всё пройдено' }}
-          </p>
-        </div>
-
-        <NuxtLink
-          to="/review"
-          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
-        >
-          <span>Повторение правил</span>
-          <span class="text-slate-400">→</span>
-        </NuxtLink>
-      </header>
-
-      <div class="space-y-5">
-        <LessonCardItem v-for="card in roadmap.lessonCards" :key="card.id" :card="card" />
+      <div class="max-w-md">
+        <UiProgress
+          :value="completedCount"
+          :total="totalCount"
+          :label="copy.progress"
+        />
       </div>
+
+      <p v-if="allDone" class="flex items-center gap-2 text-[0.9375rem] text-[var(--color-sage-400)]">
+        <span class="size-1.5 rounded-full bg-[var(--color-sage-400)]" />
+        {{ copy.allDone }}
+      </p>
+
+      <ol class="mt-2">
+        <RoadmapLesson
+          v-for="(card, index) in roadmap.lessonCards"
+          :key="card.id"
+          :card="card"
+          :last="index === roadmap.lessonCards.length - 1"
+        />
+      </ol>
+
+      <p class="tnum pt-2 text-[0.8125rem] text-[var(--ink-faint)]">
+        {{ count(totalCount, COUNTER.lessons) }}
+      </p>
     </template>
 
-    <template v-else>
-      <header class="space-y-2">
-        <h1 class="text-2xl font-semibold">Роадмапа пока нет</h1>
-        <p class="text-sm text-slate-400">
-          Он собирается из вашего уровня: все темы до текущего CEFR-бэнда по порядку. Уровень определяет
-          ассессмент по записи голоса, но можно собрать роадмап и сразу — по текущей оценке.
-        </p>
-      </header>
+    <!-- No roadmap yet: one explanation, one primary action, one alternative. -->
+    <div v-else class="space-y-6">
+      <PageHeader :title="copy.empty" :lead="copy.emptyBody" :display="false" />
 
-      <UiAlert :message="generateError" />
+      <UiNotice v-if="generateError" :message="generateError" />
 
       <div class="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          class="rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
-          :disabled="generating"
-          @click="generate"
-        >
-          {{ generating ? 'Собираем…' : 'Собрать роадмап' }}
-        </button>
-        <NuxtLink
-          to="/onboarding"
-          class="rounded-lg border border-slate-600 px-4 py-2 font-medium text-slate-100 transition hover:border-slate-400"
-        >
-          Сначала проверить уровень
-        </NuxtLink>
-        <NuxtLink
-          to="/review"
-          class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 transition hover:border-slate-500"
-        >
-          Повторение правил
-        </NuxtLink>
+        <UiButton variant="primary" size="lg" :loading="generating" @click="generate">
+          {{ generating ? copy.building : copy.build }}
+        </UiButton>
+        <UiButtonLink to="/level" variant="ghost" size="lg">
+          レベル判定を受ける
+        </UiButtonLink>
       </div>
-    </template>
+    </div>
   </section>
 </template>

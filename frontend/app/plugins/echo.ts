@@ -10,13 +10,24 @@ declare global {
 }
 
 /**
- * Echo over Reverb ($echo), used for GraphQL subscriptions.
+ * Echo over Reverb (`$echo`), used for GraphQL subscriptions.
  *
  * Lighthouse speaks the Pusher protocol, so the client has to as well:
  * `graphql-ws` cannot receive its events. Channel authorization is a POST to
  * Lighthouse's auth route, and that route needs the Sanctum session — which
  * means cookies *and* the CSRF header, the same double submit the urql client
  * performs. Echo's default authorizer sends neither, hence the custom one.
+ *
+ * **The socket opens here, at bootstrap, and that is accepted rather than
+ * overlooked.** `new Echo()` connects inside its constructor and pusher-js has no
+ * "build the client but do not dial" option (its `enabled` key controls
+ * *transports*, not the connection — verified against pusher-js 8.6.0). Passing a
+ * stub `client` and swapping in the real Pusher on first use would work, but it
+ * means hand-forging an object that Echo only ever touches through `any`, and
+ * getting one property wrong breaks subscriptions in a way no type checker would
+ * catch. The cost of the honest version is one connection and — only when Reverb
+ * is not running, which is not a production state — one console error per page
+ * load. That is the better trade.
  */
 export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig()
@@ -44,7 +55,7 @@ export default defineNuxtPlugin(() => {
           })
 
           if (!response.ok) {
-            throw new Error(`Авторизация канала не удалась (${response.status}).`)
+            throw new Error(`チャンネルの認証に失敗しました（${response.status}）。`)
           }
 
           callback(null, await response.json())

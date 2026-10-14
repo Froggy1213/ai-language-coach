@@ -5,7 +5,7 @@ import {
   VOICE_SESSION_QUERY,
 } from '~/graphql/documents'
 import type { Mistake, VoiceSession } from '~/types/graphql'
-import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { AUTH_EXPIRED_MESSAGE, graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { useLighthouseSubscription } from '~/composables/useLighthouseSubscription'
 
 /**
@@ -42,11 +42,11 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   function mapSessionError(failure: CombinedError | null | undefined): string {
     return graphQLErrorMessageFor(failure, {
       codes: {
-        VOICE_SESSION_NOT_FOUND: 'Голосовая сессия не найдена.',
-        LESSON_CARD_NOT_FOUND: 'Урок не найден в вашем роадмапе.',
-        UNAUTHENTICATED: 'Сессия истекла. Пожалуйста, выполните вход снова.',
+        VOICE_SESSION_NOT_FOUND: '会話セッションが見つかりません。',
+        LESSON_CARD_NOT_FOUND: 'このレッスンはロードマップにありません。',
+        UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
       },
-      fallback: 'Не удалось загрузить данные сессии.',
+      fallback: 'セッションを読み込めませんでした。',
     })
   }
 
@@ -82,7 +82,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
       }
     } catch (subErr: any) {
       // Failed handshake: report on screen instead of waiting forever
-      error.value = subErr?.message ?? 'Не удалось подписаться на обновления анализа.'
+      error.value = subErr?.message ?? '分析の更新を購読できませんでした。'
       analyzing.value = false
       teardownSubscription()
     }
@@ -150,7 +150,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
       }
     } catch {
       if (!disposed) {
-        error.value = 'Не удалось загрузить данные сессии.'
+        error.value = 'セッションを読み込めませんでした。'
         analyzing.value = false
       }
     } finally {

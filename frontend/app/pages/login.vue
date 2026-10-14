@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import type { CombinedError } from '@urql/vue'
+import { app, login as copy } from '~/constants/strings'
 
+/**
+ * Sign in.
+ *
+ * The shell drops away here — no tab bar, no page header — because there is
+ * nothing else to do on this screen but the form.
+ */
 const { login } = useAuth()
 
 const email = ref('')
@@ -14,9 +21,9 @@ async function submit(): Promise<void> {
 
   try {
     await login(email.value, password.value)
-    await navigateTo('/roadmap')
+    await navigateTo('/')
   } catch (failure) {
-    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось войти.' })
+    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: copy.error })
   } finally {
     pending.value = false
   }
@@ -24,49 +31,51 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <section class="mx-auto max-w-sm space-y-6">
-    <div>
-      <h1 class="text-2xl font-semibold">Вход</h1>
-      <p class="mt-1 text-sm text-slate-400">Продолжите работу со своим роадмапом.</p>
-    </div>
+  <section class="mx-auto flex min-h-[70dvh] max-w-sm flex-col justify-center space-y-8">
+    <header class="space-y-3">
+      <div class="flex items-center gap-2.5">
+        <span class="size-1.5 rounded-full bg-[var(--accent)]" />
+        <span class="display text-[1.0625rem] tracking-tight">{{ app.name }}</span>
+      </div>
+      <div class="space-y-1.5">
+        <h1 class="display text-[1.75rem] leading-tight">{{ copy.title }}</h1>
+        <p class="text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">{{ copy.subtitle }}</p>
+      </div>
+    </header>
 
     <form class="space-y-4" @submit.prevent="submit">
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Email</span>
+      <UiField :label="copy.email">
         <input
           v-model="email"
           type="email"
           required
           autocomplete="email"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
+          class="field-input"
         >
-      </label>
+      </UiField>
 
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Пароль</span>
+      <UiField :label="copy.password">
         <input
           v-model="password"
           type="password"
           required
           autocomplete="current-password"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
+          class="field-input"
         >
-      </label>
+      </UiField>
 
-      <UiAlert :message="error" />
+      <UiNotice :message="error" />
 
-      <button
-        type="submit"
-        class="w-full rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
-        :disabled="pending"
-      >
-        {{ pending ? 'Входим…' : 'Войти' }}
-      </button>
+      <UiButton type="submit" variant="primary" size="lg" block :loading="pending">
+        {{ pending ? copy.pending : copy.submit }}
+      </UiButton>
     </form>
 
-    <p class="text-sm text-slate-400">
-      Нет аккаунта?
-      <NuxtLink to="/register" class="text-sky-400 hover:underline">Зарегистрироваться</NuxtLink>
+    <p class="text-[0.875rem] text-[var(--ink-muted)]">
+      {{ copy.noAccount }}
+      <NuxtLink to="/register" class="text-[var(--accent)] underline-offset-4 hover:underline">
+        {{ copy.toRegister }}
+      </NuxtLink>
     </p>
   </section>
 </template>

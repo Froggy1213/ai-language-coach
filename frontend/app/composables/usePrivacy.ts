@@ -11,11 +11,11 @@ export function usePrivacy() {
   function translateError(code?: string): string {
     switch (code) {
       case 'CONFIRMATION_REQUIRED':
-        return 'Для подтверждения удаления необходимо ввести DELETE.'
+        return '削除を確定するには DELETE と入力してください。'
       case 'PASSWORD_MISMATCH':
-        return 'Неверный пароль.'
+        return 'パスワードが正しくありません。'
       default:
-        return 'Не удалось удалить аккаунт. Попробуйте позже.'
+        return 'アカウントを削除できませんでした。しばらくしてからお試しください。'
     }
   }
 
@@ -48,7 +48,7 @@ export function usePrivacy() {
 
       return true
     } catch {
-      error.value = 'Не удалось удалить аккаунт. Попробуйте позже.'
+      error.value = 'アカウントを削除できませんでした。しばらくしてからお試しください。'
       return false
     } finally {
       deleting.value = false

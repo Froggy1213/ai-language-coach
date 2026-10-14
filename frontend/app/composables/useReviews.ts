@@ -6,7 +6,7 @@ import {
   SUBMIT_REVIEW_RESULT_MUTATION,
 } from '~/graphql/documents'
 import type { RecurringMistake, ReviewItem } from '~/types/graphql'
-import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { AUTH_EXPIRED_MESSAGE, graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 /**
  * Manages the spaced repetition review queue and SM-2 quality submission (plan §4–6).
@@ -31,11 +31,11 @@ export function useReviews() {
   function mapReviewError(failure: CombinedError | null | undefined): string {
     return graphQLErrorMessageFor(failure, {
       codes: {
-        REVIEW_ITEM_NOT_FOUND: 'Материал для повторения не найден.',
-        GRAMMAR_POINT_NOT_FOUND: 'Грамматическое правило не найдено.',
-        UNAUTHENTICATED: 'Сессия истекла. Пожалуйста, выполните вход снова.',
+        REVIEW_ITEM_NOT_FOUND: '復習する項目が見つかりません。',
+        GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
+        UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
       },
-      fallback: 'Не удалось сохранить результат повторения.',
+      fallback: '復習の結果を保存できませんでした。',
     })
   }
 
@@ -53,7 +53,7 @@ export function useReviews() {
 
       dueReviews.value = result.data?.dueReviews ?? []
     } catch {
-      error.value = 'Не удалось загрузить очередь повторений.'
+      error.value = '復習キューを読み込めませんでした。'
       dueReviews.value = []
     }
   }
@@ -96,7 +96,7 @@ export function useReviews() {
 
   async function submitReview(grammarPointId: string, quality: number): Promise<boolean> {
     if (quality < 0 || quality > 5) {
-      itemErrors.value[grammarPointId] = 'Оценка качества должна быть от 0 до 5.'
+      itemErrors.value[grammarPointId] = '評価は0から5の範囲で指定してください。'
       return false
     }
 
@@ -123,7 +123,7 @@ export function useReviews() {
 
       return true
     } catch {
-      itemErrors.value[grammarPointId] = 'Не удалось отправить результат повторения.'
+      itemErrors.value[grammarPointId] = '復習の結果を送信できませんでした。'
       return false
     } finally {
       submittingId.value = null

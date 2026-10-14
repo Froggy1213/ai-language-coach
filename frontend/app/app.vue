@@ -3,7 +3,21 @@ import { useQuery } from '@urql/vue'
 import { DUE_REVIEWS_QUERY } from '~/graphql/documents'
 import type { ReviewItem } from '~/types/graphql'
 
-const { user, logout } = useAuth()
+/**
+ * Application shell.
+ *
+ * Two layout decisions carry the "native app, not website" feel:
+ *  - a persistent bottom tab bar, which is what Japanese mobile users read as
+ *    an application rather than a page;
+ *  - the content column is capped and centred, with the tab bar overlaying it,
+ *    so a phone never scrolls its navigation out of reach.
+ *
+ * The header only exists on desktop; on a phone the active tab already names the
+ * page, so a title bar would be chrome for chrome's sake.
+ */
+
+const { user } = useAuth()
+const { theme, toggle: toggleTheme } = useTheme()
 
 const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
   query: DUE_REVIEWS_QUERY,
@@ -13,56 +27,57 @@ const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
 
 const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
 
-const signingOut = ref(false)
-
-async function signOut(): Promise<void> {
-  signingOut.value = true
-
-  try {
-    await logout()
-  } finally {
-    signingOut.value = false
-  }
-}
+const isGuestShell = computed(() => !user.value)
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 text-slate-100">
-    <header v-if="user" class="border-b border-slate-800 bg-slate-900/40">
-      <div class="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-4">
-        <NuxtLink to="/roadmap" class="font-semibold tracking-tight">AI Language Coach</NuxtLink>
+  <div class="grain relative flex min-h-dvh flex-col bg-[var(--canvas)] text-[var(--ink)]">
+    <!-- Desktop navigation. On phones the tab bar below does this job. -->
+    <header v-if="user" class="sticky top-0 z-40 hidden border-b border-[var(--line)] bg-[color-mix(in_oklab,var(--canvas)_82%,transparent)] backdrop-blur-xl md:block">
+      <div class="mx-auto flex h-16 max-w-5xl items-center gap-8 px-6">
+        <NuxtLink to="/" class="group flex items-center gap-2.5">
+          <span class="size-1.5 rounded-full bg-[var(--accent)] transition group-hover:scale-150" />
+          <span class="display text-[1.0625rem] tracking-tight">Kirie</span>
+        </NuxtLink>
 
-        <div class="flex items-center gap-4 text-sm text-slate-400">
-          <nav class="flex items-center gap-4">
-            <NuxtLink to="/roadmap" class="transition hover:text-slate-100">Роадмап</NuxtLink>
-            <NuxtLink to="/review" class="inline-flex items-center gap-1.5 transition hover:text-slate-100">
-              <span>Повторение</span>
-              <span
-                v-if="dueCount > 0"
-                class="rounded-full bg-sky-500/20 px-1.5 py-0.5 text-xs font-medium text-sky-300"
-              >
-                {{ dueCount }}
-              </span>
-            </NuxtLink>
-            <NuxtLink to="/onboarding" class="transition hover:text-slate-100">Проверить уровень</NuxtLink>
-            <NuxtLink to="/settings" class="transition hover:text-slate-100">Настройки</NuxtLink>
-          </nav>
-          <span class="hidden sm:inline">{{ user.name }} · {{ user.currentLevel }}</span>
+        <nav class="flex items-center gap-1 text-[0.9375rem]">
+          <NavLink to="/" label="今日" exact />
+          <NavLink to="/roadmap" label="ロードマップ" />
+          <NavLink to="/talk" label="会話" />
+          <NavLink to="/review" label="復習" :badge="dueCount" />
+        </nav>
+
+        <div class="ml-auto flex items-center gap-3">
           <button
             type="button"
-            class="rounded-lg border border-slate-700 px-3 py-1 text-slate-300 transition hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
-            :disabled="signingOut"
-            @click="signOut"
+            class="grid size-9 place-items-center rounded-full text-[var(--ink-faint)] transition hover:bg-[var(--surface)] hover:text-[var(--ink)]"
+            :aria-label="theme === 'dark' ? 'ライトテーマに切り替える' : 'ダークテーマに切り替える'"
+            @click="toggleTheme"
           >
-            Выйти
+            <ThemeIcon :theme="theme" />
           </button>
+
+          <NuxtLink
+            to="/settings"
+            class="flex items-center gap-2 rounded-full border border-[var(--line)] py-1.5 pr-3.5 pl-1.5 text-[0.8125rem] text-[var(--ink-muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
+          >
+            <span class="grid size-6 place-items-center rounded-full bg-[var(--accent-dim)] text-[0.6875rem] font-semibold text-[var(--accent)]">
+              {{ user.name.slice(0, 1).toUpperCase() }}
+            </span>
+            <span class="tnum">{{ user.currentLevel }}</span>
+          </NuxtLink>
         </div>
       </div>
     </header>
 
-    <main class="mx-auto max-w-4xl px-6 py-10">
+    <main
+      class="mx-auto w-full max-w-5xl flex-1 px-5 pt-8 sm:px-6 md:pt-12"
+      :class="user ? 'pb-40 md:pb-24' : 'pb-20'"
+    >
       <NuxtPage />
     </main>
+
+    <TabBar v-if="user" :due-count="dueCount" :theme="theme" @toggle-theme="toggleTheme" />
 
     <NuxtRouteAnnouncer />
   </div>

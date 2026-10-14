@@ -23,7 +23,7 @@ export function useAssessment() {
       .toPromise()
 
     if (presigned.error || !presigned.data) {
-      throw presigned.error ?? new Error('Сервер не выдал разрешение на загрузку.')
+      throw presigned.error ?? new Error('アップロードの許可を取得できませんでした。')
     }
 
     const upload = presigned.data.createAssessmentUploadUrl
@@ -39,7 +39,7 @@ export function useAssessment() {
     const uploaded = await fetch(upload.uploadUrl, { method: 'POST', body })
 
     if (!uploaded.ok) {
-      throw new Error(`Загрузка записи не удалась (${uploaded.status}).`)
+      throw new Error(`録音をアップロードできませんでした（${uploaded.status}）。`)
     }
 
     const submitted = await $urql
@@ -47,7 +47,7 @@ export function useAssessment() {
       .toPromise()
 
     if (submitted.error || !submitted.data) {
-      throw submitted.error ?? new Error('Не удалось отправить запись на разбор.')
+      throw submitted.error ?? new Error('録音を解析に送信できませんでした。')
     }
 
     return submitted.data.submitAssessment

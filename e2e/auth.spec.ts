@@ -1,39 +1,51 @@
 import { test, expect } from '@playwright/test';
+import { GREETING_PATTERN, appNav, loginAsSeededUser, signedInShell } from './helpers';
 
 // This spec is about the guest-to-learner flow itself, so it starts signed out
-// rather than inheriting the session the setup project saved.
+// rather than inheriting the session the setup project saved. That also keeps the
+// sign-out at the end of this test from invalidating the session every other spec
+// inherits: this test signs in its own session, and `logout` only destroys the
+// session that made the request.
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe('Authentication flow @smoke', () => {
-  test('guest visiting /roadmap is redirected to /login, signs in, and signs out', async ({ page }) => {
-    // 1. A guest visiting /roadmap lands on /login
+  test('a guest is bounced to /login, signs in to the daily home, and signs out from /settings', async ({ page }) => {
+    // 1. A guest visiting a learner route lands on /login
     await page.goto('/roadmap');
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'おかえりなさい' })).toBeVisible();
 
-    // 2. Signing in with the seeded account reaches /roadmap
-    await page.locator('input[type="email"]').fill('test@example.com');
-    await page.locator('input[type="password"]').fill('password');
-    await page.getByRole('button', { name: 'Войти' }).click();
+    // 2. Signing in with the seeded account reaches the daily home screen. This is
+    // the redesign's landing page: sign-in used to go to /roadmap.
+    await loginAsSeededUser(page);
+    await expect(page).toHaveURL('/');
+    // The heading is a time-of-day greeting, so only its shape is asserted.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(GREETING_PATTERN);
 
-    await expect(page).toHaveURL(/\/roadmap$/);
+    // 3. The signed-in shell is really on screen: the desktop nav offers the four
+    // destinations and the account link that opens /settings.
+    const nav = appNav(page);
+    await expect(nav.getByRole('link', { name: '今日', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'ロードマップ', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: '会話', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: '復習', exact: true })).toBeVisible();
+    await expect(signedInShell(page)).toBeVisible();
 
-    // 3. Roadmap renders the roadmap title and the «Проверить уровень» affordance
-    // Roadmap title for seeded user is "English · A1–B1"
-    const heading = page.getByRole('heading', { level: 1 });
-    await expect(heading).toBeVisible();
-    await expect(heading).toHaveText('English · A1–B1');
+    // 4. The level-assessment affordance moved out of the old header link and now
+    // lives on the home screen's level stat; it still opens the assessment.
+    const levelLink = page.getByRole('link', { name: '判定を受け直す' });
+    await expect(levelLink).toBeVisible();
+    await levelLink.click();
+    await expect(page).toHaveURL(/\/level$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'レベル判定' })).toBeVisible();
 
-    // Affordance in header nav: "Проверить уровень"
-    const levelCheckLink = page.getByRole('link', { name: 'Проверить уровень' });
-    await expect(levelCheckLink).toBeVisible();
-
-    // 4. Signing out returns to /login
-    const signOutButton = page.getByRole('button', { name: 'Выйти' });
+    // 5. Signing out now lives on /settings and returns to /login.
+    await page.goto('/settings');
+    const signOutButton = page.getByRole('button', { name: 'ログアウト' });
     await expect(signOutButton).toBeVisible();
     await signOutButton.click();
 
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'おかえりなさい' })).toBeVisible();
   });
 });

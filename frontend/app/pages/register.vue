@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import type { CombinedError } from '@urql/vue'
 import { SUPPORTED_LANGUAGES, languageOptionLabel } from '~/constants/languages'
+import { app, register as copy } from '~/constants/strings'
 
+/**
+ * Create an account.
+ *
+ * The level assessment is deliberately not part of this form: it needs a
+ * microphone and a minute of the learner's voice, which is a different kind of
+ * commitment from choosing a password.
+ */
 const { register } = useAuth()
 
 const name = ref('')
@@ -17,9 +25,9 @@ async function submit(): Promise<void> {
 
   try {
     await register(name.value, email.value, password.value, targetLanguage.value)
-    await navigateTo('/roadmap')
+    await navigateTo('/level')
   } catch (failure) {
-    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: 'Не удалось создать аккаунт.' })
+    error.value = graphQLErrorMessageFor(failure as CombinedError, { fallback: copy.error })
   } finally {
     pending.value = false
   }
@@ -27,72 +35,58 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <section class="mx-auto max-w-sm space-y-6">
-    <div>
-      <h1 class="text-2xl font-semibold">Регистрация</h1>
-      <p class="mt-1 text-sm text-slate-400">Уровень определится по записи голоса — это следующий шаг.</p>
-    </div>
+  <section class="mx-auto flex min-h-[70dvh] max-w-sm flex-col justify-center space-y-8">
+    <header class="space-y-3">
+      <div class="flex items-center gap-2.5">
+        <span class="size-1.5 rounded-full bg-[var(--accent)]" />
+        <span class="display text-[1.0625rem] tracking-tight">{{ app.name }}</span>
+      </div>
+      <div class="space-y-1.5">
+        <h1 class="display text-[1.75rem] leading-tight">{{ copy.title }}</h1>
+        <p class="text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">{{ copy.subtitle }}</p>
+      </div>
+    </header>
 
     <form class="space-y-4" @submit.prevent="submit">
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Имя</span>
-        <input
-          v-model="name"
-          type="text"
-          required
-          autocomplete="name"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
-        >
-      </label>
+      <UiField :label="copy.name">
+        <input v-model="name" type="text" required autocomplete="name" class="field-input">
+      </UiField>
 
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Email</span>
-        <input
-          v-model="email"
-          type="email"
-          required
-          autocomplete="email"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
-        >
-      </label>
+      <UiField :label="copy.email">
+        <input v-model="email" type="email" required autocomplete="email" class="field-input">
+      </UiField>
 
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Пароль</span>
+      <UiField :label="copy.password" :hint="copy.passwordHint">
         <input
           v-model="password"
           type="password"
           required
           minlength="8"
           autocomplete="new-password"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
+          class="field-input"
         >
-        <span class="text-xs text-slate-500">Минимум 8 символов.</span>
-      </label>
+      </UiField>
 
-      <label class="block space-y-1">
-        <span class="text-sm text-slate-400">Язык</span>
-        <select
-          v-model="targetLanguage"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500"
-        >
-          <option v-for="code in SUPPORTED_LANGUAGES" :key="code" :value="code">{{ languageOptionLabel(code) }}</option>
+      <UiField :label="copy.language">
+        <select v-model="targetLanguage" class="field-input">
+          <option v-for="code in SUPPORTED_LANGUAGES" :key="code" :value="code">
+            {{ languageOptionLabel(code) }}
+          </option>
         </select>
-      </label>
+      </UiField>
 
-      <UiAlert :message="error" />
+      <UiNotice :message="error" />
 
-      <button
-        type="submit"
-        class="w-full rounded-lg bg-sky-500 px-4 py-2 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
-        :disabled="pending"
-      >
-        {{ pending ? 'Создаём…' : 'Создать аккаунт' }}
-      </button>
+      <UiButton type="submit" variant="primary" size="lg" block :loading="pending">
+        {{ pending ? copy.pending : copy.submit }}
+      </UiButton>
     </form>
 
-    <p class="text-sm text-slate-400">
-      Уже есть аккаунт?
-      <NuxtLink to="/login" class="text-sky-400 hover:underline">Войти</NuxtLink>
+    <p class="text-[0.875rem] text-[var(--ink-muted)]">
+      {{ copy.hasAccount }}
+      <NuxtLink to="/login" class="text-[var(--accent)] underline-offset-4 hover:underline">
+        {{ copy.toLogin }}
+      </NuxtLink>
     </p>
   </section>
 </template>

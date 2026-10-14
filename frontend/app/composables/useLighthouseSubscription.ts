@@ -20,6 +20,16 @@ export interface OpenLighthouseSubscriptionOptions<TEvent> {
 }
 
 /**
+ * The message for "the socket never came up".
+ *
+ * Shared because two independent paths raise it — the socket-ID wait and the
+ * channel handshake — and a learner who hits both should read one sentence, not
+ * two versions of it.
+ */
+const SOCKET_UNREACHABLE
+  = 'リアルタイム接続を確立できませんでした。しばらくしてからもう一度お試しください。'
+
+/**
  * Resolves the Pusher connection socket ID from Laravel Echo.
  *
  * The socket ID must exist before the subscription is registered with Lighthouse via HTTP POST;
@@ -30,18 +40,14 @@ function waitForSocketId(echo: any, timeoutMs = 5000): Promise<string> {
   const socketId = echo?.socketId?.()
 
   if (socketId) {
-    return Promise.resolve(socketId)
+    return socketId
   }
 
   return new Promise<string>((resolve, reject) => {
     const pusherConnection = echo?.connector?.pusher?.connection
 
     if (!pusherConnection) {
-      reject(
-        new Error(
-          'WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.',
-        ),
-      )
+      reject(new Error(SOCKET_UNREACHABLE))
       return
     }
 
@@ -53,11 +59,7 @@ function waitForSocketId(echo: any, timeoutMs = 5000): Promise<string> {
 
     const timeout = setTimeout(() => {
       pusherConnection.unbind('connected', onConnected)
-      reject(
-        new Error(
-          'WebSocket не подключился: проверьте, запущен ли Reverb и задан ли NUXT_PUBLIC_REVERB_APP_KEY.',
-        ),
-      )
+      reject(new Error(SOCKET_UNREACHABLE))
     }, timeoutMs)
 
     pusherConnection.bind('connected', onConnected)
@@ -81,13 +83,7 @@ function waitForSubscriptionHandshake(
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(
-      () =>
-        reject(
-          new Error(
-            'Не удалось подписаться на результат: проверьте, что запущен reverb:start и что '
-            + '/graphql/subscriptions/auth доступен браузеру.',
-          ),
-        ),
+      () => reject(new Error(SOCKET_UNREACHABLE)),
       timeoutMs,
     )
 
@@ -99,11 +95,7 @@ function waitForSubscriptionHandshake(
     if (typeof channel?.error === 'function') {
       channel.error((err: any) => {
         clearTimeout(timeout)
-        reject(
-          new Error(
-            err?.message ?? 'Ошибка авторизации канала подписки на результат анализа.',
-          ),
-        )
+        reject(new Error(err?.message ?? 'チャンネルの認証に失敗しました。'))
       })
     }
   })
@@ -137,12 +129,11 @@ export function watchPusherReconnects(echo: any, onReconnect: () => void): () =>
     return () => {}
   }
 
-  // A page that loads while the socket is already up — the normal case in a
-  // single-page app, where Echo connects at bootstrap and the learner navigates
-  // to the session afterwards — must still report its *next* reconnect. Starting
-  // this at `false` unconditionally would treat that next transition into
-  // `connected` as the initial connection and swallow the only reconnect that
-  // mattered, leaving the screen stuck exactly as before.
+  // A page that loads while the socket is already up — a single-page app can
+  // arrive here with the connection long established — must still report its
+  // *next* reconnect. Starting this at `false` unconditionally would treat that
+  // next transition into `connected` as the initial connection and swallow the
+  // only reconnect that mattered, leaving the screen stuck exactly as before.
   let seenConnected = connection.state === 'connected'
 
   const onStateChange = (states: { current?: string; previous?: string }) => {
@@ -193,7 +184,7 @@ function resolveTransport(transport?: LighthouseTransport): LighthouseTransport 
  * Subscribes to a Laravel Lighthouse GraphQL subscription over Echo and Reverb.
  *
  * Coordinates:
- * 1. Resolving the active Pusher socket ID.
+ * 1. Opening the socket if it is not up yet, and resolving the Pusher socket ID.
  * 2. POSTing the subscription query via `csrfAwareFetch` with the `X-Socket-ID` header.
  * 3. Extracting the subscription channel name from `extensions.lighthouse_subscriptions.channel`.
  * 4. Subscribing to the Echo private channel (stripping the "private-" prefix).
@@ -225,13 +216,13 @@ export async function openLighthouseSubscription<TEvent>(
   })
 
   if (!response.ok) {
-    throw new Error(`Сервер отклонил запрос на подписку (${response.status}).`)
+    throw new Error(`サブスクリプションの登録がサーバーに拒否されました（${response.status}）。`)
   }
 
   const body = await response.json()
 
   if (body?.errors && body.errors.length > 0) {
-    throw new Error(body.errors[0]?.message ?? 'Ошибка подписки на результат анализа.')
+    throw new Error(body.errors[0]?.message ?? 'サブスクリプションを登録できませんでした。')
   }
 
   const channelName = body?.extensions?.lighthouse_subscriptions?.channel as
@@ -239,7 +230,7 @@ export async function openLighthouseSubscription<TEvent>(
     | undefined
 
   if (!channelName) {
-    throw new Error('Сервер не подтвердил канал подписки на результат.')
+    throw new Error('サーバーがサブスクリプションのチャンネルを返しませんでした。')
   }
 
   const name = channelName.replace(/^private-/, '')

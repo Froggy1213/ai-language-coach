@@ -2,7 +2,16 @@
 import { useQuery } from '@urql/vue'
 import { ME_QUERY } from '~/graphql/documents'
 import { languageDisplayName } from '~/constants/languages'
+import { common, settings as copy } from '~/constants/strings'
+import { formatDate } from '~/utils/format'
 
+/**
+ * 設定 — account, appearance, and the data controls.
+ *
+ * A **Configure** surface, so it follows the grouped-list convention: rows of
+ * label and value, one section per concern, and the destructive action isolated
+ * at the bottom behind its own confirmation.
+ */
 interface MeData {
   me: {
     id: string
@@ -21,10 +30,24 @@ const { data, fetching, error: queryError } = useQuery<MeData>({
 
 const currentUser = computed(() => data.value?.me ?? null)
 
+const { theme, set: setTheme } = useTheme()
+
+const { logout } = useAuth()
 const { deleting, error: deleteError, deleteAccount } = usePrivacy()
 
 const password = ref('')
 const confirmation = ref('')
+const signingOut = ref(false)
+
+async function handleSignOut(): Promise<void> {
+  signingOut.value = true
+
+  try {
+    await logout()
+  } finally {
+    signingOut.value = false
+  }
+}
 
 async function handleDelete(): Promise<void> {
   if (!password.value || !confirmation.value) {
@@ -36,103 +59,145 @@ async function handleDelete(): Promise<void> {
 </script>
 
 <template>
-  <section class="mx-auto max-w-xl space-y-8">
-    <header>
-      <h1 class="text-2xl font-semibold tracking-tight">Настройки аккаунта</h1>
-      <p class="mt-1 text-sm text-slate-400">Информация о профиле, согласии на обработку голоса и управление аккаунтом.</p>
-    </header>
+  <section class="mx-auto max-w-xl space-y-10">
+    <PageHeader :title="copy.title" :lead="copy.subtitle" />
 
-    <div v-if="fetching && !currentUser" class="text-sm text-slate-400">
-      Загрузка настроек…
-    </div>
+    <p v-if="fetching && !currentUser" class="flex items-center gap-3 text-[0.9375rem] text-[var(--ink-muted)]">
+      <UiSpinner />
+      {{ copy.title }}…
+    </p>
 
-    <UiAlert
-      v-else-if="queryError && !currentUser"
-      message="Не удалось загрузить данные аккаунта."
-      padding="lg"
-    />
+    <UiNotice v-else-if="queryError && !currentUser" :message="copy.loadError" />
 
-    <div v-else-if="currentUser" class="space-y-6">
-      <div class="rounded-xl border border-slate-800 bg-slate-900/50 p-6 space-y-4">
-        <h2 class="text-lg font-medium text-slate-200">Данные аккаунта</h2>
+    <template v-else-if="currentUser">
+      <!-- Account -->
+      <section class="space-y-3">
+        <h2 class="label">{{ copy.account }}</h2>
 
-        <dl class="divide-y divide-slate-800 text-sm">
-          <div class="flex justify-between py-3">
-            <dt class="text-slate-400">Имя</dt>
-            <dd class="font-medium text-slate-200">{{ currentUser.name }}</dd>
+        <dl class="divide-y divide-[var(--line)] rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4">
+          <div class="flex items-baseline justify-between gap-6 py-3.5">
+            <dt class="shrink-0 text-[0.875rem] text-[var(--ink-muted)]">{{ copy.name }}</dt>
+            <dd class="min-w-0 truncate text-[0.9375rem]">{{ currentUser.name }}</dd>
           </div>
-          <div class="flex justify-between py-3">
-            <dt class="text-slate-400">Email</dt>
-            <dd class="font-medium text-slate-200">{{ currentUser.email }}</dd>
+          <div class="flex items-baseline justify-between gap-6 py-3.5">
+            <dt class="shrink-0 text-[0.875rem] text-[var(--ink-muted)]">{{ copy.email }}</dt>
+            <dd class="min-w-0 truncate text-[0.9375rem]">{{ currentUser.email }}</dd>
           </div>
-          <div class="flex justify-between py-3">
-            <dt class="text-slate-400">Изучаемый язык</dt>
-            <dd class="font-medium text-slate-200">{{ languageDisplayName(currentUser.targetLanguage) }}</dd>
+          <div class="flex items-baseline justify-between gap-6 py-3.5">
+            <dt class="shrink-0 text-[0.875rem] text-[var(--ink-muted)]">{{ copy.language }}</dt>
+            <dd class="text-[0.9375rem]">{{ languageDisplayName(currentUser.targetLanguage) }}</dd>
           </div>
-          <div class="flex justify-between py-3">
-            <dt class="text-slate-400">Текущий уровень (CEFR)</dt>
-            <dd class="font-medium text-slate-200">{{ currentUser.currentLevel }}</dd>
+          <div class="flex items-baseline justify-between gap-6 py-3.5">
+            <dt class="shrink-0 text-[0.875rem] text-[var(--ink-muted)]">{{ copy.levelLabel }}</dt>
+            <dd class="tnum text-[0.9375rem]">{{ currentUser.currentLevel }}</dd>
           </div>
-          <div class="flex justify-between py-3">
-            <dt class="text-slate-400">Согласие на запись голоса</dt>
-            <dd class="font-medium text-slate-200">
-              <span v-if="currentUser.voiceConsentAt" class="inline-flex items-center gap-1.5 text-emerald-400">
-                <span class="inline-block h-2 w-2 rounded-full bg-emerald-400" />
-                {{ formatDate(currentUser.voiceConsentAt ?? '') }}
+          <div class="flex items-baseline justify-between gap-6 py-3.5">
+            <dt class="shrink-0 text-[0.875rem] text-[var(--ink-muted)]">{{ copy.voiceConsent }}</dt>
+            <dd class="text-[0.9375rem]">
+              <span v-if="currentUser.voiceConsentAt" class="inline-flex items-center gap-2">
+                <span class="size-1.5 rounded-full bg-[var(--color-sage-400)]" />
+                {{ copy.voiceConsentYes }}
               </span>
-              <span v-else class="text-slate-500">
-                Не зафиксировано
-              </span>
+              <span v-else class="text-[var(--ink-faint)]">{{ copy.voiceConsentNo }}</span>
             </dd>
           </div>
         </dl>
-      </div>
 
-      <div class="rounded-xl border border-rose-900/40 bg-rose-950/20 p-6 space-y-4">
-        <div>
-          <h2 class="text-lg font-medium text-rose-300">Удаление аккаунта</h2>
-          <p class="mt-1 text-xs text-rose-200/80">
-            Действие необратимо. Будут удалены все ваши данные: профиль, роадмап, история диалогов, ошибки и аудиозаписи.
-          </p>
+        <p v-if="currentUser.voiceConsentAt" class="pl-1 text-[0.75rem] text-[var(--ink-faint)]">
+          {{ formatDate(currentUser.voiceConsentAt) }}
+        </p>
+      </section>
+
+      <!-- Appearance -->
+      <section class="space-y-3">
+        <h2 class="label">{{ copy.appearance }}</h2>
+
+        <div class="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+          <div class="flex items-center justify-between gap-4">
+            <span class="text-[0.9375rem]">{{ common.theme }}</span>
+
+            <!-- Segmented control: two mutually exclusive options read better as
+                 one control than as two switches. -->
+            <div class="flex rounded-full border border-[var(--line)] p-0.5" role="group" :aria-label="common.theme">
+              <button
+                v-for="option in (['dark', 'light'] as const)"
+                :key="option"
+                type="button"
+                class="min-h-8 rounded-full px-3.5 text-[0.8125rem] transition-colors"
+                :class="theme === option
+                  ? 'bg-[var(--accent)] text-[var(--accent-ink)]'
+                  : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'"
+                :aria-pressed="theme === option"
+                @click="setTheme(option)"
+              >
+                {{ option === 'dark' ? common.themeDark : common.themeLight }}
+              </button>
+            </div>
+          </div>
+
+          <p class="text-[0.8125rem] leading-relaxed text-[var(--ink-faint)]">{{ copy.themeHint }}</p>
         </div>
+      </section>
 
-        <UiAlert :message="deleteError" />
+      <!-- Session. Signing out is a plain action, not a danger: it is one of the
+           two things this screen is for. -->
+      <section class="space-y-3">
+        <h2 class="label">{{ copy.session }}</h2>
 
-        <form class="space-y-4" @submit.prevent="handleDelete">
-          <label class="block space-y-1">
-            <span class="text-sm text-slate-400">Текущий пароль</span>
-            <input
-              v-model="password"
-              type="password"
-              required
-              autocomplete="current-password"
-              placeholder="Введите пароль"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-rose-500"
+        <div class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+          <p class="text-[0.8125rem] leading-relaxed text-[var(--ink-faint)]">{{ copy.logoutHint }}</p>
+          <UiButton variant="quiet" :loading="signingOut" @click="handleSignOut">
+            {{ signingOut ? copy.loggingOut : copy.logout }}
+          </UiButton>
+        </div>
+      </section>
+
+      <!-- Danger zone -->
+      <section class="space-y-4">
+        <h2 class="label text-[var(--color-clay-400)]">{{ copy.danger }}</h2>
+
+        <div class="space-y-5 rounded-2xl border border-[color-mix(in_oklab,var(--color-clay-400)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-clay-500)_7%,transparent)] p-4">
+          <p class="text-[0.875rem] leading-[1.8] text-[var(--ink-muted)]">{{ copy.dangerBody }}</p>
+
+          <UiNotice v-if="deleteError" :message="deleteError" />
+
+          <form class="space-y-4" @submit.prevent="handleDelete">
+            <label class="block space-y-1.5">
+              <span class="text-[0.875rem] text-[var(--ink-muted)]">{{ copy.currentPassword }}</span>
+              <input
+                v-model="password"
+                type="password"
+                required
+                autocomplete="current-password"
+                :placeholder="copy.passwordPlaceholder"
+                class="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] outline-none transition focus:border-[var(--accent)]"
+              >
+            </label>
+
+            <label class="block space-y-1.5">
+              <span class="text-[0.875rem] text-[var(--ink-muted)]">
+                {{ copy.confirmLabel }} <strong class="font-mono text-[var(--color-clay-400)]">DELETE</strong> {{ copy.confirmSuffix }}
+              </span>
+              <input
+                v-model="confirmation"
+                type="text"
+                required
+                placeholder="DELETE"
+                class="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--surface-sunken)] px-3.5 py-2.5 font-mono text-[0.9375rem] text-[var(--ink)] outline-none transition focus:border-[var(--color-clay-400)]"
+              >
+            </label>
+
+            <UiButton
+              type="submit"
+              variant="danger"
+              :loading="deleting"
+              :disabled="!password || confirmation !== 'DELETE'"
             >
-          </label>
-
-          <label class="block space-y-1">
-            <span class="text-sm text-slate-400">
-              Для подтверждения введите <strong class="text-rose-400">DELETE</strong>
-            </span>
-            <input
-              v-model="confirmation"
-              type="text"
-              required
-              placeholder="DELETE"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-rose-500"
-            >
-          </label>
-
-          <button
-            type="submit"
-            :disabled="deleting || !password || confirmation !== 'DELETE'"
-            class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {{ deleting ? 'Удаление аккаунта…' : 'Удалить аккаунт' }}
-          </button>
-        </form>
-      </div>
-    </div>
+              {{ deleting ? copy.deleting : copy.deleteCta }}
+            </UiButton>
+          </form>
+        </div>
+      </section>
+    </template>
   </section>
 </template>

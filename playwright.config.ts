@@ -1,6 +1,20 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * The Nuxt dev server binds `localhost` (IPv6 `::1` on macOS), not `127.0.0.1`,
+ * and the backend's Sanctum stateful-domain list contains `localhost:3000`. Both
+ * the base URL and the browser's cookie jar have to agree on that hostname, or
+ * the session cookie is set for one origin and never sent to the other.
+ */
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+
+/**
+ * Playwright's own Chromium download is not always present on a developer
+ * machine; an installed Chrome is. `E2E_CHANNEL=chrome` opts into it.
+ */
+const CHANNEL = process.env.E2E_CHANNEL === 'chrome' ? { channel: 'chrome' as const } : {};
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -18,10 +32,11 @@ export default defineConfig({
     ['html', { open: 'never' }],
   ],
   use: {
-    baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:3000',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'off',
+    ...CHANNEL,
   },
   projects: [
     // One sign-in for the whole run: `login` is throttled at ten attempts per
@@ -36,6 +51,7 @@ export default defineConfig({
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
+        ...CHANNEL,
         storageState: '.auth/user.json',
       },
     },

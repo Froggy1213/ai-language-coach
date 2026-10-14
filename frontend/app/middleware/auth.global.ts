@@ -19,6 +19,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   if (user.value && isGuestRoute) {
-    return navigateTo('/roadmap')
+    return navigateTo('/')
   }
 })
