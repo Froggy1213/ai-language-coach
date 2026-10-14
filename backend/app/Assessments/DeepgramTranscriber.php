@@ -13,11 +13,15 @@ use DIJ\Deepgram\Deepgram;
  * lives. Sending the bytes also means a local S3-compatible store behaves
  * exactly like the real bucket.
  *
- * The `dij-digital/deepgram-laravel` package wraps the request; its model and
- * language defaults come from `config/deepgram-laravel.php` (Nova-2,
- * `DEEPGRAM_DEFAULT_LANGUAGE`). Response time is governed by the global HTTP
- * options set in AppServiceProvider: a long recording takes longer than the
- * framework's 30-second default.
+ * The `dij-digital/deepgram-laravel` package wraps the request. Its model and
+ * language defaults come from `config/deepgram-laravel.php`, where the model is
+ * `DEEPGRAM_DEFAULT_MODEL` (nova-3): passing a model here as well would leave
+ * two places to change when the model is next revised. Response time is governed
+ * by the global HTTP options set in AppServiceProvider — a long recording takes
+ * longer than the framework's 30-second default.
+ *
+ * What comes back is kept whole: the analysis reads word timings and per-word
+ * confidence out of it (see SpeechFeatures), not only the transcript string.
  */
 final class DeepgramTranscriber
 {
@@ -28,22 +32,29 @@ final class DeepgramTranscriber
      */
     public function transcribe(Recording $recording, ?string $language = null): Transcription
     {
-        $path = $this->spool($recording);
+        $recording->assertReadable();
 
         try {
             $response = $this->deepgram->listen()->transcribeFile(
-                absoluteFilePath: $path,
+                absoluteFilePath: $recording->path,
                 mimeType: $recording->contentType,
                 options: array_filter([
                     'language' => $language,
                     'smart_format' => true,
                     'punctuate' => true,
+                    // Hesitations are the point: a CEFR examiner reads "I, um,
+                    // went" differently from "I went", and the filler count in
+                    // SpeechFeatures is empty without this.
+                    'filler_words' => true,
                 ]),
             );
         } finally {
-            // The package has read the file by now; a recording should not
-            // outlive the call that needed it (plan §5).
-            @unlink($path);
+            // The staged copy is consumed by this call: the provider has the
+            // bytes by now, and rendering them into a transcription is not the
+            // same thing as keeping the audio (plan §5). The caller keeps a
+            // defensive `discard()` for a failure before this point, and
+            // `discard()` is idempotent, so removing it twice is free.
+            $recording->discard();
         }
 
         $text = trim((string) data_get($response, 'results.channels.0.alternatives.0.transcript', ''));
@@ -54,25 +65,13 @@ final class DeepgramTranscriber
             throw new TranscriptionFailed('Deepgram returned an empty transcript for the recording.');
         }
 
+        $durationSeconds = (float) data_get($response, 'metadata.duration', 0);
+
         return new Transcription(
             text: $text,
-            durationSeconds: (float) data_get($response, 'metadata.duration', 0),
+            durationSeconds: $durationSeconds,
             raw: $response,
+            features: SpeechFeatures::fromDeepgramResponse($response, $durationSeconds),
         );
-    }
-
-    /**
-     * The package takes a path, not a stream, so the bytes are spooled to a
-     * temporary file for the duration of the call.
-     */
-    private function spool(Recording $recording): string
-    {
-        $path = tempnam(sys_get_temp_dir(), 'assessment-recording-');
-
-        if ($path === false || file_put_contents($path, $recording->contents) === false) {
-            throw new TranscriptionFailed('The recording could not be spooled to a temporary file.');
-        }
-
-        return $path;
     }
 }

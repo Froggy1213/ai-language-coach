@@ -4,6 +4,7 @@ namespace Tests\Feature\Assessments;
 
 use App\Assessments\AssessmentAnalysisFailed;
 use App\Assessments\DeepSeekCefrAssessor;
+use App\Assessments\SpeechFeatures;
 use App\Assessments\Transcription;
 use App\Enums\CefrLevel;
 use App\Models\User;
@@ -104,14 +105,132 @@ class DeepSeekCefrAssessorTest extends TestCase
         $this->assessor()->assess($this->transcription('Hello.'), $this->user());
     }
 
+    public function test_it_hands_the_examiner_the_fluency_evidence_alongside_the_transcript(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'A2',
+            'summary' => 'You are at A2.',
+            'strengths' => ['Simple sentences'],
+            'weaknesses' => ['Past tense'],
+        ]]);
+
+        $this->assessor()->assess(
+            $this->transcription('I go to school yesterday.', features: new SpeechFeatures(
+                wordCount: 40,
+                wordsPerMinute: 62.5,
+                speakingSeconds: 38.4,
+                silenceShare: 0.3,
+                longestSilenceSeconds: 6.1,
+                longestPauseSeconds: 4.2,
+                lowConfidenceShare: 0.15,
+                fillers: ['um', 'uh'],
+                uncertainWords: ['yesterday'],
+            )),
+            $this->user(),
+        );
+
+        // Judging a spoken sample on its transcript alone turns it into a written
+        // one: the pauses and the hesitations have to reach the prompt, and the
+        // confidence figure has to arrive hedged, because it measures the audio
+        // as much as the learner.
+        StructuredAnonymousAgent::assertPrompted(static function ($prompt): bool {
+            $text = (string) $prompt->prompt;
+
+            foreach ([
+                '"words_per_minute": 62.5',
+                '"longest_pause_between_words_seconds": 4.2',
+                '"longest_silence_seconds": 6.1',
+                '"filler_words_used": [',
+                '"words_the_recogniser_was_unsure_about": [',
+                // The two guardrails that keep delivery and audio quality from
+                // deciding a band on their own.
+                'must not move the band on their own',
+                'Never lower the band because',
+                'Transcript:',
+                'I go to school yesterday.',
+            ] as $needle) {
+                if (! str_contains($text, $needle)) {
+                    fwrite(STDERR, "MISSING: {$needle}\n");
+
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    public function test_it_says_so_when_the_provider_returned_no_timings(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'A2',
+            'summary' => 'You are at A2.',
+            'strengths' => ['Simple sentences'],
+            'weaknesses' => ['Past tense'],
+        ]]);
+
+        $this->assessor()->assess(
+            $this->transcription('I go to school yesterday.', features: new SpeechFeatures(
+                wordCount: 5,
+                lowConfidenceShare: 0.4,
+            )),
+            $this->user(),
+        );
+
+        // Words without timings are not an empty measurement: the confidence
+        // figures are real and worth sending, but the prompt must not invite the
+        // model to reason about a fluency figure that was never measured.
+        StructuredAnonymousAgent::assertPrompted(static function ($prompt): bool {
+            $text = (string) $prompt->prompt;
+
+            foreach ([
+                'carries no word timings',
+                'no fluency figure appears above',
+                '"low_confidence_word_share": 0.4',
+            ] as $needle) {
+                if (! str_contains($text, $needle)) {
+                    fwrite(STDERR, "MISSING: {$needle}\n");
+
+                    return false;
+                }
+            }
+
+            // The measurement block must not carry a fluency key. (The words
+            // `words_per_minute` still appear in the explanation below it, which is
+            // why this checks the JSON key rather than the bare phrase.)
+            return ! str_contains($text, '"words_per_minute"');
+        });
+    }
+
+    public function test_it_sends_the_bare_transcript_when_the_provider_measured_nothing(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'A1',
+            'summary' => 'Just starting.',
+            'strengths' => ['Greetings'],
+            'weaknesses' => ['Articles'],
+        ]]);
+
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+
+        // No word timings means no measurements: the prompt must not invent a
+        // block of zeroes the provider never produced.
+        StructuredAnonymousAgent::assertPrompted(static fn ($prompt): bool => (string) $prompt->prompt === 'Hello.');
+    }
+
     private function assessor(): DeepSeekCefrAssessor
     {
         return $this->app->make(DeepSeekCefrAssessor::class);
     }
 
-    private function transcription(string $text): Transcription
+    private function transcription(string $text, ?SpeechFeatures $features = null): Transcription
     {
-        return new Transcription(text: $text, durationSeconds: 30.0, raw: []);
+        return new Transcription(
+            text: $text,
+            durationSeconds: 30.0,
+            raw: [],
+            features: $features ?? new SpeechFeatures(wordCount: 0),
+        );
     }
 
     private function user(): User

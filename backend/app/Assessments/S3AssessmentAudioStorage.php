@@ -8,6 +8,7 @@ use Aws\S3\PostObjectV4;
 use Aws\S3\S3Client;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * S3 implementation of the assessment audio boundary (plan §5).
@@ -107,19 +108,45 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
 
     public function fetch(AudioUpload $upload): Recording
     {
-        try {
-            $object = $this->client->getObject([
-                'Bucket' => $this->bucket(),
-                'Key' => $upload->key,
-            ]);
-        } catch (S3Exception $exception) {
-            throw new InvalidAssessmentAudio('The uploaded audio could not be read back from the bucket.', previous: $exception);
+        // `SaveAs` hands the SDK a path to stream into, so the body never
+        // becomes a PHP string: a 15 MB recording read with `getObject` and
+        // string-cast first costs several times that in peak memory, and the
+        // HTTP client that posts it on would hold a second copy.
+        $path = tempnam(sys_get_temp_dir(), 'assessment-recording-');
+
+        if ($path === false) {
+            throw new InvalidAssessmentAudio('The uploaded audio could not be staged for transcription.');
         }
 
-        return new Recording(
-            contents: (string) $object['Body'],
-            contentType: $upload->contentType,
-        );
+        try {
+            $this->client->getObject([
+                'Bucket' => $this->bucket(),
+                'Key' => $upload->key,
+                'SaveAs' => $path,
+            ]);
+        } catch (Throwable $exception) {
+            // A partial download is not a recording: leaving it behind would
+            // hand the transcriber a truncated file.
+            //
+            // Caught as `Throwable`, not `S3Exception`, because the failure that
+            // matters here is not always an S3 one: `bucket()` throws a
+            // RuntimeException when AWS_BUCKET is unset, and a credential
+            // provider with no metadata service throws the SDK's own
+            // CredentialsException. Narrowing the catch to S3Exception left the
+            // freshly created temp file on the worker's disk on every retry of
+            // every such failure, and the caller never got a `Recording` to
+            // discard. The file is removed whatever went wrong; only the
+            // translation to a domain exception is conditional.
+            @unlink($path);
+
+            if ($exception instanceof S3Exception) {
+                throw new InvalidAssessmentAudio('The uploaded audio could not be read back from the bucket.', previous: $exception);
+            }
+
+            throw $exception;
+        }
+
+        return new Recording(path: $path, contentType: $upload->contentType);
     }
 
     public function delete(string $fileUrl): void

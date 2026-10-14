@@ -28,10 +28,19 @@ interface AssessmentAudioStorage
     public function inspect(User $user, string $fileUrl): AudioUpload;
 
     /**
-     * Read the object back out of the bucket.
+     * Stream the object out of the bucket into a file the transcription consumes.
      *
      * The transcription provider needs the audio itself: the bucket is private,
-     * so handing out a URL would not survive the first request.
+     * so handing out a URL would not survive the first request. It is streamed
+     * to disk rather than returned as bytes so the worker's memory does not
+     * scale with the recording size.
+     *
+     * The returned `Recording` is owned by the `transcribe()` call that reads it,
+     * which removes the file itself once the provider has been handed the bytes —
+     * on success and on failure alike. The caller keeps a defensive
+     * `discard()` in a `finally` only as a backstop for a failure that happens
+     * before transcription starts; `discard()` is idempotent, so the second call
+     * is free.
      *
      * @throws InvalidAssessmentAudio when the object is missing or unreadable.
      */

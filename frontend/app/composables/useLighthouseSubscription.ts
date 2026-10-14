@@ -109,6 +109,69 @@ function waitForSubscriptionHandshake(
   })
 }
 
+/**
+ * Watch the Pusher connection and report reconnects.
+ *
+ * This is the gap a Lighthouse subscription cannot close by itself: a Pusher
+ * channel is re-subscribed to automatically after the socket reconnects, but the
+ * *Lighthouse* subscription is registered server-side against the old socket id.
+ * When the socket comes back with a new id, Lighthouse keeps pushing at the
+ * connection that no longer exists, so a result produced after a reconnect is
+ * never delivered — the screen sits on "analysing" forever with no error to show.
+ *
+ * The first `connected` is the connection the caller is already using, so it is
+ * not reported: only a reconnect is. The listener is removed by the returned
+ * function, which callers wire to component teardown.
+ *
+ * @param echo     The Laravel Echo instance.
+ * @param onReconnect Called once per *re*-connection, not the initial one.
+ * @returns A function that stops watching.
+ */
+export function watchPusherReconnects(echo: any, onReconnect: () => void): () => void {
+  const connection = echo?.connector?.pusher?.connection
+
+  // A transport that does not expose a connection (a test double, an Echo
+  // connector other than Pusher) simply has nothing to watch. Failing here would
+  // turn an optional resilience path into a broken screen.
+  if (!connection || typeof connection.bind !== 'function') {
+    return () => {}
+  }
+
+  // A page that loads while the socket is already up — the normal case in a
+  // single-page app, where Echo connects at bootstrap and the learner navigates
+  // to the session afterwards — must still report its *next* reconnect. Starting
+  // this at `false` unconditionally would treat that next transition into
+  // `connected` as the initial connection and swallow the only reconnect that
+  // mattered, leaving the screen stuck exactly as before.
+  let seenConnected = connection.state === 'connected'
+
+  const onStateChange = (states: { current?: string; previous?: string }) => {
+    if (states?.current !== 'connected') {
+      return
+    }
+
+    if (!seenConnected) {
+      seenConnected = true
+      return
+    }
+
+    onReconnect()
+  }
+
+  // `state_change` rather than `connected`: the handler has to run for a
+  // transition into `connected` from anywhere, and the first one has to be
+  // distinguishable from the rest.
+  connection.bind('state_change', onStateChange)
+
+  return () => {
+    try {
+      connection.unbind('state_change', onStateChange)
+    } catch {
+      // Already torn down by the transport; nothing left to unbind.
+    }
+  }
+}
+
 function resolveTransport(transport?: LighthouseTransport): LighthouseTransport {
   if (transport) {
     return {
@@ -232,6 +295,8 @@ export function useLighthouseSubscription(): {
     options: OpenLighthouseSubscriptionOptions<TEvent>,
   ) => Promise<LighthouseSubscriptionHandle>
   stopAll: () => void
+  /** Reports every Pusher *re*-connection, for callers that must re-ask the API. */
+  onReconnect: (handler: () => void) => () => void
 } {
   const { $echo } = useNuxtApp()
   const config = useRuntimeConfig()
@@ -239,12 +304,18 @@ export function useLighthouseSubscription(): {
   const transport: LighthouseTransport = { echo: $echo, backendUrl }
 
   const activeHandles = new Set<LighthouseSubscriptionHandle>()
+  const reconnectWatchers = new Set<() => void>()
 
   function stopAll(): void {
     for (const handle of Array.from(activeHandles)) {
       handle.stop()
     }
     activeHandles.clear()
+
+    for (const stopWatching of Array.from(reconnectWatchers)) {
+      stopWatching()
+    }
+    reconnectWatchers.clear()
   }
 
   async function open<TEvent>(
@@ -268,6 +339,26 @@ export function useLighthouseSubscription(): {
     return wrappedHandle
   }
 
+  /**
+   * Run `handler` after the socket reconnects, for as long as this composable's
+   * scope lives.
+   *
+   * A caller that only subscribes has no way to notice that the push it is
+   * waiting for was aimed at a socket that no longer exists: the channel looks
+   * subscribed, the screen looks busy, and nothing arrives. Re-asking the API
+   * once the connection is back is what turns that into a delayed result instead
+   * of a permanently stuck screen.
+   */
+  function onReconnect(handler: () => void): () => void {
+    const stopWatching = watchPusherReconnects($echo, handler)
+    reconnectWatchers.add(stopWatching)
+
+    return () => {
+      reconnectWatchers.delete(stopWatching)
+      stopWatching()
+    }
+  }
+
   if (getCurrentScope()) {
     onScopeDispose(() => {
       stopAll()
@@ -277,5 +368,6 @@ export function useLighthouseSubscription(): {
   return {
     open,
     stopAll,
+    onReconnect,
   }
 }

@@ -32,6 +32,20 @@ class AnalyzeAssessmentTest extends TestCase
 
     private const AUDIO_URL = 'https://coach-audio.s3.amazonaws.com/assessments/1/recording.webm';
 
+    /** @var list<string> */
+    private array $stagedRecordings = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->stagedRecordings as $path) {
+            @unlink($path);
+        }
+
+        $this->stagedRecordings = [];
+
+        parent::tearDown();
+    }
+
     public function test_it_transcribes_analyses_and_rebuilds_the_roadmap(): void
     {
         $this->seed(GrammarPointSeeder::class);
@@ -61,6 +75,16 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertSame(42.5, $assessment->raw_data['duration_seconds']);
         $this->assertSame('B1', $assessment->raw_data['analysis']['cefr_level']);
         $this->assertSame(['Present perfect'], $assessment->raw_data['analysis']['weaknesses']);
+
+        // The delivery evidence is stored with the level it produced, so a band
+        // that looks wrong later can be explained from what the model was told.
+        $this->assertSame(2, $assessment->raw_data['speech_features']['words_recognised']);
+        $this->assertSame(['um'], $assessment->raw_data['speech_features']['filler_words_used']);
+        $this->assertSame(0.5, $assessment->raw_data['speech_features']['low_confidence_word_share']);
+        $this->assertSame(1.3, $assessment->raw_data['speech_features']['longest_pause_between_words_seconds']);
+        // Two words is not a speech rate: the figure is withheld rather than
+        // extrapolated into a number no reader should trust.
+        $this->assertArrayNotHasKey('words_per_minute', $assessment->raw_data['speech_features']);
 
         $this->assertSame(CefrLevel::B1, $user->refresh()->current_level);
 
@@ -275,8 +299,8 @@ class AnalyzeAssessmentTest extends TestCase
     }
 
     /**
-     * The bucket, stubbed: the job reads the object back and checks it again
-     * before anything is transcribed.
+     * The bucket, stubbed: the job streams the object back into a staged file,
+     * checks it again, and transcribes from that file.
      */
     private function audioStore(): MockInterface
     {
@@ -287,10 +311,16 @@ class AnalyzeAssessmentTest extends TestCase
             sizeBytes: 2048,
             contentType: 'audio/webm',
         ));
-        $audio->shouldReceive('fetch')->andReturn(new Recording(
-            contents: 'fake-webm-bytes',
-            contentType: 'audio/webm',
-        ));
+        $audio->shouldReceive('fetch')->andReturnUsing(function (): Recording {
+            $path = tempnam(sys_get_temp_dir(), 'assessment-recording-');
+            file_put_contents($path, 'fake-webm-bytes');
+
+            // The job is supposed to discard this; registering it here means a
+            // regression shows up as a stray file rather than as a silent leak.
+            $this->stagedRecordings[] = $path;
+
+            return new Recording(path: $path, contentType: 'audio/webm');
+        });
 
         return $audio;
     }
@@ -329,7 +359,14 @@ class AnalyzeAssessmentTest extends TestCase
             'api.deepgram.com/*' => Http::response([
                 'metadata' => ['duration' => 42.5],
                 'results' => [
-                    'channels' => [['alternatives' => [['transcript' => $transcript, 'confidence' => 0.98]]]],
+                    'channels' => [['alternatives' => [[
+                        'transcript' => $transcript,
+                        'confidence' => 0.98,
+                        'words' => [
+                            ['word' => 'i', 'punctuated_word' => 'I', 'start' => 0.0, 'end' => 0.3, 'confidence' => 0.99],
+                            ['word' => 'um', 'punctuated_word' => 'um', 'start' => 1.6, 'end' => 1.8, 'confidence' => 0.71],
+                        ],
+                    ]]]],
                 ],
             ]),
         ]);

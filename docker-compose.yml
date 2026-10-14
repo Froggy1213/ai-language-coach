@@ -123,6 +123,12 @@ x-laravel-environment: &laravel-environment
   AWS_DEFAULT_REGION: us-east-1
   AWS_USE_PATH_STYLE_ENDPOINT: "true"
 
+  # Batch speech-to-text model for the onboarding assessment. The Laravel side
+  # reads the model from `dij-digital/deepgram-laravel`, whose own fallback is
+  # still Nova-2 — a different generation from the Nova-3 the streaming agent
+  # uses. Named here so both passes transcribe the same way.
+  DEEPGRAM_DEFAULT_MODEL: ${DEEPGRAM_DEFAULT_MODEL:-nova-3}
+
   # LIVEKIT_URL is what this backend dials (Twirp); LIVEKIT_PUBLIC_URL is what
   # the learner's browser dials (WebRTC). A browser cannot resolve `livekit`, so
   # a containerised API has to set both or every session hands the learner a
@@ -311,20 +317,49 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
       CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
+      # Dialogue model. `LLM_PROVIDER` is left empty here on purpose: unset means
+      # "infer from the keys that are present, fastest known provider first", and
+      # agent.py refuses to run the dialogue on a provider the latency benchmark
+      # disqualified (a DeepSeek-only environment now fails at startup instead of
+      # pausing 1.5s after every utterance). Set it explicitly in production.
       LLM_PROVIDER: ${LLM_PROVIDER:-}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      # The escape hatch for running the dialogue on a disqualified provider on
+      # purpose. Without it in this list the variable would be inert in a
+      # container while appearing to work on the host.
+      ALLOW_SLOW_DIALOGUE_LLM: ${ALLOW_SLOW_DIALOGUE_LLM:-false}
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://host.docker.internal:8000}
       VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:-82cba8627ffb6407e152a3baa17f586b85f213cacb9b55b9}
+      # Speech recognition and synthesis. The language comes from the job
+      # metadata, not from here; these are the escape hatches for pinning a model.
+      DEEPGRAM_STT_MODEL: ${DEEPGRAM_STT_MODEL:-nova-3}
+      DEEPGRAM_TTS_MODEL: ${DEEPGRAM_TTS_MODEL:-}
+      CARTESIA_VOICE: ${CARTESIA_VOICE:-}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-}
+      # Turn handling (plan §5). Turn detection is on by default and runs the
+      # on-device end-of-turn model that ships inside livekit-local-inference —
+      # no LiveKit Cloud call, no download. `dynamic` lets that model stretch the
+      # silence window instead of always committing after a fixed 0.3s.
+      TURN_DETECTION: ${TURN_DETECTION:-true}
+      ENDPOINTING_MODE: ${ENDPOINTING_MODE:-dynamic}
+      ENDPOINTING_MIN_DELAY_SECONDS: ${ENDPOINTING_MIN_DELAY_SECONDS:-0.3}
+      ENDPOINTING_MAX_DELAY_SECONDS: ${ENDPOINTING_MAX_DELAY_SECONDS:-2.5}
+      PREEMPTIVE_GENERATION: ${PREEMPTIVE_GENERATION:-true}
       # Worker pool capacity (plan §5, §7). livekit-agents 1.8.5 does not read
       # these itself — agent.py passes them into WorkerOptions — and it has no
       # max_processes field at all: the concurrency ceiling is load_threshold
       # plus the container's CPU, measured by load/dispatch_capacity.py.
       NUM_IDLE_PROCESSES: ${NUM_IDLE_PROCESSES:-4}
       LOAD_THRESHOLD: ${LOAD_THRESHOLD:-0.7}
-      DRAIN_TIMEOUT_SECONDS: ${DRAIN_TIMEOUT_SECONDS:-360}
+      # Kept below the ECS stopTimeout it runs under: Fargate caps stopTimeout at
+      # 120s and SIGKILLs whatever is left, so a longer drain is not a longer
+      # drain. Locally there is no such cap, and Compose honours this value.
+      DRAIN_TIMEOUT_SECONDS: ${DRAIN_TIMEOUT_SECONDS:-110}
       # Error tracking (plan §1, §7). Inert while the DSN is empty.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-${APP_ENV:-local}}

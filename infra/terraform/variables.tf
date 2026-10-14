@@ -164,13 +164,23 @@ variable "voice_agent_load_threshold" {
 variable "voice_agent_drain_timeout" {
   type        = number
   description = "Seconds an in-flight call may finish after SIGTERM (measured sprints are 3-5 minutes; the library default is an hour)"
-  default     = 360
+  default     = 110
+
+  validation {
+    condition     = var.voice_agent_drain_timeout <= 120
+    error_message = "Fargate force-kills the container at stopTimeout, and stopTimeout is itself capped at 120s on Fargate, so a longer drain is unreachable: the worker would be SIGKILLed mid-call anyway. Keep the drain inside the cap and hold the task with ECS Task Scale-In Protection when a call needs to outlive it."
+  }
 }
 
 variable "voice_agent_stop_timeout" {
   type        = number
-  description = "ECS task stopTimeout in seconds; must not be shorter than voice_agent_drain_timeout (Plan §5)"
-  default     = 420
+  description = "ECS task stopTimeout in seconds; must exceed voice_agent_drain_timeout and must not exceed the Fargate cap of 120"
+  default     = 120
+
+  validation {
+    condition     = var.voice_agent_stop_timeout <= 120 && var.voice_agent_stop_timeout > var.voice_agent_drain_timeout
+    error_message = "Fargate rejects a container stopTimeout above 120 seconds, and a stopTimeout at or below voice_agent_drain_timeout means the worker is SIGKILLed part-way through the drain it was configured for. Keep it above the drain and at or below 120."
+  }
 }
 
 variable "voice_agent_min_capacity" {
@@ -183,6 +193,69 @@ variable "voice_agent_max_capacity" {
   type        = number
   description = "Maximum running Fargate tasks for voice-agent-worker (second line of defence autoscaling)"
   default     = 5
+}
+
+# ------------------------------------------------------------------------------
+# Dialogue Model & Turn Handling - Plan §5, §7
+# ------------------------------------------------------------------------------
+# The checklist item is "the dialogue LLM is chosen by the benchmark; DeepSeek
+# only in async roles". The default here is the fastest candidate that was
+# benchmarked, and it is set in the task definition rather than left to
+# auto-detection: with only DEEPSEEK_API_KEY present, auto-detection used to pick
+# the one provider the benchmark had already disqualified, and nothing in the
+# deployment said so.
+variable "voice_agent_llm_provider" {
+  type        = string
+  description = "Dialogue LLM provider (groq | cerebras | openai | deepseek | any OpenAI-compatible id). DeepSeek is refused at startup unless voice_agent_allow_slow_llm is true."
+  default     = "groq"
+}
+
+variable "voice_agent_llm_model" {
+  type        = string
+  description = "Dialogue model id. Empty uses the provider's default from agent.py (groq -> openai/gpt-oss-120b, cerebras -> gpt-oss-120b, openai -> gpt-4o-mini)."
+  default     = ""
+}
+
+variable "voice_agent_llm_base_url" {
+  type        = string
+  description = "OpenAI-compatible endpoint for the dialogue model. Empty uses the provider's default."
+  default     = ""
+}
+
+variable "voice_agent_allow_slow_llm" {
+  type        = bool
+  description = "Run the dialogue on a provider the latency benchmark disqualified (>800ms p95 TTFT). Deliberate override only."
+  default     = false
+}
+
+variable "voice_agent_turn_detection" {
+  type        = bool
+  description = "Use the on-device end-of-utterance model to decide when a learner has finished (default true; weights ship inside the livekit-local-inference wheel)"
+  default     = true
+}
+
+variable "voice_agent_endpointing_mode" {
+  type        = string
+  description = "Endpointing mode: dynamic (the turn detector stretches the silence window) or fixed (a constant wait)"
+
+  default = "dynamic"
+
+  validation {
+    condition     = contains(["dynamic", "fixed"], var.voice_agent_endpointing_mode)
+    error_message = "livekit-agents only accepts `dynamic` or `fixed` for endpointing.mode."
+  }
+}
+
+variable "voice_agent_endpointing_max_delay" {
+  type        = number
+  description = "Longest silence the turn detector may wait through mid-sentence before committing the turn, in seconds. A learner reaching for a word pauses longer than a native speaker."
+  default     = 2.5
+}
+
+variable "voice_agent_preemptive_generation" {
+  type        = bool
+  description = "Start the LLM on the interim transcript and cancel it if the learner keeps talking (livekit-agents default: true)"
+  default     = true
 }
 
 # ------------------------------------------------------------------------------

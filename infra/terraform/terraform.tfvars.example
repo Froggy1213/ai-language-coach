@@ -38,10 +38,33 @@ livekit_ssh_allowed_cidrs = ["203.0.113.10/32"] # Replace with your operator IP 
 # field: the ceiling is load_threshold plus the task's CPU.
 voice_agent_num_idle_processes = 4
 voice_agent_load_threshold     = 0.7
-voice_agent_drain_timeout      = 360 # 6 minutes: measured sprints are 3-5
-voice_agent_stop_timeout       = 420 # must not be shorter than the drain timeout
+# Fargate caps a container stopTimeout at 120s and SIGKILLs whatever is left, so
+# the drain is configured *below* that cap: the worker exits on its own terms
+# instead of being killed mid-call. A longer call cannot be drained on this
+# launch type — that needs ECS Task Scale-In Protection, not a bigger number.
+voice_agent_drain_timeout      = 110
+voice_agent_stop_timeout       = 120
 voice_agent_min_capacity       = 1
 voice_agent_max_capacity       = 5
+
+# Dialogue model & turn handling (Plan §5, §7)
+#
+# Plan §7 asks for the dialogue LLM to be chosen by the benchmark. It is the
+# fastest candidate measured in benchmarks/README.md; set it here rather than
+# relying on auto-detection, which used to fall back to the one provider the
+# benchmark had disqualified. Requires GROQ_API_KEY in the app secret.
+voice_agent_llm_provider = "groq"
+voice_agent_llm_model    = "" # provider default (groq -> openai/gpt-oss-120b)
+voice_agent_llm_base_url = "" # provider default
+
+# The end-of-utterance model runs on-device (its weights ship inside the
+# livekit-local-inference wheel), so this costs no network call. `dynamic` lets
+# it stretch the silence window while a learner is mid-sentence instead of
+# committing after a fixed wait.
+voice_agent_turn_detection        = true
+voice_agent_endpointing_mode      = "dynamic"
+voice_agent_endpointing_max_delay = 2.5
+voice_agent_preemptive_generation = true
 
 # Storage & Privacy Lifecycle (Plan §5, §7)
 cors_allowed_origins      = ["https://coach.example.com"]

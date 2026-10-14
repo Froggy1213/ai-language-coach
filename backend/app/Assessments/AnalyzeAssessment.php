@@ -65,9 +65,18 @@ final class AnalyzeAssessment implements ShouldQueue
         // submitted: it may have been replaced or removed since, and the
         // transcription cannot work from a URL the bucket will not serve.
         $upload = $audio->inspect($user, $assessment->audio_url);
+
+        // The staged copy is removed by `transcribe()` on success and on failure
+        // alike; the `finally` covers a failure before it is even called, so a
+        // recording never outlives the job that staged it.
         $recording = $audio->fetch($upload);
 
-        $transcription = $transcriber->transcribe($recording, $user->target_language);
+        try {
+            $transcription = $transcriber->transcribe($recording, $user->target_language);
+        } finally {
+            $recording->discard();
+        }
+
         $result = $assessor->assess($transcription, $user);
 
         DB::transaction(function () use ($assessment, $user, $transcription, $result, $roadmaps): void {
@@ -83,6 +92,9 @@ final class AnalyzeAssessment implements ShouldQueue
                 'raw_data' => array_merge($assessment->raw_data ?? [], [
                     'transcript' => $transcription->text,
                     'duration_seconds' => $transcription->durationSeconds,
+                    // Kept next to the transcript so a level that looks wrong
+                    // later can be explained from the evidence it was given.
+                    'speech_features' => $transcription->features->toPromptArray(),
                     'analysis' => $result->toArray(),
                 ]),
             ]);

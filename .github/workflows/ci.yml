@@ -143,8 +143,10 @@ jobs:
       - name: Run tests
         working-directory: agent
         # Discovery rather than one named file: the suite grew past
-        # test_turn_metrics.py (the Sentry scrubber, the worker-pool settings) and
-        # a hard-coded filename silently stops covering the tests added beside
-        # it. 59 tests here; the host run skips the three that need
-        # livekit-agents, which this job installs from requirements.txt.
+        # test_turn_metrics.py (the Sentry scrubber, the worker-pool settings, the
+        # dialogue-model and turn-handling decisions, and the SDK integration tests
+        # that build a real AgentSession from them) and a hard-coded filename
+        # silently stops covering the tests added beside it. 99 tests here; a host
+        # run without livekit-agents skips the 16 that need it, and this job
+        # installs it from requirements.txt.
         run: python -m unittest discover -s . -p "test_*.py"

@@ -28,10 +28,19 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 DEFAULT_CANDIDATES = [
+    # The baseline: measured, disqualified for speech, and still the async model.
     "deepseek:deepseek-chat",
+    # The candidates that are supposed to replace it. Model ids move fast — a
+    # retired id comes back as HTTP 404 with the provider's own list of current
+    # models in the body, which is why a failure here is printed rather than
+    # swallowed. Check the account's /models endpoint before trusting a list from
+    # documentation, and keep reasoning/thinking models out of this comparison:
+    # they add a deliberation pause to exactly the number being measured.
+    "groq:openai/gpt-oss-120b",
+    "groq:openai/gpt-oss-20b",
+    "cerebras:gpt-oss-120b",
+    "cerebras:qwen-3.8-27b",
     "openai:gpt-4o-mini",
-    "groq:llama-3.3-70b-versatile",
-    "groq:llama-3.1-8b-instant",
 ]
 
 DEFAULT_SYSTEM_PROMPT = """You are an expert, empathetic AI Language Coach.
@@ -192,6 +201,10 @@ class CandidateModel:
             self.api_key = universal_key or (os.getenv("GROQ_API_KEY") or "").strip() or None
             default_base = "https://api.groq.com/openai/v1"
             missing_var = "GROQ_API_KEY"
+        elif self.provider == "cerebras":
+            self.api_key = universal_key or (os.getenv("CEREBRAS_API_KEY") or "").strip() or None
+            default_base = "https://api.cerebras.ai/v1"
+            missing_var = "CEREBRAS_API_KEY"
         else:
             provider_var = f"{self.provider.upper()}_API_KEY"
             self.api_key = universal_key or (os.getenv(provider_var) or "").strip() or None
@@ -232,12 +245,20 @@ def execute_streaming_request(
     max_tokens: int = 150,
     temperature: float = 0.7,
     existing_conn: Optional[http.client.HTTPConnection] = None,
+    disable_thinking: bool = True,
 ) -> Tuple[Optional[float], Optional[float], int, str, Optional[http.client.HTTPConnection]]:
     """
     Performs an OpenAI-compatible streaming chat completion over HTTP/HTTPS.
     Measures:
     - TTFT: elapsed time from request dispatch to first non-empty text token parsed from SSE stream.
     - Total turnaround: elapsed time until stream completion ([DONE] or EOF).
+
+    `disable_thinking` asks the provider not to deliberate before its first
+    visible token. A deliberating model is silent for exactly the interval being
+    measured, so leaving it on would charge a reasoning pause to the learner's
+    conversational budget. The fields are not universal: an endpoint that
+    validates its JSON strictly answers 4xx, so a rejection is retried once
+    without them and the caller records which request the numbers came from.
 
     Returns:
     (ttft_ms, total_ms, token_count, text_content, connection)
@@ -256,6 +277,14 @@ def execute_streaming_request(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+
+    if disable_thinking:
+        # `reasoning_effort` is OpenAI's spelling; `thinking` is the one several
+        # OpenAI-compatible providers use. Unknown fields are ignored by a
+        # tolerant endpoint, which is the common case.
+        payload["reasoning_effort"] = "none"
+        payload["thinking"] = {"type": "disabled"}
+
     body = json.dumps(payload).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {candidate.api_key}",
@@ -283,6 +312,26 @@ def execute_streaming_request(
         t_start = time.perf_counter()
         conn.request("POST", candidate.endpoint_path, body=body, headers=headers)
         resp = conn.getresponse()
+
+    if resp.status != 200 and disable_thinking:
+        # The endpoint refused the request. Re-send it without the thinking
+        # switches rather than losing the candidate to a payload it never asked
+        # about — a 4xx here says nothing about the model's latency, and the
+        # caller is told that the measurement is the "thinking left on" figure.
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+        return execute_streaming_request(
+            candidate,
+            messages,
+            timeout,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            existing_conn=None,
+            disable_thinking=False,
+        )
 
     if resp.status != 200:
         err_msg = resp.read().decode("utf-8", errors="replace")

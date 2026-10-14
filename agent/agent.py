@@ -134,6 +134,127 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_str(name: str, default: str) -> str:
+    """
+    Read a string setting, treating blank as absent.
+
+    `os.getenv(name, default)` returns the default only when the variable is
+    *unset*, and Docker Compose sets every variable it forwards — `CARTESIA_MODEL:
+    ${CARTESIA_MODEL:-}` puts an empty string in the container. With `getenv`'s
+    default that empty string was passed on as the model name, which the provider
+    rejects at the first turn instead of at startup. Blank means "not configured"
+    everywhere in this file.
+    """
+    return (os.getenv(name) or "").strip() or default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a flag, accepting the spellings people actually write in a .env."""
+    raw = os.getenv(name, "").strip().lower()
+    if raw == "":
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("Ignoring %s=%r: not a boolean", name, raw)
+    return default
+
+
+def _env_per_language(name: str, language: str, default: str = "") -> str:
+    """
+    Read a setting that may be specialised per target language.
+
+    A voice is not a language-neutral asset — the Cartesia voice ids are English
+    voices, and the Deepgram Aura model name ends in its language — so a second
+    language needs a second voice. `CARTESIA_VOICE` remains the general setting,
+    and `CARTESIA_VOICE_DE` overrides it for German. Falls back to `default` when
+    neither is set, and the caller decides whether that is acceptable.
+    """
+    code = _language_code(language)
+
+    for key in (f"{name}_{code.upper()}", f"{name}_{code}"):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+
+    return (os.getenv(name) or "").strip() or default
+
+
+def _language_code(language: str) -> str:
+    """
+    The base language tag from whatever the session metadata carried.
+
+    Metadata arrives as `en`, `en-US` or `EN`; Deepgram and the voice maps want
+    the bare code, and an empty value means "the default language" rather than
+    "no language".
+    """
+    raw = (language or "").strip().lower().replace("_", "-")
+    base = raw.split("-", 1)[0]
+    return base or "en"
+
+
+def build_turn_handling() -> Dict[str, Any]:
+    """
+    How the agent decides the learner has finished their turn.
+
+    Read this before "improving" it: most of what a review would suggest here is
+    already the default, and the defaults are easy to make *worse* by naming them.
+
+    1. **Turn detection is already on, and already local.** `AgentSession`
+       defaults to `inference.TurnDetector()`, which on a self-hosted node
+       resolves to the on-device `turn-detector-v1-mini` model. Those weights
+       ship inside the `livekit-local-inference` wheel (34 MB, loads in ~70 ms
+       with no network access), so end-of-utterance has always been semantic
+       rather than a bare silence timer. Nothing needs installing or
+       downloading, and there is no LiveKit Cloud dependency: the cloud `v1`
+       detector is only chosen when the process is running hosted or in dev
+       mode. Passing `TURN_DETECTION=off` is the escape hatch, not the fix.
+
+    2. **Endpointing: `dynamic`, at the streaming defaults.** With a streaming
+       detector attached, livekit-agents 1.8.5 already tightens the fixed
+       endpointing defaults from min 0.5 s / max 3.0 s to **min 0.3 s / max
+       2.5 s** (`_STREAMING_ENDPOINTING_DEFAULTS`). What it still does is wait
+       that fixed 0.3 s of silence whatever was said. `dynamic` lets the
+       end-of-turn probability stretch or shorten the wait, which is what the
+       detector is for. The numbers below therefore repeat the tighter defaults
+       rather than the looser legacy ones — naming 0.5 here would have made the
+       agent *less* responsive than leaving the setting alone.
+
+    3. **Preemptive generation** is on by default in 1.8.5: the LLM starts on
+       the interim transcript and is cancelled if the learner keeps talking,
+       taking the model off the critical path on the turns where the interim was
+       right. Kept as an explicit setting so a slow provider can be given less
+       rope (`PREEMPTIVE_GENERATION=false`) without a code change.
+
+    Returned as a plain mapping because `turn_handling` is a TypedDict that
+    `AgentSession` reads with `dict.get`, so no import is needed for it — which
+    also keeps this function importable on a host without livekit-agents.
+    """
+    endpointing: Dict[str, Any] = {
+        # `_env_str` rather than a bare `or`: a forwarded-but-empty variable is
+        # normal in Docker Compose and must not become an empty mode name.
+        "mode": _env_str("ENDPOINTING_MODE", "dynamic").lower(),
+        # Defaults mirror _STREAMING_ENDPOINTING_DEFAULTS, not _ENDPOINTING_DEFAULTS.
+        "min_delay": _env_float("ENDPOINTING_MIN_DELAY_SECONDS", 0.3),
+        "max_delay": _env_float("ENDPOINTING_MAX_DELAY_SECONDS", 2.5),
+    }
+
+    turn_handling: Dict[str, Any] = {
+        "endpointing": endpointing,
+        "preemptive_generation": {
+            "enabled": _env_bool("PREEMPTIVE_GENERATION", True),
+        },
+    }
+
+    if not _env_bool("TURN_DETECTION", True):
+        # `"vad"` is the SDK's own name for "silence timer only, no semantic
+        # detector" — not `None`, which the type does not accept.
+        turn_handling["turn_detection"] = "vad"
+
+    return turn_handling
+
+
 def build_worker_options() -> Any:
     """
     The worker pool as the deployment configured it (plan §5, §7).
@@ -813,10 +934,153 @@ Guidelines:
 """
 
 
+# Names for the languages a greeting can be spoken in. Only used for the opening
+# line; the dialogue itself is driven by `target_language` in the instructions, so
+# a language missing here gets a slightly less idiomatic greeting, not a broken
+# session.
+LANGUAGE_NAMES: Dict[str, str] = {
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+}
+
+
+def build_greeting(metadata: Dict[str, Any]) -> str:
+    """
+    The agent's opening line, spoken before the learner says anything.
+
+    Deliberately a fixed sentence rendered by TTS rather than a generated one:
+    `session.say()` reaches the learner after one text-to-speech call, while
+    asking the model to write the greeting would add a full LLM round trip to the
+    very first thing anybody hears. (The turns after it do go through the model,
+    preemptively — see `build_turn_handling`.)
+
+    The previous wording ("Today we are practicing Present Perfect. Practice
+    discussing past travel experiences, and visits.") read the metadata aloud and
+    was ungrammatical. `practice_prompt` is a full instruction to the learner — the
+    catalogue writes "Describe your usual weekday: what you always, usually and
+    never do, and at what time." — so it is spoken verbatim as the task rather than
+    wrapped in a phrase that assumes it is a topic.
+    """
+    language = _language_code(str(metadata.get("target_language") or "en"))
+    language_name = LANGUAGE_NAMES.get(language, language.upper())
+    practice_prompt = str(metadata.get("practice_prompt") or "").strip().rstrip(".")
+    task = practice_prompt or "Let's start with some speaking practice"
+
+    return f"Hi! I'm your {language_name} coach. {task}. Ready when you are."
+
+
 def create_stt(metadata: Dict[str, Any]):
-    target_lang = str(metadata.get("target_language") or "en").lower()
-    lang = "en" if target_lang.startswith("en") else target_lang
-    return deepgram.STT(model="nova-2", language=lang)
+    """
+    Streaming recogniser for the language this session is practising.
+
+    Two things are deliberately explicit rather than defaulted:
+
+    - The model. `livekit-plugins-deepgram` 1.8.5 already defaults to `nova-3`,
+      but this call named `nova-2` and so pinned the previous generation for
+      every session — and the learners here are non-native speakers, which is
+      exactly the case nova-3 was retrained for. Naming the model makes it a
+      deployment setting instead of a constant in a function.
+    - The language. It arrives with the job metadata, so the recogniser is told
+      the one language this session is allowed to be in. Left to its own default
+      every session is transcribed as `en-US`.
+    """
+    language = _language_code(str(metadata.get("target_language") or "en"))
+    model = _env_str("DEEPGRAM_STT_MODEL", "nova-3")
+
+    return deepgram.STT(
+        model=model,
+        language=language,
+        # The turn detector reads punctuation and hesitations, and `filler_words`
+        # is what makes the recogniser keep "um" instead of quietly deleting it.
+        punctuate=True,
+        filler_words=True,
+    )
+
+
+# The dialogue model is chosen in the benchmark (benchmarks/README.md), and the
+# recommendation is "> 800 ms p95 TTFT is async-only". This is the guard that
+# keeps that decision from being quietly undone by whichever API key happens to
+# be in the environment: auto-detection used to pick DeepSeek — measured at
+# 1068 ms p95 on this project's own harness — because it was the only key set.
+#
+# Ordered by measured first-token latency, fastest first. The model ids are the
+# ones each provider currently advertises for low-latency serving; a provider
+# that retires one returns HTTP 404 naming its replacement, which is why
+# `LLM_MODEL` exists rather than a second code change.
+KNOWN_DIALOGUE_PROVIDERS: Dict[str, Dict[str, str]] = {
+    "groq": {
+        "model": "openai/gpt-oss-120b",
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_var": "GROQ_API_KEY",
+    },
+    "cerebras": {
+        "model": "gpt-oss-120b",
+        "base_url": "https://api.cerebras.ai/v1",
+        "key_var": "CEREBRAS_API_KEY",
+    },
+    "openai": {
+        "model": "gpt-4o-mini",
+        "base_url": "",
+        "key_var": "OPENAI_API_KEY",
+    },
+    "deepseek": {
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "key_var": "DEEPSEEK_API_KEY",
+    },
+}
+
+# Providers whose measured first-token latency is above the conversational
+# budget. They stay first-class for the asynchronous work (mistake analysis,
+# CEFR assessment), where price beats speed — just not for the dialogue.
+SLOW_DIALOGUE_PROVIDERS = frozenset({"deepseek"})
+
+#: Set to a true value to run the dialogue on a provider the benchmark
+#: disqualified. Named here so the message and the tests cannot drift apart.
+ALLOW_SLOW_DIALOGUE_ENV = "ALLOW_SLOW_DIALOGUE_LLM"
+
+
+def assert_dialogue_provider_is_suitable(provider: str) -> None:
+    """
+    Refuse to answer a learner with a model the benchmark disqualified.
+
+    Failing at startup is the point: a fleet that boots happily and then pauses
+    for a second and a half after every utterance looks healthy in every
+    dashboard and is unusable in the room. `ALLOW_SLOW_DIALOGUE_LLM=true` is the
+    escape hatch for a deliberate choice (a local model, an experiment), and it
+    logs, so the reason is never a mystery later.
+    """
+    if provider not in SLOW_DIALOGUE_PROVIDERS:
+        return
+
+    if _env_bool(ALLOW_SLOW_DIALOGUE_ENV, False):
+        logger.warning(
+            "LLM_PROVIDER=%s is measured above the conversational latency budget "
+            "(benchmarks/README.md) and has been allowed by %s. "
+            "Expect pauses of a second or more after each learner utterance.",
+            provider,
+            ALLOW_SLOW_DIALOGUE_ENV,
+        )
+        return
+
+    raise ValueError(
+        f"LLM_PROVIDER={provider!r} is measured above the conversational latency budget "
+        f"(p95 TTFT > 800 ms, see benchmarks/README.md), so it must not run the dialogue: "
+        f"keep it for the asynchronous analysis jobs and point LLM_PROVIDER at "
+        f"{', '.join(sorted(set(KNOWN_DIALOGUE_PROVIDERS) - SLOW_DIALOGUE_PROVIDERS))}. "
+        f"Set {ALLOW_SLOW_DIALOGUE_ENV}=true to override deliberately."
+    )
 
 
 def create_llm():
@@ -825,9 +1089,9 @@ def create_llm():
 
     The dialogue model is fully environment-driven:
     - LLM_PROVIDER: Candidate provider identifier (e.g. 'deepseek', 'openai', 'groq',
-      or any OpenAI-compatible provider). If unset, auto-detects based on configured
-      API keys, preserving the baseline default (DeepSeek if DEEPSEEK_API_KEY is present,
-      else OpenAI if OPENAI_API_KEY is present).
+      or any OpenAI-compatible provider). If unset, it is inferred from the keys
+      that are present — fastest known provider first, not whichever key happens
+      to be set, so adding a Groq key changes the model that runs.
     - LLM_MODEL: Model identifier (e.g. 'deepseek-chat', 'gpt-4o-mini', 'llama-3.3-70b-versatile').
       Defaults per provider.
     - LLM_BASE_URL: OpenAI-compatible endpoint URL (e.g. 'https://api.deepseek.com',
@@ -847,91 +1111,132 @@ def create_llm():
     if not HAS_OPENAI:
         raise RuntimeError("livekit-plugins-openai is required for LLM integration")
 
-    explicit_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    explicit_provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
     model_name = (os.getenv("LLM_MODEL") or "").strip() or None
     base_url = (os.getenv("LLM_BASE_URL") or "").strip() or None
     llm_key = (os.getenv("LLM_API_KEY") or "").strip() or None
 
-    deepseek_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
-    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip() or None
-    groq_key = (os.getenv("GROQ_API_KEY") or "").strip() or None
-
-    # If provider is explicitly specified, resolve provider-specific configuration
+    # A provider that was named is a decision; it is checked, not second-guessed.
     if explicit_provider:
-        if explicit_provider == "deepseek":
-            api_key = llm_key or deepseek_key
-            if not api_key:
-                raise ValueError("DEEPSEEK_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'deepseek'")
-            return openai.LLM(
-                model=model_name or "deepseek-chat",
-                base_url=base_url or "https://api.deepseek.com",
-                api_key=api_key,
-            )
-        elif explicit_provider == "openai":
-            api_key = llm_key or openai_key
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'openai'")
-            return openai.LLM(
-                model=model_name or "gpt-4o-mini",
-                base_url=base_url,
-                api_key=api_key,
-            )
-        elif explicit_provider == "groq":
-            api_key = llm_key or groq_key
-            if not api_key:
-                raise ValueError("GROQ_API_KEY (or LLM_API_KEY) is required when LLM_PROVIDER is 'groq'")
-            return openai.LLM(
-                model=model_name or "llama-3.3-70b-versatile",
-                base_url=base_url or "https://api.groq.com/openai/v1",
-                api_key=api_key,
-            )
+        provider = explicit_provider
+        # An unknown provider is read as a custom OpenAI-compatible endpoint, so
+        # there is nothing to classify and no latency figure to hold it to.
+        known = KNOWN_DIALOGUE_PROVIDERS.get(provider)
+        key_var = known["key_var"] if known else f"{provider.upper()}_API_KEY"
+        api_key = llm_key or (os.getenv(key_var) or "").strip() or None
+
+        if not api_key:
+            raise ValueError(f"{key_var} (or LLM_API_KEY) is required when LLM_PROVIDER is '{provider}'")
+
+        if known:
+            assert_dialogue_provider_is_suitable(provider)
         else:
-            # Custom / generic OpenAI-compatible provider
-            provider_key_var = f"{explicit_provider.upper()}_API_KEY"
-            api_key = llm_key or os.getenv(provider_key_var)
-            if not api_key:
-                raise ValueError(
-                    f"{provider_key_var} (or LLM_API_KEY) is required when LLM_PROVIDER is '{explicit_provider}'"
-                )
-            return openai.LLM(
-                model=model_name or "deepseek-chat",
-                base_url=base_url,
-                api_key=api_key,
-            )
+            # A custom endpoint that is not told which model to use cannot be
+            # guessed at: the fallback used to be a DeepSeek model id, which a
+            # local or third-party endpoint would answer with a 404 at the first
+            # turn. The endpoint is also required, or the request would go to the
+            # OpenAI default with someone else's key.
+            if not model_name:
+                raise ValueError(f"LLM_MODEL is required when LLM_PROVIDER is '{provider}', which agent.py has no default for")
 
-    # Provider not explicitly specified: preserve original auto-detection behavior
-    if deepseek_key and (not openai_key or base_url or "deepseek" in (model_name or "").lower()):
+            if not base_url:
+                raise ValueError(f"LLM_BASE_URL is required when LLM_PROVIDER is '{provider}', which agent.py has no default endpoint for")
+
         return openai.LLM(
-            model=model_name or "deepseek-chat",
-            base_url=base_url or "https://api.deepseek.com",
-            api_key=llm_key or deepseek_key,
+            model=model_name or known["model"],
+            base_url=base_url or (known["base_url"] or None),
+            api_key=api_key,
         )
 
-    if openai_key:
-        return openai.LLM(
-            model=model_name or "gpt-4o-mini",
-            base_url=base_url,
-            api_key=llm_key or openai_key,
+    # Nothing named: infer from the keys present, fastest known provider first.
+    # The order matters — auto-detection that prefers "whichever key exists"
+    # silently picks the slowest model as soon as it is the only key configured,
+    # which is exactly how this deployment ended up on DeepSeek.
+    for provider, config in KNOWN_DIALOGUE_PROVIDERS.items():
+        if provider in SLOW_DIALOGUE_PROVIDERS:
+            continue
+
+        api_key = llm_key or (os.getenv(config["key_var"]) or "").strip() or None
+        if not api_key:
+            continue
+
+        logger.info(
+            "LLM_PROVIDER is unset; using %s from %s. Set LLM_PROVIDER explicitly so the "
+            "dialogue model is a decision rather than a side effect of which key is present.",
+            provider,
+            config["key_var"],
         )
 
-    if groq_key:
         return openai.LLM(
-            model=model_name or "llama-3.3-70b-versatile",
-            base_url=base_url or "https://api.groq.com/openai/v1",
-            api_key=llm_key or groq_key,
+            model=model_name or config["model"],
+            base_url=base_url or config["base_url"] or None,
+            api_key=api_key,
         )
 
-    if llm_key:
-        return openai.LLM(
-            model=model_name or "deepseek-chat",
-            base_url=base_url or "https://api.deepseek.com",
-            api_key=llm_key,
+    # Nothing fast is keyed. The only configuration left is a disqualified
+    # provider, which is either refused or — with the override set — actually
+    # used. Returning a model here rather than falling through matters: the
+    # override is the whole point of the escape hatch, and a fall-through would
+    # report "nothing is configured" to an operator who had just configured it.
+    slow_key = llm_key or (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
+    if slow_key:
+        assert_dialogue_provider_is_suitable("deepseek")
+        logger.warning(
+            "The dialogue is running on deepseek because %s is the only configured provider.",
+            ALLOW_SLOW_DIALOGUE_ENV,
         )
 
-    raise ValueError("Neither DEEPSEEK_API_KEY nor OPENAI_API_KEY is configured")
+        return openai.LLM(
+            model=model_name or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["model"],
+            base_url=base_url or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["base_url"],
+            api_key=slow_key,
+        )
+
+    raise ValueError(
+        "No dialogue LLM is configured. Set LLM_PROVIDER and its key "
+        f"({KNOWN_DIALOGUE_PROVIDERS['groq']['key_var']} / "
+        f"{KNOWN_DIALOGUE_PROVIDERS['openai']['key_var']} / LLM_API_KEY)."
+    )
 
 
-def create_tts():
+# A voice is not language-neutral: each of these ids is a single-language voice,
+# so a session in another language needs another voice or the agent reads German
+# aloud in an American accent. Cartesia's sonic-3 voices are multilingual, which is
+# why one id covers every language there; Deepgram's Aura voices are not, so that
+# map carries an entry per language. The environment (`CARTESIA_VOICE_DE`,
+# `DEEPGRAM_TTS_MODEL_DE`, `OPENAI_TTS_VOICE_DE`) overrides either per language, and
+# the Deepgram ids below were read off the account's own `/v1/models` listing
+# rather than guessed.
+CARTESIA_VOICES: Dict[str, str] = {
+    "en": "248be419-c632-4f23-adf1-5324ed7dbf1d",
+}
+DEEPGRAM_AURA_VOICES: Dict[str, str] = {
+    "en": "aura-2-thalia-en",
+    "de": "aura-2-aurelia-de",
+    "fr": "aura-2-agathe-fr",
+    "es": "aura-2-agustina-es",
+    "it": "aura-2-cinzia-it",
+    "nl": "aura-2-beatrix-nl",
+    "ja": "aura-2-ama-ja",
+}
+OPENAI_VOICES: Dict[str, str] = {
+    "en": "alloy",
+}
+
+
+def create_tts(metadata: Optional[Dict[str, Any]] = None):
+    """
+    Speech synthesis in the language the learner is practising.
+
+    The previous signature took no language at all and the Deepgram fallback
+    named `aura-asteria-en`, so the moment a second language was added to
+    `config/languages.php` the agent would have answered in English-accented
+    nonsense. The language now comes from the same job metadata the rest of the
+    pipeline reads.
+    """
+    metadata = metadata or {}
+    language = _language_code(str(metadata.get("target_language") or "en"))
+
     cartesia_key = os.getenv("CARTESIA_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -941,16 +1246,27 @@ def create_tts():
             # "sonic-3" is the plugin's current default; "sonic-english" was
             # retired upstream and only survived as an alias, so naming it here
             # would pin the voice to a model the API is free to drop.
-            model=os.getenv("CARTESIA_MODEL", "sonic-3"),
-            voice=os.getenv("CARTESIA_VOICE", "248be419-c632-4f23-adf1-5324ed7dbf1d"),
+            model=_env_str("CARTESIA_MODEL", "sonic-3"),
+            voice=_env_per_language(
+                "CARTESIA_VOICE", language, CARTESIA_VOICES.get(language, CARTESIA_VOICES["en"])
+            ),
             api_key=cartesia_key,
         )
 
     if deepgram_key:
-        return deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en"))
+        return deepgram.TTS(
+            model=_env_per_language(
+                "DEEPGRAM_TTS_MODEL", language, DEEPGRAM_AURA_VOICES.get(language, DEEPGRAM_AURA_VOICES["en"])
+            )
+        )
 
     if openai_key and HAS_OPENAI:
-        return openai.TTS(model=os.getenv("OPENAI_TTS_MODEL", "tts-1"), voice="alloy")
+        return openai.TTS(
+            model=_env_str("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
+            voice=_env_per_language(
+                "OPENAI_TTS_VOICE", language, OPENAI_VOICES.get(language, OPENAI_VOICES["en"])
+            ),
+        )
 
     raise ValueError("No valid TTS provider configured (set CARTESIA_API_KEY, DEEPGRAM_API_KEY, or OPENAI_API_KEY)")
 
@@ -1048,7 +1364,7 @@ async def entrypoint(ctx: JobContext):
             return
 
         try:
-            tts = create_tts()
+            tts = create_tts(metadata)
         except Exception as exc:
             logger.error("Failed to initialize TTS: %s", exc)
             capture_exception(exc, tags=session_tags)
@@ -1067,6 +1383,7 @@ async def entrypoint(ctx: JobContext):
                     stt=stt,
                     llm=llm_instance,
                     tts=tts,
+                    turn_handling=build_turn_handling(),
                 )
 
                 tracker = TurnMetricsTracker(session_id=session_id)
@@ -1134,9 +1451,8 @@ async def entrypoint(ctx: JobContext):
 
                 await session.start(room=ctx.room, agent=agent_instance)
 
-                # Opening prompt
-                greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
-                await session.say(greeting, allow_interruptions=True)
+                # One text-to-speech call, no model in the loop: see build_greeting.
+                await session.say(build_greeting(metadata), allow_interruptions=True)
             else:
                 logger.info("Using LiveKit VoicePipelineAgent interface")
                 pipeline_agent = VoicePipelineAgent(
@@ -1147,8 +1463,7 @@ async def entrypoint(ctx: JobContext):
                 )
                 pipeline_agent.start(ctx.room)
 
-                greeting = f"Hello! Today we are practicing {grammar_point}. {practice_prompt} Whenever you are ready, let's start!"
-                await pipeline_agent.say(greeting, allow_interruptions=True)
+                await pipeline_agent.say(build_greeting(metadata), allow_interruptions=True)
 
         except Exception as exc:
             logger.error("Runtime error in voice agent session: %s", exc, exc_info=True)

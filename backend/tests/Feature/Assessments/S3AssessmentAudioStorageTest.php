@@ -226,16 +226,45 @@ class S3AssessmentAudioStorageTest extends TestCase
             ->inspect($this->user(7), 'https://coach-audio.s3.us-east-1.amazonaws.com/assessments/7/notes.webm');
     }
 
-    public function test_it_reads_the_recording_back_out_of_the_bucket(): void
+    public function test_it_streams_the_recording_into_a_file_instead_of_holding_it_in_memory(): void
     {
         $handler = new MockHandler;
         $handler->append(new Result(['Body' => Utils::streamFor('fake-webm-bytes')]));
 
         $recording = $this->storage($handler)->fetch($this->upload());
 
-        $this->assertSame('fake-webm-bytes', $recording->contents);
-        $this->assertSame('audio/webm', $recording->contentType);
-        $this->assertSame('GetObject', $handler->getLastCommand()->getName());
+        try {
+            $this->assertSame('audio/webm', $recording->contentType);
+            $this->assertFileExists($recording->path);
+
+            // `SaveAs` becomes the request's sink, which is what keeps a 15 MB
+            // object out of a PHP string: the SDK writes the response body
+            // straight to the path it is given. Asserting on the sink rather
+            // than on the contents is deliberate — the AWS MockHandler returns a
+            // canned Result and never writes the body, so a contents assertion
+            // would be testing the fake, not this class.
+            $command = $handler->getLastCommand();
+
+            $this->assertSame('GetObject', $command->getName());
+            $this->assertSame($recording->path, $command['@http']['sink']);
+        } finally {
+            $recording->discard();
+        }
+    }
+
+    public function test_it_discards_the_staged_file(): void
+    {
+        $handler = new MockHandler;
+        $handler->append(new Result(['Body' => Utils::streamFor('fake-webm-bytes')]));
+
+        $recording = $this->storage($handler)->fetch($this->upload());
+        $path = $recording->path;
+
+        $this->assertFileExists($path);
+
+        $recording->discard();
+
+        $this->assertFileDoesNotExist($path);
     }
 
     public function test_it_fails_when_the_recording_cannot_be_read_back(): void
@@ -246,10 +275,55 @@ class S3AssessmentAudioStorageTest extends TestCase
             'Key' => 'assessments/7/recording.webm',
         ])));
 
-        $this->expectException(InvalidAssessmentAudio::class);
-        $this->expectExceptionMessage('could not be read back');
+        $before = $this->stagedFiles();
 
-        $this->storage($handler)->fetch($this->upload());
+        try {
+            $this->storage($handler)->fetch($this->upload());
+            $this->fail('The read-back was expected to fail.');
+        } catch (InvalidAssessmentAudio $exception) {
+            $this->assertStringContainsString('could not be read back', $exception->getMessage());
+        }
+
+        // The call created a temp file before it failed. Nobody downstream ever
+        // receives a Recording for it, so this is the only place it can be
+        // removed — and a retried job would otherwise leave one per attempt.
+        $this->assertSame($before, $this->stagedFiles());
+    }
+
+    public function test_it_removes_the_staged_file_when_the_failure_is_not_an_s3_one(): void
+    {
+        // `bucket()` throws a RuntimeException when AWS_BUCKET is unset, and a
+        // credential provider with no metadata service throws the SDK's own
+        // exception — neither is an S3Exception. Catching only S3Exception left
+        // the file behind on exactly those failures.
+        $storage = new S3AssessmentAudioStorage(new S3Client([
+            'version' => 'latest',
+            'region' => 'us-east-1',
+            'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
+        ]), '');
+
+        $before = $this->stagedFiles();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('No S3 bucket is configured');
+
+        try {
+            $storage->fetch($this->upload());
+        } finally {
+            $this->assertSame($before, $this->stagedFiles());
+        }
+    }
+
+    /**
+     * The staging files this test class is responsible for.
+     *
+     * @return list<string>
+     */
+    private function stagedFiles(): array
+    {
+        $files = glob(sys_get_temp_dir().'/assessment-recording-*');
+
+        return $files === false ? [] : array_values($files);
     }
 
     public function test_it_deletes_the_recording_from_the_bucket(): void

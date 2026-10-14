@@ -120,18 +120,33 @@ The harness supports any OpenAI-compatible provider.
    - Custom provider: `MYPROVIDER_API_KEY=...` or universal `LLM_API_KEY=...`
 2. **Pass the candidate string to the benchmark**:
    ```bash
-   python3 benchmarks/dialogue_llm_latency.py -m "groq:llama-3.3-70b-versatile,openai:gpt-4o-mini"
+   python3 benchmarks/dialogue_llm_latency.py -m "groq:openai/gpt-oss-120b,openai:gpt-4o-mini"
    ```
    Or set the environment variable:
    ```bash
-   export BENCHMARK_MODELS="groq:llama-3.3-70b-versatile,openai:gpt-4o-mini"
+   export BENCHMARK_MODELS="groq:openai/gpt-oss-120b,openai:gpt-4o-mini"
    ```
 
 Candidate syntax:
 - `deepseek:deepseek-chat` (maps to `https://api.deepseek.com`, key: `DEEPSEEK_API_KEY`)
 - `openai:gpt-4o-mini` (maps to `https://api.openai.com/v1`, key: `OPENAI_API_KEY`)
-- `groq:llama-3.3-70b-versatile` (maps to `https://api.groq.com/openai/v1`, key: `GROQ_API_KEY`)
+- `groq:openai/gpt-oss-120b` (maps to `https://api.groq.com/openai/v1`, key: `GROQ_API_KEY`)
+- `cerebras:gpt-oss-120b` (maps to `https://api.cerebras.ai/v1`, key: `CEREBRAS_API_KEY`)
 - `custom:my-model:https://my-llm.com/v1` (custom base URL, key: `LLM_API_KEY`)
+
+> [!IMPORTANT]
+> **Model ids go stale, and a stale id is an HTTP 404 — not a slow number.** The
+> default candidate list is a starting point, not an authority: providers retire
+> and rename models on their own schedule (Groq's Llama and Kimi lines, for
+> instance, moved to enterprise-only). Check the account's own `/models` endpoint
+> before trusting a list from documentation, and pass `-m` explicitly when
+> re-running. A 404 is printed with the provider's own message rather than
+> swallowed, so a renamed model shows up as a failure instead of a silent skip.
+>
+> Candidates are also measured with reasoning/thinking **disabled** in the request
+> body, because a deliberating model is silent for exactly the interval being
+> measured. A provider that ignores the switch has its deliberation included in
+> the number, and the number should be read that way.
 
 ---
 
@@ -159,9 +174,39 @@ The voice agent in `agent/agent.py` is fully environment-driven:
 ```bash
 # In docker-compose.yml or .env:
 LLM_PROVIDER=groq
-LLM_MODEL=llama-3.3-70b-versatile
+LLM_MODEL=openai/gpt-oss-120b
 LLM_BASE_URL=https://api.groq.com/openai/v1
 GROQ_API_KEY=gsk-...
 ```
 
 Zero code changes or container image rebuilds are needed to switch the dialogue model.
+
+### The decision is enforced, not just written down
+
+`agent.py` refuses to start the dialogue on a provider this benchmark disqualified
+(`SLOW_DIALOGUE_PROVIDERS`, currently `deepseek`). That is deliberate: before it,
+provider auto-detection preferred whichever API key happened to be present, so a
+DeepSeek-only deployment silently ran the dialogue on the one candidate measured
+above the budget — a fleet that boots healthily and then pauses after every
+utterance, with nothing in the logs to say why. DeepSeek keeps the asynchronous
+roles (mistake analysis, CEFR assessment); point `LLM_PROVIDER` at a candidate from
+the table above, or set `ALLOW_SLOW_DIALOGUE_LLM=true` to override on purpose.
+
+### What this benchmark does not measure
+
+TTFT is the largest term in the conversational pause, but it is not the whole turn.
+The end-to-end number is `STT final + LLM TTFT + TTS first chunk`, and the other
+two terms are decided elsewhere in the repository:
+
+| Term | Where it is decided | Default |
+|---|---|---|
+| STT final | `build_turn_handling()` in `agent/agent.py` | turn-detector `dynamic`, 0.3–2.5 s |
+| LLM TTFT | this benchmark | ≤ 600 ms p95 to pass |
+| TTS first chunk | `CARTESIA_MODEL` / `DEEPGRAM_TTS_MODEL` | Cartesia `sonic-3` |
+
+Switching endpointing to `dynamic` does not lower the *minimum* wait: with a
+streaming turn detector attached, livekit-agents already tightens its fixed
+endpointing from 0.5 s to 0.3 s. What it changes is that a fixed timer no longer
+commits the turn while a learner is still mid-sentence. Confirm it on a real
+session — the agent emits a `TURN_LATENCY` line per turn — rather than assuming it
+helped.

@@ -28,7 +28,7 @@ final class DeepSeekCefrAssessor implements CefrAssessor
     {
         $response = agent($this->instructions($user), schema: $this->schema())
             ->prompt(
-                $transcription->text,
+                $this->prompt($transcription),
                 [],
                 (string) config('assessments.analysis.provider'),
                 (string) config('assessments.analysis.model'),
@@ -40,6 +40,78 @@ final class DeepSeekCefrAssessor implements CefrAssessor
         }
 
         return $this->result($response->structured);
+    }
+
+    /**
+     * The transcript, plus the measurements the words themselves cannot express.
+     *
+     * A batch transcription without word timings (a stubbed provider, a model
+     * that does not return them) falls back to the bare transcript rather than
+     * printing zeroes the caller never measured.
+     */
+    private function prompt(Transcription $transcription): string
+    {
+        if ($transcription->features->isEmpty()) {
+            return $transcription->text;
+        }
+
+        // The measurements come from a provider response, so a malformed byte
+        // sequence is possible. `json_encode` returns false rather than throwing,
+        // and `false` interpolates to an empty string — which would hand the model
+        // an empty block under a heading promising measurements. Encoding
+        // failures fall back to the bare transcript instead.
+        $measurements = json_encode(
+            $transcription->features->toPromptArray(),
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+
+        if (! is_string($measurements) || $measurements === '') {
+            return $transcription->text;
+        }
+
+        // Which caveat to add depends on what was actually measured: a response
+        // with no word timings still carries real confidence figures, and the
+        // prompt must not invite the model to reason about a fluency number it
+        // was never given.
+        $timings = $transcription->features->hasTimings()
+            ? 'The figures above are what the recogniser measured; weigh them as described below.'
+            : 'This transcription carries no word timings, so no fluency figure appears above. '
+                .'The confidence figures are still evidence about the audio quality.';
+
+        return <<<PROMPT
+        Recording length: {$transcription->durationSeconds} seconds.
+
+        Measurements taken from the transcription:
+        {$measurements}
+
+        {$timings}
+
+        Use these as context, within these limits:
+        - `words_per_minute`, `longest_pause_between_words_seconds` and
+          `silence_share_of_recording` describe delivery. Flat, even delivery
+          supports the band the grammar and vocabulary justify; hesitant delivery
+          with long silences is worth naming in the feedback as something to work
+          on. They must not move the band on their own — the band is a judgement
+          of what the learner can do with the language, and someone who speaks
+          slowly but accurately is not a lower level because of it.
+        - `silence_share_of_recording` counts every moment without recognised
+          words, including the silence before the learner started speaking, and
+          the pauses between sentences. It is not evidence of confusion on its own.
+        - `low_confidence_word_share` and `words_the_recogniser_was_unsure_about`
+          are the weakest signal here, and the only one that is about the audio
+          rather than the learner. A recogniser is unsure because of a poor
+          microphone, background noise and an unfamiliar accent just as much as
+          because of a word the learner said badly. Never lower the band because
+          of this, and never describe it to the learner as a pronunciation
+          problem: at most, one or two of the words listed may be worth
+          repeating back as something to try again.
+        - `filler_words_used` are hesitations the recogniser kept verbatim. A
+          native speaker uses them too, so judge them by how dense they are, not
+          by whether they appear.
+
+        Transcript:
+        {$transcription->text}
+        PROMPT;
     }
 
     private function instructions(User $user): string

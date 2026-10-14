@@ -9,7 +9,16 @@
 #
 # Configuration:
 # Injected via Secrets Manager (valueFrom) rather than plaintext.
-# stopTimeout configured to allow graceful drains (Horizon 360s, voice-agent 420s).
+#
+# stopTimeout is bounded by Fargate, not by this file. The documented maximum is
+# 120 seconds (Amazon ECS "task definition parameters for Fargate" ->
+# Container timeouts -> stopTimeout), and a larger value is rejected at
+# register-task-definition. Every service here runs on FARGATE, so both the
+# Horizon drain (was 360) and the voice-agent drain (was 420) were unreachable:
+# the container was SIGKILLed two minutes in regardless. Both now sit at the cap,
+# and the in-process drains are configured to finish *before* it, so the workers
+# exit on their own terms instead of being killed.
+# https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.name_prefix}-cluster"
@@ -146,6 +155,11 @@ locals {
     { name = "BROADCAST_CONNECTION", value = "reverb" },
     { name = "LIGHTHOUSE_BROADCASTER", value = "reverb" },
     { name = "LIGHTHOUSE_SUBSCRIPTION_STORAGE", value = "redis" },
+    # Every opened subscription is a key in ElastiCache, and it is removed when
+    # the client unsubscribes, the result is pushed, or this TTL expires. A
+    # learner who closes the tab unsubscribes from nothing, so without the TTL
+    # those keys are never reclaimed. Matches the local default (backend/.env).
+    { name = "LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL", value = "3600" },
     { name = "LIGHTHOUSE_QUERY_CACHE_MODE", value = "opcache" },
     { name = "LIGHTHOUSE_MAX_QUERY_DEPTH", value = "10" },
     { name = "LIGHTHOUSE_MAX_QUERY_COMPLEXITY", value = "50" },
@@ -172,7 +186,12 @@ locals {
     { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
     { name = "LIVEKIT_PUBLIC_URL", value = "wss://${var.livekit_domain}" },
     { name = "LIVEKIT_SERVER_TOKEN_TTL_SECONDS", value = "60" },
-    { name = "VOICE_AGENT_NAME", value = "ai-language-coach" }
+    { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
+    # Batch STT for the onboarding assessment. The `dij-digital/deepgram-laravel`
+    # package reads this key for its own default model, whose fallback is still
+    # Nova-2 — the previous generation, and a different model from the Nova-3 the
+    # streaming agent uses. Named once here so both passes transcribe the same way.
+    { name = "DEEPGRAM_DEFAULT_MODEL", value = "nova-3" }
   ]
 
   laravel_secrets = [
@@ -275,7 +294,7 @@ resource "aws_ecs_task_definition" "horizon_worker" {
       image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
       essential   = true
       command     = ["php", "artisan", "horizon"]
-      stopTimeout = 360 # Plan §5, decision 15: Must exceed 300s job timeout to drain active jobs
+      stopTimeout = 120 # Fargate caps stopTimeout at 120s; the 300s job timeout cannot be drained on this launch type, so an in-flight job is retried instead (see the note at the top of this file)
       environment = local.laravel_common_env
       secrets     = local.laravel_secrets
       healthCheck = {
@@ -398,7 +417,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
       image       = "${aws_ecr_repository.repos["agent"].repository_url}:latest"
       essential   = true
       command     = ["python", "agent.py", "start"]
-      stopTimeout = var.voice_agent_stop_timeout # Plan §5: not shorter than voice_agent_drain_timeout
+      stopTimeout = var.voice_agent_stop_timeout # Fargate cap; DRAIN_TIMEOUT_SECONDS is set below it so the worker exits before the SIGKILL
       portMappings = [
         {
           containerPort = 8081
@@ -411,6 +430,25 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
         { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
         { name = "BACKEND_INTERNAL_URL", value = "https://${var.app_domain}" },
+        # The dialogue model is a decision recorded here, not something inferred
+        # from whichever API key happens to be in the environment: plan §7 asks
+        # for the benchmark to choose it, and auto-detection chose the one
+        # provider the benchmark had disqualified.
+        { name = "LLM_PROVIDER", value = var.voice_agent_llm_provider },
+        { name = "LLM_MODEL", value = var.voice_agent_llm_model },
+        { name = "LLM_BASE_URL", value = var.voice_agent_llm_base_url },
+        { name = "ALLOW_SLOW_DIALOGUE_LLM", value = var.voice_agent_allow_slow_llm ? "true" : "false" },
+        # Recognition and synthesis. The language comes from the job metadata;
+        # the model is pinned so a plugin upgrade cannot change it silently.
+        { name = "DEEPGRAM_STT_MODEL", value = "nova-3" },
+        # Turn handling: the end-of-utterance model ships inside the
+        # livekit-local-inference wheel (on-device, no LiveKit Cloud call), and
+        # `dynamic` lets it stretch the silence window mid-sentence instead of
+        # always committing after a fixed wait.
+        { name = "TURN_DETECTION", value = var.voice_agent_turn_detection ? "true" : "false" },
+        { name = "ENDPOINTING_MODE", value = var.voice_agent_endpointing_mode },
+        { name = "ENDPOINTING_MAX_DELAY_SECONDS", value = tostring(var.voice_agent_endpointing_max_delay) },
+        { name = "PREEMPTIVE_GENERATION", value = var.voice_agent_preemptive_generation ? "true" : "false" },
         # Plan §5, §7: the worker pool, as measured by load/dispatch_capacity.py.
         # livekit-agents 1.8.5 has no max_processes field — the ceiling is
         # load_threshold plus this task's CPU — so there is no MAX_PROCESSES here.
@@ -424,6 +462,8 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         { name = "VOICE_INTERNAL_SECRET", valueFrom = "${local.secret_arn}:VOICE_INTERNAL_SECRET::" },
         { name = "DEEPGRAM_API_KEY", valueFrom = "${local.secret_arn}:DEEPGRAM_API_KEY::" },
         { name = "DEEPSEEK_API_KEY", valueFrom = "${local.secret_arn}:DEEPSEEK_API_KEY::" },
+        { name = "GROQ_API_KEY", valueFrom = "${local.secret_arn}:GROQ_API_KEY::" },
+        { name = "CEREBRAS_API_KEY", valueFrom = "${local.secret_arn}:CEREBRAS_API_KEY::" },
         { name = "CARTESIA_API_KEY", valueFrom = "${local.secret_arn}:CARTESIA_API_KEY::" },
         { name = "OPENAI_API_KEY", valueFrom = "${local.secret_arn}:OPENAI_API_KEY::" },
         { name = "SENTRY_DSN", valueFrom = "${local.secret_arn}:SENTRY_DSN::" }

@@ -485,9 +485,38 @@ class TestMetadataAndPipeline(unittest.TestCase):
 
     def test_create_stt_coercion(self):
         mock_dg = MagicMock()
-        with patch("agent.deepgram", mock_dg):
+        with patch("agent.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
             create_stt({"target_language": None})
-            mock_dg.STT.assert_called_once_with(model="nova-2", language="en")
+            mock_dg.STT.assert_called_once_with(
+                model="nova-3",
+                language="en",
+                punctuate=True,
+                # The recogniser has to keep "um" and "uh": the turn detector and
+                # the CEFR assessor both read them, and the default is to delete.
+                filler_words=True,
+            )
+
+    def test_create_stt_follows_the_session_language(self):
+        # The language is per session and arrives with the job metadata. Ignoring
+        # it means every session is transcribed as en-US, which is what the
+        # previous implementation did by hard-coding the recogniser.
+        mock_dg = MagicMock()
+        with patch("agent.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
+            create_stt({"target_language": "de-DE"})
+            mock_dg.STT.assert_called_once_with(
+                model="nova-3",
+                language="de",
+                punctuate=True,
+                filler_words=True,
+            )
+
+    def test_create_stt_model_is_a_deployment_setting(self):
+        mock_dg = MagicMock()
+        with patch("agent.deepgram", mock_dg), patch.dict(
+            "os.environ", {"DEEPGRAM_STT_MODEL": "nova-3-general"}, clear=True
+        ):
+            create_stt({"target_language": "en"})
+            self.assertEqual("nova-3-general", mock_dg.STT.call_args.kwargs["model"])
 
     def test_prewarm(self):
         mock_proc = DummyMetric(userdata={})
@@ -572,7 +601,11 @@ class TestCreateLlm(unittest.TestCase):
 
     @patch("agent.HAS_OPENAI", True)
     @patch("agent.openai")
-    def test_default_auto_detect_deepseek(self, mock_openai):
+    def test_auto_detect_refuses_to_put_deepseek_on_the_dialogue(self, mock_openai):
+        # The benchmark in benchmarks/README.md measured deepseek-chat at
+        # 1068 ms p95 TTFT against a 600 ms budget. Auto-detection used to pick
+        # it whenever it was the only key present, which produced a fleet that
+        # booted healthily and then paused after every utterance.
         env = {
             "DEEPSEEK_API_KEY": "dsk-test-123",
             "OPENAI_API_KEY": "",
@@ -580,6 +613,45 @@ class TestCreateLlm(unittest.TestCase):
             "LLM_MODEL": "",
             "LLM_BASE_URL": "",
             "LLM_API_KEY": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                create_llm()
+
+            mock_openai.LLM.assert_not_called()
+
+        self.assertIn("latency budget", str(ctx.exception))
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_auto_detect_prefers_the_fast_provider_when_several_keys_exist(self, mock_openai):
+        env = {
+            "DEEPSEEK_API_KEY": "dsk-test-123",
+            "GROQ_API_KEY": "gsk-groq-789",
+            "OPENAI_API_KEY": "",
+            "LLM_PROVIDER": "",
+            "LLM_MODEL": "",
+            "LLM_BASE_URL": "",
+            "LLM_API_KEY": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            create_llm()
+            mock_openai.LLM.assert_called_once_with(
+                model="openai/gpt-oss-120b",
+                base_url="https://api.groq.com/openai/v1",
+                api_key="gsk-groq-789",
+            )
+
+    @patch("agent.HAS_OPENAI", True)
+    @patch("agent.openai")
+    def test_the_slow_provider_can_still_be_chosen_deliberately(self, mock_openai):
+        env = {
+            "DEEPSEEK_API_KEY": "dsk-test-123",
+            "LLM_PROVIDER": "deepseek",
+            "LLM_MODEL": "",
+            "LLM_BASE_URL": "",
+            "LLM_API_KEY": "",
+            "ALLOW_SLOW_DIALOGUE_LLM": "true",
         }
         with patch.dict("os.environ", env, clear=True):
             create_llm()
@@ -631,13 +703,15 @@ class TestCreateLlm(unittest.TestCase):
         env = {
             "LLM_PROVIDER": "deepseek",
             "LLM_API_KEY": "universal-key-000",
-            "LLM_MODEL": "deepseek-reasoner",
+            "LLM_MODEL": "deepseek-chat",
             "LLM_BASE_URL": "https://custom.deepseek.com/v1",
+            # DeepSeek is refused for the dialogue unless the override says so.
+            "ALLOW_SLOW_DIALOGUE_LLM": "true",
         }
         with patch.dict("os.environ", env, clear=True):
             create_llm()
             mock_openai.LLM.assert_called_once_with(
-                model="deepseek-reasoner",
+                model="deepseek-chat",
                 base_url="https://custom.deepseek.com/v1",
                 api_key="universal-key-000",
             )
@@ -660,13 +734,14 @@ class TestCreateLlm(unittest.TestCase):
             "DEEPSEEK_API_KEY": "",
             "OPENAI_API_KEY": "",
             "GROQ_API_KEY": "",
+            "CEREBRAS_API_KEY": "",
             "LLM_API_KEY": "",
             "LLM_PROVIDER": "",
         }
         with patch.dict("os.environ", env, clear=True):
             with self.assertRaises(ValueError) as ctx:
                 create_llm()
-            self.assertIn("Neither DEEPSEEK_API_KEY nor OPENAI_API_KEY is configured", str(ctx.exception))
+            self.assertIn("No dialogue LLM is configured", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,9 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   const mistakes = computed<Mistake[]>(() => session.value?.mistakes ?? [])
 
   let stopSubscription: (() => void) | null = null
+  let stopWatchingReconnects: (() => void) | null = null
   let disposed = false
+  let rechecking = false
 
   function teardownSubscription(): void {
     if (stopSubscription) {
@@ -172,7 +174,40 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
     }
   }
 
+  /**
+   * Re-read the session after the socket reconnects.
+   *
+   * Lighthouse registers the subscription server-side against the socket id that
+   * asked for it, so a reconnect leaves it pushing at a connection that no longer
+   * exists: the channel still looks subscribed, `analyzing` stays true, and the
+   * result never arrives — the learner is left with a spinner and no error to
+   * report. Re-reading is what closes that loop, and it is deliberately the whole
+   * recovery: the fresh status either carries the mistakes already or re-opens
+   * the subscription against the new socket.
+   *
+   * Guarded against overlapping runs because a flaky connection reconnects
+   * repeatedly, and each attempt costs a query and a subscription.
+   */
+  async function recheckAfterReconnect(): Promise<void> {
+    if (disposed || rechecking) {
+      return
+    }
+
+    rechecking = true
+    try {
+      // Not `refresh()`: this is a background recovery, so it must not flash the
+      // page back into its loading state over content the learner is reading.
+      await loadSession()
+    } finally {
+      rechecking = false
+    }
+  }
+
   onMounted(() => {
+    stopWatchingReconnects = lighthouse.onReconnect(() => {
+      void recheckAfterReconnect()
+    })
+
     void loadSession()
   })
 
@@ -189,6 +224,8 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   onUnmounted(() => {
     disposed = true
     teardownSubscription()
+    stopWatchingReconnects?.()
+    stopWatchingReconnects = null
   })
 
   return {
