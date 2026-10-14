@@ -129,8 +129,19 @@ curl -fsS -o /dev/null -w '%{http_code}\n' \
                         --livekit livekit.example.com
 
 # Container roles: every service should be "running" or "healthy".
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+# The --env-file is not optional here — Compose interpolates `${VAR:?}` for every
+# subcommand, not just `up`, so without it this fails with 16 "required variable
+# is missing" errors rather than listing anything.
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.prod.yml ps
 ```
+
+Only ports 80 and 443 are public. The API (`127.0.0.1:8000`), the SPA
+(`127.0.0.1:3000`), Reverb (`127.0.0.1:8081`), MySQL and MinIO stay bound to
+loopback in production too, which is deliberate: they are useful for
+`curl`, a `mysql` client or a backup over SSH, and unreachable from the network.
+That is also why the proxy, rather than a published port, is what serves
+learners.
 
 The browser suite in `e2e/` is **not** a production check: it signs in as
 `test@example.com`, which must not exist in a deployment. Run it against the
