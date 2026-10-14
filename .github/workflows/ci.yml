@@ -66,6 +66,16 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
+        env:
+          # Load-bearing, exactly as in backend/Dockerfile: `composer install`
+          # runs the post-autoload-dump hook (`artisan package:discover`), which
+          # boots AppServiceProvider and therefore ProductionSanityCheck. The
+          # .env is created by the *next* step, so at this point Laravel falls
+          # back to its default APP_ENV of `production`, the guard refuses the
+          # development defaults, and the job dies in "Install dependencies"
+          # before anything is installed. This is why CI was red from d37959d9
+          # onwards while every local run stayed green: a developer has a .env.
+          APP_ENV: local
         run: composer install --prefer-dist --no-interaction --no-progress
 
       # phpunit.xml supplies the DB_* values; this step only provides the app
