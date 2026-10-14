@@ -92,7 +92,7 @@ docker compose --env-file .env.production \
   run --rm api php artisan migrate --force
 docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.prod.yml \
-  run --rm api php artisan db:seed --class=GrammarPointSeeder
+  run --rm api php artisan db:seed --class=GrammarPointSeeder --force
 
 # 4. Start everything that serves traffic.
 docker compose --env-file .env.production \
@@ -111,8 +111,11 @@ Two notes on step 3:
   one `uncategorized` sentinel per configured language. Without it the roadmap
   generator has no catalogue to build from.
 
-`migrate --force` is required because the scheduler and Horizon refuse to run
-migrations interactively in production.
+`--force` is required on both commands, and not only on `migrate`: in production,
+`migrate` and `db:seed` ask for interactive confirmation, `run --rm` has no
+terminal to answer with, and the command is cancelled with
+`WARN Command cancelled.` — after a migration that already ran, which makes it
+look like the seed succeeded.
 
 ## 5. Verify the deployment
 
@@ -145,7 +148,25 @@ learners.
 
 The browser suite in `e2e/` is **not** a production check: it signs in as
 `test@example.com`, which must not exist in a deployment. Run it against the
-local stack or a staging copy of it (see `e2e/README.md`).
+local stack or a staging copy of it (see `e2e/README.md`). Against a staging
+deployment behind a private CA, two flags make it usable:
+
+```bash
+E2E_BASE_URL=https://staging.example.com E2E_IGNORE_HTTPS=true \
+  E2E_CHANNEL=chrome npx playwright test --project=chromium
+```
+
+Checking a WebSocket by hand through the proxy needs `--http1.1`. Over TLS,
+`curl` negotiates HTTP/2 by default, and an `Upgrade` header is not a thing HTTP/2
+can carry — the proxy answers `500 Internal server error.` and the failure looks
+like a broken Reverb route:
+
+```bash
+curl -sk --http1.1 -i -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  "https://coach.example.com/app/$REVERB_APP_KEY?protocol=7&client=js&version=8.6.0&flash=false"
+# HTTP/1.1 101 Switching Protocols, X-Powered-By: Laravel Reverb
+```
 
 ## 6. Upgrades
 

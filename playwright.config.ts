@@ -15,6 +15,16 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 const CHANNEL = process.env.E2E_CHANNEL === 'chrome' ? { channel: 'chrome' as const } : {};
 
 /**
+ * Accept a certificate the machine does not trust. Needed to point the suite at
+ * a real deployment shape: Caddy issues itself a certificate for `localhost`
+ * from its own CA, so an otherwise-correct `https://localhost` run fails at the
+ * TLS handshake before any application code executes. Staging behind a private
+ * CA is the same case. Off unless asked for, so a hostname mismatch in a public
+ * deployment is still a failure rather than something silently tolerated.
+ */
+const IGNORE_HTTPS = process.env.E2E_IGNORE_HTTPS === 'true' ? { ignoreHTTPSErrors: true } : {};
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -37,6 +47,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'off',
     ...CHANNEL,
+    ...IGNORE_HTTPS,
   },
   projects: [
     // One sign-in for the whole run: `login` is throttled at ten attempts per

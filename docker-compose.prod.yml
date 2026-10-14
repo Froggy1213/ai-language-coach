@@ -123,7 +123,22 @@ x-prod-laravel-environment: &prod-laravel-environment
   PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS: ${PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS:-7}
 
 services:
+  # ---------------------------------------------------------------------------
+  # `!override` because the base file makes the API wait for `minio` and
+  # `livekit` to be *healthy* before it starts, and a deployment usually has
+  # neither: object storage is a real bucket and the media server is the
+  # dedicated node. Compose merges mappings key by key, so without this the two
+  # dependencies would be inherited and `docker compose up -d api` would drag a
+  # bundled MinIO and a bundled LiveKit into a production deployment — a
+  # surprise a config render does not show, because the services are simply
+  # already running by the time anything is asked.
+  # ---------------------------------------------------------------------------
   api:
+    depends_on: !override
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       <<: *prod-laravel-environment
       APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}

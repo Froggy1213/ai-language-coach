@@ -84,6 +84,7 @@ The suite supports environment overrides via standard environment variables:
 | `E2E_BASE_URL` | `http://localhost:3000` | Nuxt SPA frontend URL. The containerised stack answers on both `localhost:3000` and `127.0.0.1:3000` and the suite passes on either, because the SPA aligns its API origin with the hostname it was served from (`frontend/app/utils/backend-endpoint.ts`, README decision 58). The *hybrid* setup — `npm run dev` on the host — binds `localhost` (IPv6 `::1` on macOS) only, so `localhost` is the correct value there. |
 | `E2E_CHANNEL` | `undefined` | Set to `chrome` to run against the installed Google Chrome instead of Playwright's bundled Chromium (which is not installed here). |
 | `E2E_API_URL` | `http://127.0.0.1:8000` | Laravel GraphQL / REST API URL. |
+| `E2E_IGNORE_HTTPS` | `undefined` | Set to `true` to accept a certificate the machine does not trust — Caddy's own CA for `https://localhost`, or a staging deployment behind a private CA. Off by default, so a hostname mismatch in a public deployment is still a failure. |
 | `CI` | `undefined` | When set to `true`, enables retry on failure (`retries: 1`) and forbids `.only`. |
 
 Example:
