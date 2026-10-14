@@ -34,10 +34,11 @@
 		reverse_proxy api:8080
 	}
 
-	# Reverb speaks the Pusher protocol: `/app/<key>` is the WebSocket the Echo
-	# client opens, `/apps/<key>/events` is its HTTP publish path. Both have to
-	# share the application origin — a browser will not hold a `wss://` socket
-	# to a host it was not served from without a fresh CORS negotiation.
+	# Reverb speaks the Pusher protocol: `/app/<app key>` is the WebSocket the Echo
+	# client opens, `/apps/<app id>/events` is the HTTP publish path Laravel uses
+	# (the app *id*, not the key — they are different values from the environment).
+	# Both have to share the application origin: a browser will not hold a `wss://`
+	# socket to a host it was not served from without a fresh CORS negotiation.
 	@reverb path /app/* /apps/*
 	handle @reverb {
 		reverse_proxy reverb:8081
