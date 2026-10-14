@@ -482,14 +482,20 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      NUXT_PUBLIC_BACKEND_URL: http://127.0.0.1:8000
+      # The SPA's view of the stack, and therefore overridable: pointing the web
+      # container at a different API (a staging backend, a proxy on another port)
+      # is a configuration change, not an edit to this file. It stays inside the
+      # `full` profile's own network only when left at its default, which is why
+      # the value is the API's published loopback address rather than `api:8080`:
+      # the *browser* dials it, not this container.
+      NUXT_PUBLIC_BACKEND_URL: ${NUXT_PUBLIC_BACKEND_URL:-http://127.0.0.1:8000}
       # frontend/.env is excluded from the image, so without these the built app
       # falls back to nuxt.config's port 8080 while the reverb container listens
       # on 8081 — every subscription would target a port nobody serves.
       NUXT_PUBLIC_REVERB_APP_KEY: ${REVERB_APP_KEY:-}
-      NUXT_PUBLIC_REVERB_HOST: 127.0.0.1
-      NUXT_PUBLIC_REVERB_PORT: 8081
-      NUXT_PUBLIC_REVERB_SCHEME: http
+      NUXT_PUBLIC_REVERB_HOST: ${NUXT_PUBLIC_REVERB_HOST:-127.0.0.1}
+      NUXT_PUBLIC_REVERB_PORT: ${NUXT_PUBLIC_REVERB_PORT:-8081}
+      NUXT_PUBLIC_REVERB_SCHEME: ${NUXT_PUBLIC_REVERB_SCHEME:-http}
     depends_on:
       - api
 

@@ -81,7 +81,7 @@ The suite supports environment overrides via standard environment variables:
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `E2E_BASE_URL` | `http://localhost:3000` | Nuxt SPA frontend URL. **Crucial**: use `localhost:3000`, not `127.0.0.1:3000`. The Nuxt dev server binds `localhost` (IPv6 `::1` on macOS) and the backend's Sanctum stateful-domain list contains `localhost:3000`; the base URL and the browser's cookie jar have to agree on that hostname or the session cookie is set for one origin and never sent to the other. |
+| `E2E_BASE_URL` | `http://localhost:3000` | Nuxt SPA frontend URL. The containerised stack answers on both `localhost:3000` and `127.0.0.1:3000` and the suite passes on either, because the SPA aligns its API origin with the hostname it was served from (`frontend/app/utils/backend-endpoint.ts`, README decision 58). The *hybrid* setup — `npm run dev` on the host — binds `localhost` (IPv6 `::1` on macOS) only, so `localhost` is the correct value there. |
 | `E2E_CHANNEL` | `undefined` | Set to `chrome` to run against the installed Google Chrome instead of Playwright's bundled Chromium (which is not installed here). |
 | `E2E_API_URL` | `http://127.0.0.1:8000` | Laravel GraphQL / REST API URL. |
 | `CI` | `undefined` | When set to `true`, enables retry on failure (`retries: 1`) and forbids `.only`. |
@@ -115,6 +115,20 @@ addresses the specs drive:
 Interface copy lives in `frontend/app/constants/strings.ts` (Japanese) and is the
 source of truth for every string the specs assert; the *learning* content
 (grammar titles, prompts, cheat sheets) stays English and comes from the API.
+
+## What each spec pins
+
+| Spec | What it is the guard for |
+| :--- | :--- |
+| `auth.spec.ts` | The guest bounce, a real sign-in, and sign-out from `/settings` |
+| `console.spec.ts` | No uncaught exception, no console error and no `>= 400` `/graphql` response across login → 今日 → ロードマップ → レベル判定 |
+| `roadmap.spec.ts` | The browser's own `Roadmap` response answers 200 (not just that the DOM looks right) and the lesson rail renders |
+| `level.spec.ts` | The consent gate before the recording affordance, and the `/onboarding` → `/level` redirect |
+| `review.spec.ts` | `/review` renders either the due queue or its documented empty state |
+| `session-feedback.spec.ts` | A stranger's session id renders a clear not-found state rather than a spinner, including through the legacy `/session/:id` route |
+| `settings.spec.ts` | The consent record, the sign-out control and the guarded deletion flow |
+| `backend-hosts.spec.ts` | Every `/graphql` and `/sanctum/*` request stays on the hostname the SPA was served from, answers 200, and leaves the session cookie on that hostname (README decision 58 — the failure it guards against is a 419 on the first mutation, which looks like a broken login) |
+| `global.setup.ts` | The single sign-in every other spec inherits |
 
 ---
 

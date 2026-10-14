@@ -150,3 +150,32 @@ jobs:
         # run without livekit-agents skips the 16 that need it, and this job
         # installs it from requirements.txt.
         run: python -m unittest discover -s . -p "test_*.py"
+
+  containers:
+    # The three jobs above run against a *source checkout*, so none of them can
+    # see a defect that only exists inside an image: a build-context exclusion
+    # that removed a file the runtime needs, an `artisan` call that fails because
+    # the image has no .env, a Nitro server bound to the wrong host. This job
+    # exists because exactly that happened — `composer dump-autoload` booted
+    # AppServiceProvider with Laravel's default APP_ENV of `production`, the
+    # production sanity check refused the development defaults, and the API image
+    # stopped building while every other job stayed green. See decision 57.
+    #
+    # `backend/Dockerfile` is what ECS deploys for four services (api, horizon,
+    # reverb, migrations), so a failure here is a failed deployment.
+    name: Containers — build and boot the images
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and smoke the images
+        run: ./scripts/verify-images.sh
+
+      - name: Dump the failing container's log
+        if: failure()
+        run: |
+          for name in coach_verify_api coach_verify_web; do
+            echo "--- $name"
+            docker logs "$name" 2>&1 | tail -50 || true
+          done
