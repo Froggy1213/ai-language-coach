@@ -130,7 +130,7 @@ Executed via `./load/sigterm_drain_test.sh`:
 | **New dispatch rejected during drain** | **YES** (Fleet unavailable) | Must reject / stop accepting new jobs | **PASS** |
 | **Container exit code** | **0** | `0` (Graceful exit) | **PASS** |
 | **Drain latency after call ended** | **17.49s** | Completes promptly after session ends | **PASS** |
-| **Total drain duration from SIGTERM** | **22.08s** | < `drain_timeout` (3600s) | **PASS** |
+| **Total drain duration from SIGTERM** | **22.08s** | < `drain_timeout` (110s configured) | **PASS** |
 | **Service restore duration to healthy** | **6.07s** | Returns to healthy | **PASS** |
 
 ---
@@ -144,10 +144,10 @@ Based on the measured benchmarks and internal `livekit-agents` architecture, her
 | Parameter | Recommended Value | Current Default | Config Location |
 | :--- | :--- | :--- | :--- |
 | `num_idle_processes` | **4** (for 2 vCPU) / **6** (for 4 vCPU) | `4` (prod default) | `WorkerOptions(num_idle_processes=4)` in `agent/agent.py` |
-| `max_processes` (per task) | **8–10 concurrent sessions** | Unbounded (CPU throttled) | ECS Fargate task sizing & scaling policies |
+| `max_processes` | **does not exist** in livekit-agents 1.8.5 | — | The concurrency ceiling is `load_threshold` plus the task's CPU; size the task instead |
 | `load_threshold` | **0.70** (70% CPU) | `0.70` (prod default) | `WorkerOptions(load_threshold=0.70)` in `agent/agent.py` |
-| `drain_timeout` | **360 seconds** (6 min) | `3600 seconds` (1 hr) | `WorkerOptions(drain_timeout=360)` in `agent/agent.py` |
-| `stopTimeout` / `stop_grace_period` | **360 seconds** (6 min) | Docker default: 10s | `docker-compose.yml` & ECS Task Definition |
+| `drain_timeout` | **110 seconds** | `3600 seconds` (1 hr, library default) | `DRAIN_TIMEOUT_SECONDS` in `docker-compose.yml` and `voice_agent_drain_timeout` in `infra/terraform/variables.tf` (110); `agent.py` falls back to 360 only when the variable is unset |
+| `stopTimeout` / `stop_grace_period` | **120 seconds** — Fargate's hard cap, and it must exceed the drain | Docker default: 10s | `voice_agent_stop_timeout` in `infra/terraform/variables.tf`; `stop_grace_period` in `docker-compose.yml` |
 
 ### 4.2 Data Behind Each Recommendation
 
@@ -155,18 +155,18 @@ Based on the measured benchmarks and internal `livekit-agents` architecture, her
    - Prewarming 4 processes maintains a sub-300ms join latency floor (measured 265ms p50).
    - Cold process initialization under load increases latency to ~540ms. If idle processes were 0, every learner would experience higher join latency and jitter.
    - Memory overhead of 4 idle processes with Silero VAD is ~1.2 GB RAM, easily fitting within a 4 GB Fargate container.
-2. **`max_processes` / Task Concurrency Ceiling = 8–10:**
+2. **Task concurrency ceiling = 8–10 (sizing, not a knob):**
    - Each active voice conversation runs bidirectional WebRTC audio, Silero VAD tensor operations, Deepgram streaming WebSocket, LLM response tracking, and Cartesia audio streaming.
    - Resource consumption per active call: ~15–20% of 1 vCPU and ~350 MB RAM.
    - For a standard 2 vCPU / 4 GB Fargate task, 8–10 concurrent sessions represent the safe saturation threshold before CPU context switching degrades audio packets.
 3. **`load_threshold = 0.70`:**
    - `livekit-agents` uses `_DefaultLoadCalc`, which averages CPU utilization over a 2.5-second moving window.
    - At 70% CPU load, the worker stops warming additional idle processes and marks itself full, triggering LiveKit's 429 / queueing behavior before CPU starvation can cause audio dropouts.
-4. **`drain_timeout = 360` and `stopTimeout = 360`:**
+4. **`drain_timeout = 110` and `stopTimeout = 120`:**
    - Product voice sprints last 3–5 minutes, with a room empty timeout of 300 seconds (`VOICE_ROOM_EMPTY_TIMEOUT`).
    - The default `drain_timeout` in `livekit-agents` is 3600 seconds (1 hour), which is unnecessarily long for ECS task deployments.
    - Conversely, default Docker/ECS stop timeout is only **10–30 seconds**. If ECS terminates a container after 30 seconds, learners still mid-conversation are forcefully aborted (`SIGKILL`).
-   - Setting both `drain_timeout` and ECS task definition `stopTimeout` to **360s** ensures that active sessions complete naturally during deployments without stalling pipeline rollouts for an hour.
+   - Fargate caps `stopTimeout` at **120 seconds** and SIGKILLs whatever is left, so a drain longer than that is unreachable: the configured pair is a 110 s drain under a 120 s `stopTimeout`, which preserves a call in flight (measured drain 17–22 s) without stalling a rollout for an hour.
 
 ---
 

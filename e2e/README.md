@@ -34,7 +34,7 @@ Verify services:
 - **Reverb (WebSocket)**: 127.0.0.1:8081
 - **MinIO**: 127.0.0.1:9000 / 9001
 - **LiveKit Server**: 127.0.0.1:7880
-- **MySQL 8.0**: 127.0.0.1:3306
+- **MySQL 8.4**: 127.0.0.1:3306
 - **Redis 7**: 127.0.0.1:6379
 
 Run the tests:
