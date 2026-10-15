@@ -8,6 +8,52 @@ type Assessment {
 
     "CEFR band the analysis settled on; null until `status` is `done`."
     cefrLevel: CefrLevel @rename(attribute: "cefr_level")
+
+    """
+    How clearly the recording came through, word by word; null on an assessment
+    that finished before this was measured. Stored inside `raw_data` next to the
+    transcript it was measured from.
+    """
+    pronunciation: PronunciationFeedback @rename(attribute: "raw_data.pronunciation")
+}
+
+"""
+How much of a recording the speech recogniser was confident about.
+
+Evidence about the audio rather than a phonetic grade: microphone placement,
+background noise, an unfamiliar accent and an unclear word all move it, which is
+why the interface names the words instead of offering a score to chase.
+"""
+type PronunciationFeedback {
+    """
+    Overall clarity band — `clear`, `mostly_clear`, `uneven` or `effortful`;
+    null when the recording was too short for the share to mean anything.
+    """
+    band: String
+
+    "Share of words the recogniser was confident about, whole percent; null when the sample was too short."
+    clarityPercent: Int @rename(attribute: "clarity_percent")
+
+    "Words the recogniser was least sure about, worst first."
+    uncertainWords: [PronouncedWord!]! @rename(attribute: "uncertain_words")
+
+    "Words below this confidence were listed; the interface explains the threshold with it."
+    uncertainThreshold: Float! @rename(attribute: "uncertain_threshold")
+
+    "Whether the recording was too short to summarise, so only the words are shown."
+    isThinSample: Boolean! @rename(attribute: "is_thin_sample")
+
+    "The sentence the analysis wrote about these words, in the interface language."
+    advice: String
+}
+
+"One word the recogniser was not confident about."
+type PronouncedWord {
+    "The word as it was recognised."
+    word: String!
+
+    "Recogniser confidence in this word, 0 to 1."
+    confidence: Float!
 }
 
 "One form field the browser must send alongside the file part."

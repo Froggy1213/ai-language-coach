@@ -6,6 +6,27 @@
  * roadmap instead of trusting the mutation's own payload.
  */
 
+/**
+ * The pronunciation evidence one assessment carries.
+ *
+ * Shared by the `assessmentReady` subscription and `me.latestAssessment`,
+ * because the level screen reads the same block from whichever of the two
+ * arrives: the push for the recording it just took, the query after a reload.
+ */
+export const PRONUNCIATION_FIELDS = /* GraphQL */ `
+  pronunciation {
+    band
+    clarityPercent
+    uncertainThreshold
+    isThinSample
+    advice
+    uncertainWords {
+      word
+      confidence
+    }
+  }
+`
+
 export const ME_QUERY = /* GraphQL */ `
   query Me {
     me {
@@ -15,6 +36,12 @@ export const ME_QUERY = /* GraphQL */ `
       targetLanguage
       currentLevel
       voiceConsentAt
+      latestAssessment {
+        id
+        status
+        cefrLevel
+        ${PRONUNCIATION_FIELDS}
+      }
     }
   }
 `
@@ -114,6 +141,7 @@ export const ASSESSMENT_READY_SUBSCRIPTION = /* GraphQL */ `
       id
       status
       cefrLevel
+      ${PRONUNCIATION_FIELDS}
     }
   }
 `

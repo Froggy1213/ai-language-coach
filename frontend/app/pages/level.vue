@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { level as copy, common } from '~/constants/strings'
+import { level as copy } from '~/constants/strings'
 import { formatClock } from '~/utils/format'
+import type { Assessment } from '~/types/graphql'
+import type { LatestAssessment } from '~/types/view-models'
 
 /**
  * レベル判定 — the CEFR placement recording.
@@ -23,6 +25,17 @@ const { elapsed, start: startTimer, stop: stopTimer, reset: resetTimer } = useEl
 const assessedLevel = ref<string | null>(null)
 const starting = ref(false)
 const stopping = ref(false)
+
+/**
+ * The clarity block for the recording that was just analysed.
+ *
+ * Taken from the subscription payload rather than from `refresh()`: the push
+ * arrives with the result already in hand, and `me` is fetched for the new level
+ * only. After a reload the same block is read back from `latestAssessment`, so
+ * the section survives a page change instead of vanishing with the socket.
+ */
+const pronunciation = ref<LatestAssessment['pronunciation']>(null)
+const storedPronunciation = computed(() => user.value?.latestAssessment?.pronunciation ?? null)
 
 let aborted = false
 let recorder: MediaRecorder | null = null
@@ -144,6 +157,9 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
   stage.value = 'uploading'
   error.value = null
   waitingFailed.value = false
+  // A re-recording replaces the previous result: leaving the old words on screen
+  // would attribute the last attempt's evidence to this one.
+  pronunciation.value = null
 
   try {
     const currentUser = user.value
@@ -154,7 +170,7 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
 
     // Subscribe first: the analysis can finish before the mutation's response is
     // even rendered.
-    stopListening = await onReady(currentUser.id, (assessment) => {
+    stopListening = await onReady(currentUser.id, (assessment: Assessment) => {
       if (aborted) {
         return
       }
@@ -167,6 +183,9 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       }
 
       assessedLevel.value = assessment.cefrLevel ?? null
+      // `assessmentReady` selects the same block `me.latestAssessment` does, so
+      // the two shapes are the same one; only its optionality differs.
+      pronunciation.value = assessment.pronunciation ?? null
       stage.value = 'done'
       stopListening?.()
       stopListening = null
@@ -370,5 +389,10 @@ const activeStep = computed(() => {
 
       <UiButtonLink to="/roadmap" variant="primary" size="lg">{{ copy.openRoadmap }}</UiButtonLink>
     </div>
+
+    <!-- The clarity evidence for this recording. Rendered outside the result card
+         so it stays visible after a reload, when it comes from `me` rather than
+         from the subscription that closed the recording step. -->
+    <PronunciationPanel :feedback="pronunciation ?? storedPronunciation" />
   </section>
 </template>

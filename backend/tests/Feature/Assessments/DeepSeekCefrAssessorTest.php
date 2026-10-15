@@ -4,6 +4,8 @@ namespace Tests\Feature\Assessments;
 
 use App\Assessments\AssessmentAnalysisFailed;
 use App\Assessments\DeepSeekCefrAssessor;
+use App\Assessments\PronunciationAnalyzer;
+use App\Assessments\PronunciationAssessment;
 use App\Assessments\SpeechFeatures;
 use App\Assessments\Transcription;
 use App\Enums\CefrLevel;
@@ -25,6 +27,8 @@ class DeepSeekCefrAssessorTest extends TestCase
         $result = $this->assessor()->assess(
             $this->transcription('I have been learning English for six years.'),
             $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
         );
 
         $this->assertSame(CefrLevel::B1, $result->level);
@@ -52,7 +56,7 @@ class DeepSeekCefrAssessorTest extends TestCase
             'weaknesses' => ['Past tense'],
         ]]);
 
-        $this->assessor()->assess($this->transcription('I go to school yesterday.'), $this->user());
+        $this->assessor()->assess($this->transcription('I go to school yesterday.'), $this->user(), $this->clarity(), $this->analyzer());
 
         StructuredAnonymousAgent::assertPrompted(static fn ($prompt): bool => $prompt->model === 'deepseek-v4-pro');
     }
@@ -64,7 +68,7 @@ class DeepSeekCefrAssessorTest extends TestCase
         $this->expectException(AssessmentAnalysisFailed::class);
         $this->expectExceptionMessage('unusable judgement');
 
-        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user(), $this->clarity(), $this->analyzer());
     }
 
     public function test_it_fails_when_the_model_picks_a_band_outside_the_scale(): void
@@ -78,7 +82,7 @@ class DeepSeekCefrAssessorTest extends TestCase
 
         $this->expectException(AssessmentAnalysisFailed::class);
 
-        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user(), $this->clarity(), $this->analyzer());
     }
 
     public function test_it_fails_when_the_response_carries_no_structured_output(): void
@@ -88,7 +92,7 @@ class DeepSeekCefrAssessorTest extends TestCase
 
         $this->expectException(AssessmentAnalysisFailed::class);
 
-        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user(), $this->clarity(), $this->analyzer());
     }
 
     public function test_it_fails_when_the_feedback_lists_are_empty(): void
@@ -102,7 +106,7 @@ class DeepSeekCefrAssessorTest extends TestCase
 
         $this->expectException(AssessmentAnalysisFailed::class);
 
-        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user(), $this->clarity(), $this->analyzer());
     }
 
     public function test_it_hands_the_examiner_the_fluency_evidence_alongside_the_transcript(): void
@@ -127,6 +131,8 @@ class DeepSeekCefrAssessorTest extends TestCase
                 uncertainWords: ['yesterday'],
             )),
             $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
         );
 
         // Judging a spoken sample on its transcript alone turns it into a written
@@ -175,6 +181,8 @@ class DeepSeekCefrAssessorTest extends TestCase
                 lowConfidenceShare: 0.4,
             )),
             $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
         );
 
         // Words without timings are not an empty measurement: the confidence
@@ -211,16 +219,152 @@ class DeepSeekCefrAssessorTest extends TestCase
             'weaknesses' => ['Articles'],
         ]]);
 
-        $this->assessor()->assess($this->transcription('Hello.'), $this->user());
+        $this->assessor()->assess($this->transcription('Hello.'), $this->user(), $this->clarity(), $this->analyzer());
 
         // No word timings means no measurements: the prompt must not invent a
         // block of zeroes the provider never produced.
         StructuredAnonymousAgent::assertPrompted(static fn ($prompt): bool => (string) $prompt->prompt === 'Hello.');
     }
 
+    public function test_it_hands_the_examiner_the_words_the_recogniser_struggled_with(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'B1',
+            'summary' => 'You are at B1.',
+            'strengths' => ['Clear everyday vocabulary'],
+            'weaknesses' => ['Present perfect'],
+            'pronunciation_advice' => '「thought」という単語をもう一度ゆっくり言ってみましょう。',
+        ]]);
+
+        $this->assessor()->assess(
+            $this->transcription('I thought it was thorough.', features: new SpeechFeatures(wordCount: 5)),
+            $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
+        );
+
+        StructuredAnonymousAgent::assertPrompted(static function ($prompt): bool {
+            $text = (string) $prompt->prompt;
+
+            foreach ([
+                'Words the recogniser was least sure about:',
+                '"thought"',
+                '"thorough"',
+                'Write `pronunciation_advice` from this block alone.',
+            ] as $needle) {
+                if (! str_contains($text, $needle)) {
+                    fwrite(STDERR, "MISSING: {$needle}\n");
+
+                    return false;
+                }
+            }
+
+            // The share is the interface's number. A prompt carrying it invites the
+            // model to repeat it to the learner as a grade, which the evidence
+            // cannot support.
+            return ! str_contains($text, '88');
+        });
+    }
+
+    public function test_it_attaches_the_sentence_the_model_wrote_about_those_words(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'B1',
+            'summary' => 'You are at B1.',
+            'strengths' => ['Clear everyday vocabulary'],
+            'weaknesses' => ['Present perfect'],
+            'pronunciation_advice' => '「thought」という単語をもう一度ゆっくり言ってみましょう。',
+        ]]);
+
+        $result = $this->assessor()->assess(
+            $this->transcription('I thought it was thorough.', features: new SpeechFeatures(wordCount: 5)),
+            $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
+        );
+
+        $this->assertNotNull($result->pronunciation);
+        $this->assertSame('「thought」という単語をもう一度ゆっくり言ってみましょう。', $result->pronunciation->advice);
+        // The measurement is the analyzer's, not the model's: the band the learner
+        // sees must not be something a prompt can change.
+        $this->assertSame(PronunciationAssessment::BAND_MOSTLY_CLEAR, $result->pronunciation->band);
+        $this->assertSame(88, $result->pronunciation->clarityPercent);
+    }
+
+    public function test_it_drops_a_sentence_that_asserts_a_phonetic_verdict(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'B1',
+            'summary' => 'You are at B1.',
+            'strengths' => ['Clear everyday vocabulary'],
+            'weaknesses' => ['Present perfect'],
+            // Exactly the failure the published evidence describes: a diagnosis
+            // the confidence measurement cannot support.
+            'pronunciation_advice' => '「thought」の発音は /θ/ ではなく /s/ になっていました。',
+        ]]);
+
+        $result = $this->assessor()->assess(
+            $this->transcription('I thought it was thorough.', features: new SpeechFeatures(wordCount: 5)),
+            $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
+        );
+
+        // The level is a real judgement and the words are real evidence, so a bad
+        // sentence costs the sentence and nothing else — the screen then shows the
+        // words without a comment.
+        $this->assertSame(CefrLevel::B1, $result->level);
+        $this->assertNull($result->pronunciation?->advice);
+    }
+
+    public function test_it_leaves_the_advice_empty_when_the_model_wrote_english(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'B1',
+            'summary' => 'You are at B1.',
+            'strengths' => ['Clear everyday vocabulary'],
+            'weaknesses' => ['Present perfect'],
+            'pronunciation_advice' => 'Try saying "thought" and "thorough" again slowly.',
+        ]]);
+
+        $result = $this->assessor()->assess(
+            $this->transcription('I thought it was thorough.', features: new SpeechFeatures(wordCount: 5)),
+            $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
+        );
+
+        // The interface is Japanese; a sentence the learner cannot read is not
+        // feedback, and an English one means the instruction was ignored.
+        $this->assertNull($result->pronunciation?->advice);
+    }
+
     private function assessor(): DeepSeekCefrAssessor
     {
         return $this->app->make(DeepSeekCefrAssessor::class);
+    }
+
+    private function analyzer(): PronunciationAnalyzer
+    {
+        return new PronunciationAnalyzer;
+    }
+
+    /**
+     * The clarity evidence as the analyzer would hand it over for a recording the
+     * recogniser was unsure about in one place.
+     */
+    private function clarity(): PronunciationAssessment
+    {
+        return new PronunciationAssessment(
+            band: PronunciationAssessment::BAND_MOSTLY_CLEAR,
+            clarityPercent: 88,
+            uncertainWords: [
+                ['word' => 'thought', 'confidence' => 0.3],
+                ['word' => 'thorough', 'confidence' => 0.4],
+            ],
+            isThinSample: false,
+            uncertainThreshold: 0.65,
+        );
     }
 
     private function transcription(string $text, ?SpeechFeatures $features = null): Transcription

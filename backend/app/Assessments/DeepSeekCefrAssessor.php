@@ -24,11 +24,38 @@ use function Laravel\Ai\agent;
  */
 final class DeepSeekCefrAssessor implements CefrAssessor
 {
-    public function assess(Transcription $transcription, User $user): AssessmentResult
-    {
+    /**
+     * Phrases that would turn the advice into a phonetic verdict.
+     *
+     * The evidence is confidence, not phonemes, so a sentence built on these
+     * asserts something the measurement cannot support — the exact failure the
+     * published evidence describes (`benchmarks/research/voice-stack-research-2026-10-14.md`
+     * §"Do not use a multimodal LLM to grade pronunciation").
+     *
+     * @var list<string>
+     */
+    private const FORBIDDEN_ADVICE_PHRASES = [
+        '発音が違',
+        '発音が悪',
+        '発音を間違',
+        '発音の間違い',
+        '発音記号',
+        'の発音は',
+        'の発音が',
+        'mispronounced',
+        'wrong pronunciation',
+        'pronunciation error',
+    ];
+
+    public function assess(
+        Transcription $transcription,
+        User $user,
+        PronunciationAssessment $pronunciation,
+        PronunciationAnalyzer $analyzer,
+    ): AssessmentResult {
         $response = agent($this->instructions($user), schema: $this->schema())
             ->prompt(
-                $this->prompt($transcription),
+                $this->prompt($transcription, $pronunciation, $analyzer),
                 [],
                 (string) config('assessments.analysis.provider'),
                 (string) config('assessments.analysis.model'),
@@ -39,7 +66,11 @@ final class DeepSeekCefrAssessor implements CefrAssessor
             throw new AssessmentAnalysisFailed('The analysis agent returned an unstructured response.');
         }
 
-        return $this->result($response->structured);
+        $advice = $this->advice($response->structured['pronunciation_advice'] ?? null);
+
+        return $this->result($response->structured)->withPronunciation(
+            $pronunciation->withAdvice($advice),
+        );
     }
 
     /**
@@ -48,9 +79,17 @@ final class DeepSeekCefrAssessor implements CefrAssessor
      * A batch transcription without word timings (a stubbed provider, a model
      * that does not return them) falls back to the bare transcript rather than
      * printing zeroes the caller never measured.
+     *
+     * The pronunciation block is rendered through `toPromptArray`, which is also
+     * what decides whether there is anything to say: a recording the recogniser
+     * was sure about throughout produces no block, so the model is never asked to
+     * invent an observation about clarity.
      */
-    private function prompt(Transcription $transcription): string
-    {
+    private function prompt(
+        Transcription $transcription,
+        PronunciationAssessment $pronunciation,
+        PronunciationAnalyzer $analyzer,
+    ): string {
         if ($transcription->features->isEmpty()) {
             return $transcription->text;
         }
@@ -78,6 +117,24 @@ final class DeepSeekCefrAssessor implements CefrAssessor
             : 'This transcription carries no word timings, so no fluency figure appears above. '
                 .'The confidence figures are still evidence about the audio quality.';
 
+        // The words the recogniser struggled with, so the advice the learner reads
+        // names the words that were actually unclear instead of pronunciation in
+        // general. The share itself is left out: it is the interface's number, and
+        // a prompt carrying it invites the model to repeat it as a grade.
+        $pronunciation = json_encode(
+            $analyzer->toPromptArray($pronunciation),
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+
+        $unclearWords = is_string($pronunciation) && $pronunciation !== ''
+            ? <<<BLOCK
+
+            Words the recogniser was least sure about:
+            {$pronunciation}
+
+            BLOCK
+            : "\n";
+
         return <<<PROMPT
         Recording length: {$transcription->durationSeconds} seconds.
 
@@ -85,7 +142,7 @@ final class DeepSeekCefrAssessor implements CefrAssessor
         {$measurements}
 
         {$timings}
-
+        {$unclearWords}
         Use these as context, within these limits:
         - `words_per_minute`, `longest_pause_between_words_seconds` and
           `silence_share_of_recording` describe delivery. Flat, even delivery
@@ -105,6 +162,10 @@ final class DeepSeekCefrAssessor implements CefrAssessor
           of this, and never describe it to the learner as a pronunciation
           problem: at most, one or two of the words listed may be worth
           repeating back as something to try again.
+        - `words_the_recogniser_struggled_with` is the same evidence, reduced to
+          the words worth trying again, and `sample_too_short_to_judge_overall`
+          means the clip was too short for any statement about clarity as a whole.
+          Write `pronunciation_advice` from this block alone.
         - `filler_words_used` are hesitations the recogniser kept verbatim. A
           native speaker uses them too, so judge them by how dense they are, not
           by whether they appear.
@@ -135,6 +196,15 @@ final class DeepSeekCefrAssessor implements CefrAssessor
         - summary: two or three sentences in simple English, naming the band and why.
         - strengths: two to four concrete things they already do well.
         - weaknesses: two to four grammar or vocabulary topics worth working on next.
+        - pronunciation_advice: one or two sentences in Japanese, naming at most two
+          of the words in `words_the_recogniser_struggled_with` and suggesting the
+          learner say them again slowly. This is about how clearly the recording
+          came through, not a verdict on the learner's mouth: the measurement is
+          the recogniser's confidence, and a microphone, noise or an accent move it
+          as much as an unclear word does. Never write a phonetic transcription or
+          a sound in slashes, never claim the learner mispronounced something, and
+          never name a word that is not in that list. When the list is absent or
+          `sample_too_short_to_judge_overall` is set, return an empty string.
         PROMPT;
     }
 
@@ -148,7 +218,65 @@ final class DeepSeekCefrAssessor implements CefrAssessor
             'summary' => $schema->string()->required(),
             'strengths' => $schema->array()->items($schema->string())->required(),
             'weaknesses' => $schema->array()->items($schema->string())->required(),
+            'pronunciation_advice' => $schema->string(),
         ];
+    }
+
+    /**
+     * The sentence the learner reads about clarity, or null when the model wrote
+     * nothing usable.
+     *
+     * Deliberately not fatal. Everything else about the judgement is already
+     * validated, and a missing or over-reaching sentence is not a reason to throw
+     * away a level the analysis did reach: the screen then shows the words and the
+     * score without a comment, which is a smaller loss than no assessment at all.
+     * The rejection is reported instead, so a prompt that has drifted is visible
+     * rather than silent.
+     */
+    private function advice(mixed $advice): ?string
+    {
+        if (! is_string($advice)) {
+            return null;
+        }
+
+        $advice = trim($advice);
+
+        if ($advice === '') {
+            return null;
+        }
+
+        try {
+            $validated = Validator::make(['advice' => $advice], [
+                'advice' => [
+                    'string',
+                    'min:10',
+                    'max:300',
+                    // The interface language: a sentence the learner cannot read
+                    // is not feedback, and an English one would mean the model
+                    // ignored the instruction.
+                    'regex:/[ぁ-んァ-ヶ一-龯]/u',
+                    static function (string $attribute, mixed $value, Closure $fail): void {
+                        foreach (self::FORBIDDEN_ADVICE_PHRASES as $phrase) {
+                            if (mb_stripos((string) $value, $phrase) !== false) {
+                                $fail("The pronunciation advice asserts a phonetic verdict (`{$phrase}`).");
+                            }
+                        }
+
+                        // A phoneme in IPA or slashes is diagnosis, which the
+                        // confidence evidence cannot support.
+                        if (preg_match('#/[^/]{1,12}/|[\[【][a-zɪʊəθðʃʒŋˈˌː]+[\]】]#u', (string) $value) === 1) {
+                            $fail('The pronunciation advice contains a phonetic transcription.');
+                        }
+                    },
+                ],
+            ])->validate();
+        } catch (ValidationException $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        return $validated['advice'];
     }
 
     /**

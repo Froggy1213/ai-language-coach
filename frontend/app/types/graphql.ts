@@ -19,6 +19,12 @@ export type Assessment = {
   cefrLevel?: Maybe<CefrLevel>;
   /** Unique primary key. */
   id: Scalars['ID']['output'];
+  /**
+   * How clearly the recording came through, word by word; null on an assessment
+   * that finished before this was measured. Stored inside `raw_data` next to the
+   * transcript it was measured from.
+   */
+  pronunciation?: Maybe<PronunciationFeedback>;
   /** Where the transcription and analysis pass has got to. */
   status: AssessmentStatus;
 };
@@ -208,6 +214,41 @@ export type PresignedUpload = {
   uploadUrl: Scalars['String']['output'];
 };
 
+/** One word the recogniser was not confident about. */
+export type PronouncedWord = {
+  __typename?: 'PronouncedWord';
+  /** Recogniser confidence in this word, 0 to 1. */
+  confidence: Scalars['Float']['output'];
+  /** The word as it was recognised. */
+  word: Scalars['String']['output'];
+};
+
+/**
+ * How much of a recording the speech recogniser was confident about.
+ *
+ * Evidence about the audio rather than a phonetic grade: microphone placement,
+ * background noise, an unfamiliar accent and an unclear word all move it, which is
+ * why the interface names the words instead of offering a score to chase.
+ */
+export type PronunciationFeedback = {
+  __typename?: 'PronunciationFeedback';
+  /** The sentence the analysis wrote about these words, in the interface language. */
+  advice?: Maybe<Scalars['String']['output']>;
+  /**
+   * Overall clarity band — `clear`, `mostly_clear`, `uneven` or `effortful`;
+   * null when the recording was too short for the share to mean anything.
+   */
+  band?: Maybe<Scalars['String']['output']>;
+  /** Share of words the recogniser was confident about, whole percent; null when the sample was too short. */
+  clarityPercent?: Maybe<Scalars['Int']['output']>;
+  /** Whether the recording was too short to summarise, so only the words are shown. */
+  isThinSample: Scalars['Boolean']['output'];
+  /** Words below this confidence were listed; the interface explains the threshold with it. */
+  uncertainThreshold: Scalars['Float']['output'];
+  /** Words the recogniser was least sure about, worst first. */
+  uncertainWords: Array<PronouncedWord>;
+};
+
 export type Query = {
   __typename?: 'Query';
   /** Review items whose review date has arrived, soonest first. */
@@ -322,6 +363,11 @@ export type User = {
   email: Scalars['String']['output'];
   /** Unique primary key. */
   id: Scalars['ID']['output'];
+  /**
+   * The most recent assessment this learner finished, so the level screen can show
+   * its result again after a page reload; null before the first one completes.
+   */
+  latestAssessment?: Maybe<Assessment>;
   /** Display name. */
   name: Scalars['String']['output'];
   /** The roadmap generated for this user. */

@@ -9,6 +9,8 @@ use App\Assessments\AssessmentResult;
 use App\Assessments\AudioUpload;
 use App\Assessments\CefrAssessor;
 use App\Assessments\DeepgramTranscriber;
+use App\Assessments\PronunciationAnalyzer;
+use App\Assessments\PronunciationAssessment;
 use App\Assessments\Recording;
 use App\Enums\AssessmentStatus;
 use App\Enums\CefrLevel;
@@ -49,7 +51,7 @@ class AnalyzeAssessmentTest extends TestCase
     public function test_it_transcribes_analyses_and_rebuilds_the_roadmap(): void
     {
         $this->seed(GrammarPointSeeder::class);
-        $this->fakeDeepgram('I have been learning English for six years.');
+        $this->fakeDeepgram('The thought about it was thorough enough.', $this->wordsWithFourUncertain());
 
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
         $firstRoadmap = $this->app->make(RoadmapGenerator::class)->generate($user);
@@ -71,20 +73,29 @@ class AnalyzeAssessmentTest extends TestCase
 
         $this->assertSame(AssessmentStatus::Done, $assessment->status);
         $this->assertSame(CefrLevel::B1, $assessment->cefr_level);
-        $this->assertSame('I have been learning English for six years.', $assessment->raw_data['transcript']);
+        $this->assertSame('The thought about it was thorough enough.', $assessment->raw_data['transcript']);
         $this->assertSame(42.5, $assessment->raw_data['duration_seconds']);
         $this->assertSame('B1', $assessment->raw_data['analysis']['cefr_level']);
         $this->assertSame(['Present perfect'], $assessment->raw_data['analysis']['weaknesses']);
 
         // The delivery evidence is stored with the level it produced, so a band
         // that looks wrong later can be explained from what the model was told.
-        $this->assertSame(2, $assessment->raw_data['speech_features']['words_recognised']);
-        $this->assertSame(['um'], $assessment->raw_data['speech_features']['filler_words_used']);
-        $this->assertSame(0.5, $assessment->raw_data['speech_features']['low_confidence_word_share']);
-        $this->assertSame(1.3, $assessment->raw_data['speech_features']['longest_pause_between_words_seconds']);
-        // Two words is not a speech rate: the figure is withheld rather than
-        // extrapolated into a number no reader should trust.
-        $this->assertArrayNotHasKey('words_per_minute', $assessment->raw_data['speech_features']);
+        $this->assertSame(24, $assessment->raw_data['speech_features']['words_recognised']);
+        $this->assertSame(0.167, $assessment->raw_data['speech_features']['low_confidence_word_share']);
+        $this->assertSame(0.1, $assessment->raw_data['speech_features']['longest_pause_between_words_seconds']);
+        // Round-tripped through a JSON column, so a whole figure comes back as an
+        // integer rather than the float it was computed as.
+        $this->assertEquals(150, $assessment->raw_data['speech_features']['words_per_minute']);
+
+        // The clarity evidence is stored beside the transcript it was measured
+        // from, so a score a learner questions later can be explained from the
+        // words it came from.
+        $this->assertSame(83, $assessment->raw_data['pronunciation']['clarity_percent']);
+        $this->assertSame(0.65, $assessment->raw_data['pronunciation']['uncertain_threshold']);
+        $this->assertSame(
+            ['thought', 'thorough', 'thirty', 'three'],
+            array_column($assessment->raw_data['pronunciation']['uncertain_words'], 'word'),
+        );
 
         $this->assertSame(CefrLevel::B1, $user->refresh()->current_level);
 
@@ -104,6 +115,57 @@ class AnalyzeAssessmentTest extends TestCase
                 Mockery::type(AssessmentReady::class),
                 'assessmentReady',
                 Mockery::on(static fn ($root): bool => $root->is($assessment)),
+            );
+    }
+
+    public function test_it_stores_the_pronunciation_evidence_the_broadcast_carries(): void
+    {
+        $this->seed(GrammarPointSeeder::class);
+        $this->fakeDeepgram('The thought about it was thorough enough.', $this->wordsWithFourUncertain());
+
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $assessment = $this->assessmentFor($user);
+
+        $audio = $this->audioStore();
+        $audio->shouldReceive('delete')->once()->with($assessment->audio_url);
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        // The stub stands in for the model, which adds the sentence and leaves the
+        // measurement the job took untouched.
+        $this->runJob($assessment, $this->assessorReturning($this->b1Result()->withPronunciation(
+            new PronunciationAssessment(
+                band: PronunciationAssessment::BAND_MOSTLY_CLEAR,
+                clarityPercent: 83,
+                uncertainWords: [
+                    ['word' => 'thought', 'confidence' => 0.3],
+                    ['word' => 'thorough', 'confidence' => 0.4],
+                ],
+                isThinSample: false,
+                uncertainThreshold: 0.65,
+                advice: '「thought」という単語をもう一度ゆっくり言ってみましょう。',
+            ),
+        )), $audio, $broadcasts);
+
+        $stored = $assessment->refresh()->raw_data['pronunciation'];
+
+        $this->assertSame('mostly_clear', $stored['band']);
+        $this->assertSame(83, $stored['clarity_percent']);
+        $this->assertSame([
+            ['word' => 'thought', 'confidence' => 0.3],
+            ['word' => 'thorough', 'confidence' => 0.4],
+        ], $stored['uncertain_words']);
+        $this->assertSame('「thought」という単語をもう一度ゆっくり言ってみましょう。', $stored['advice']);
+
+        // The subscriber that wakes the level screen must receive the block, not
+        // an instance loaded before the transaction wrote it: the screen reads the
+        // result straight off the push.
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(AssessmentReady::class),
+                'assessmentReady',
+                Mockery::on(static fn ($root): bool => $root->raw_data['pronunciation']['clarity_percent'] === 83),
             );
     }
 
@@ -292,6 +354,7 @@ class AnalyzeAssessmentTest extends TestCase
         (new AnalyzeAssessment($assessment))->handle(
             $this->app->make(DeepgramTranscriber::class),
             $assessor,
+            $this->app->make(PronunciationAnalyzer::class),
             $audio,
             $this->app->make(RoadmapGenerator::class),
             $broadcasts,
@@ -351,7 +414,10 @@ class AnalyzeAssessmentTest extends TestCase
         ]);
     }
 
-    private function fakeDeepgram(string $transcript): void
+    /**
+     * @param  list<array<string, mixed>>|null  $words  Word timings and confidences; null for the default pair.
+     */
+    private function fakeDeepgram(string $transcript, ?array $words = null): void
     {
         config(['deepgram-laravel.api_key' => 'test-key']);
 
@@ -362,7 +428,7 @@ class AnalyzeAssessmentTest extends TestCase
                     'channels' => [['alternatives' => [[
                         'transcript' => $transcript,
                         'confidence' => 0.98,
-                        'words' => [
+                        'words' => $words ?? [
                             ['word' => 'i', 'punctuated_word' => 'I', 'start' => 0.0, 'end' => 0.3, 'confidence' => 0.99],
                             ['word' => 'um', 'punctuated_word' => 'um', 'start' => 1.6, 'end' => 1.8, 'confidence' => 0.71],
                         ],
@@ -370,5 +436,44 @@ class AnalyzeAssessmentTest extends TestCase
                 ],
             ]),
         ]);
+    }
+
+    /**
+     * Twenty-four scored words, four of them unclear at the confidence the
+     * analyzer's list is built from: 83% of them came through clearly.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function wordsWithFourUncertain(): array
+    {
+        $unclear = ['thought' => 0.3, 'thorough' => 0.4, 'thirty' => 0.5, 'three' => 0.6];
+        $words = [];
+        $start = 0.0;
+
+        foreach ($unclear as $word => $confidence) {
+            $words[] = $this->spokenWord($word, $start, $confidence);
+            $start += 0.5;
+        }
+
+        for ($index = 1; $index <= 20; $index++) {
+            $words[] = $this->spokenWord('word'.$index, $start, 0.97);
+            $start += 0.5;
+        }
+
+        return $words;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function spokenWord(string $word, float $start, float $confidence): array
+    {
+        return [
+            'word' => $word,
+            'punctuated_word' => $word,
+            'start' => $start,
+            'end' => $start + 0.4,
+            'confidence' => $confidence,
+        ];
     }
 }

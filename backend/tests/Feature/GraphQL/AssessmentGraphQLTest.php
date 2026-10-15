@@ -7,6 +7,7 @@ use App\Assessments\AssessmentAudioStorage;
 use App\Assessments\AudioUpload;
 use App\Assessments\InvalidAssessmentAudio;
 use App\Enums\AssessmentStatus;
+use App\Enums\CefrLevel;
 use App\Models\Assessment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -182,6 +183,133 @@ class AssessmentGraphQLTest extends TestCase
             ->assertGraphQLValidationKeys(['audioUrl']);
 
         $this->assertDatabaseCount('assessments', 0);
+    }
+
+    /**
+     * The level screen reads the clarity block back through `me` after a reload:
+     * the subscription that closed the recording step is gone, so without this the
+     * section would disappear on the next visit.
+     */
+    public function test_it_returns_the_latest_finished_assessments_clarity_evidence(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        Assessment::factory()->for($user)->create(['status' => AssessmentStatus::Failed]);
+
+        $old = Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Done,
+            'cefr_level' => CefrLevel::A2,
+        ]);
+
+        Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Done,
+            'cefr_level' => CefrLevel::B1,
+        ])->forceFill(['created_at' => now()->addMinute()])->save();
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query {
+                me {
+                    latestAssessment {
+                        id
+                        status
+                        cefrLevel
+                        pronunciation {
+                            band
+                            clarityPercent
+                            uncertainThreshold
+                            isThinSample
+                            advice
+                            uncertainWords { word confidence }
+                        }
+                    }
+                }
+            }
+        ')->assertGraphQLErrorFree();
+
+        // The newest `done` row, not the newest row: an assessment still running has
+        // no result, and a failed one is a retry rather than a result to show.
+        $this->assertNotSame((string) $old->id, (string) $response->json('data.me.latestAssessment.id'));
+        $this->assertSame('B1', $response->json('data.me.latestAssessment.cefrLevel'));
+        $this->assertNull($response->json('data.me.latestAssessment.pronunciation'));
+    }
+
+    public function test_it_returns_an_assessments_stored_clarity_block(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $assessment = Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Done,
+            'cefr_level' => CefrLevel::B1,
+            'raw_data' => [
+                'transcript' => 'I thought it was thorough.',
+                // Exactly the shape `PronunciationAssessment::toArray()` writes.
+                'pronunciation' => [
+                    'band' => 'mostly_clear',
+                    'clarity_percent' => 83,
+                    'uncertain_threshold' => 0.65,
+                    'uncertain_words' => [
+                        ['word' => 'thought', 'confidence' => 0.3],
+                        ['word' => 'thorough', 'confidence' => 0.4],
+                    ],
+                    'is_thin_sample' => false,
+                    'advice' => '「thought」という単語をもう一度ゆっくり言ってみましょう。',
+                ],
+            ],
+        ]);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query {
+                me {
+                    latestAssessment {
+                        pronunciation {
+                            band
+                            clarityPercent
+                            uncertainThreshold
+                            isThinSample
+                            advice
+                            uncertainWords { word confidence }
+                        }
+                    }
+                }
+            }
+        ')->assertGraphQLErrorFree();
+
+        $this->assertSame('mostly_clear', $response->json('data.me.latestAssessment.pronunciation.band'));
+        $this->assertSame(83, $response->json('data.me.latestAssessment.pronunciation.clarityPercent'));
+        $this->assertSame(0.65, $response->json('data.me.latestAssessment.pronunciation.uncertainThreshold'));
+        $this->assertFalse($response->json('data.me.latestAssessment.pronunciation.isThinSample'));
+        $this->assertSame(
+            '「thought」という単語をもう一度ゆっくり言ってみましょう。',
+            $response->json('data.me.latestAssessment.pronunciation.advice'),
+        );
+        $this->assertSame([
+            ['word' => 'thought', 'confidence' => 0.3],
+            ['word' => 'thorough', 'confidence' => 0.4],
+        ], $response->json('data.me.latestAssessment.pronunciation.uncertainWords'));
+
+        // The raw transcript is deliberately not exposed: the learner reads the
+        // clarity evidence, the stored analysis stays server-side.
+        $this->assertNotNull($assessment->refresh()->raw_data['transcript']);
+    }
+
+    public function test_a_learner_with_no_finished_assessment_has_no_latest_assessment(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        Assessment::factory()->for($user)->create(['status' => AssessmentStatus::Processing]);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                me {
+                    latestAssessment { id }
+                }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.me.latestAssessment', null);
     }
 
     private function fakeUpload(User $user, int $sizeBytes, string $contentType = 'audio/webm'): string

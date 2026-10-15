@@ -45,8 +45,12 @@ final readonly class SpeechFeatures
      * Below this per-word confidence the recogniser was guessing. The value is
      * Deepgram's own convention: its documentation treats 0.75 as the point
      * where a word is worth a human's attention.
+     *
+     * Public because the pronunciation view measures the same payload at a
+     * stricter point (`PronunciationAnalyzer`); two private copies of the scale
+     * would drift, and the two would then disagree about the same recording.
      */
-    private const LOW_CONFIDENCE = 0.75;
+    public const LOW_CONFIDENCE = 0.75;
 
     /**
      * A rate needs enough speech to be a rate.
@@ -72,6 +76,7 @@ final readonly class SpeechFeatures
      * @param  float|null  $lowConfidenceShare  Share of words below the confidence floor.
      * @param  list<string>  $fillers  Filler words that were actually used.
      * @param  list<string>  $uncertainWords  Up to ten of the lowest-confidence words.
+     * @param  list<array{word: string, confidence: float}>  $wordConfidences  Every scored word, in spoken order.
      */
     public function __construct(
         public int $wordCount,
@@ -83,6 +88,7 @@ final readonly class SpeechFeatures
         public ?float $lowConfidenceShare = null,
         public array $fillers = [],
         public array $uncertainWords = [],
+        public array $wordConfidences = [],
     ) {}
 
     /**
@@ -179,6 +185,7 @@ final readonly class SpeechFeatures
                 lowConfidenceShare: $confidences === [] ? null : round($lowConfidence / count($confidences), 3),
                 fillers: array_values(array_unique($fillers)),
                 uncertainWords: self::mostUncertain($confidences),
+                wordConfidences: $confidences,
             );
         }
 
@@ -201,6 +208,7 @@ final readonly class SpeechFeatures
             lowConfidenceShare: $confidences === [] ? null : round($lowConfidence / count($confidences), 3),
             fillers: array_values(array_unique($fillers)),
             uncertainWords: self::mostUncertain($confidences),
+            wordConfidences: $confidences,
         );
     }
 
@@ -224,6 +232,23 @@ final readonly class SpeechFeatures
         usort($low, static fn (array $a, array $b): int => $a['confidence'] <=> $b['confidence']);
 
         return array_values(array_unique(array_column(array_slice($low, 0, 10), 'word')));
+    }
+
+    /**
+     * Every recognised word with the confidence the recogniser gave it, in the
+     * order it was spoken.
+     *
+     * The aggregate figures above answer "how much of this was unclear"; the
+     * pronunciation view needs to answer "which words were", so the raw pairs are
+     * kept rather than only the ten worst. Words the provider scored no
+     * confidence for are absent instead of appearing as a fabricated zero — a
+     * zero would read as the least confident word in the recording.
+     *
+     * @return list<array{word: string, confidence: float}>
+     */
+    public function wordConfidences(): array
+    {
+        return $this->wordConfidences;
     }
 
     /**

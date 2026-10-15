@@ -20,4 +20,10 @@ type User {
 
     "The roadmap generated for this user."
     roadmap: Roadmap @hasOne
+
+    """
+    The most recent assessment this learner finished, so the level screen can show
+    its result again after a page reload; null before the first one completes.
+    """
+    latestAssessment: Assessment @field(resolver: "App\\GraphQL\\Resolvers\\LatestAssessment")
 }

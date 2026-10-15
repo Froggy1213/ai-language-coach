@@ -47,6 +47,7 @@ final class AnalyzeAssessment implements ShouldQueue
     public function handle(
         DeepgramTranscriber $transcriber,
         CefrAssessor $assessor,
+        PronunciationAnalyzer $pronunciation,
         AssessmentAudioStorage $audio,
         RoadmapGenerator $roadmaps,
         BroadcastsSubscriptions $broadcasts,
@@ -77,7 +78,21 @@ final class AnalyzeAssessment implements ShouldQueue
             $recording->discard();
         }
 
-        $result = $assessor->assess($transcription, $user);
+        // The clarity evidence is measured before the model is called: the
+        // numbers are arithmetic over the provider payload, so revising the
+        // prompt, the model or the provider must not change what a recording
+        // scored. The model's only contribution is the sentence about it.
+        $clarity = $pronunciation->analyze($transcription->features);
+
+        $result = $assessor->assess($transcription, $user, $clarity, $pronunciation);
+
+        // The measurement is this job's, and the model contributes only the
+        // sentence about it. An assessor that returns without attaching the block
+        // — a stub, or a future implementation — must not cost the learner the
+        // evidence that was already computed for their recording.
+        $result = $result->withPronunciation(
+            ($result->pronunciation ?? $clarity->withAdvice(null)),
+        );
 
         DB::transaction(function () use ($assessment, $user, $transcription, $result, $roadmaps): void {
             $user->forceFill(['current_level' => $result->level])->save();
@@ -96,9 +111,16 @@ final class AnalyzeAssessment implements ShouldQueue
                     // later can be explained from the evidence it was given.
                     'speech_features' => $transcription->features->toPromptArray(),
                     'analysis' => $result->toArray(),
+                    'pronunciation' => $result->pronunciation?->toArray(),
                 ]),
             ]);
         });
+
+        // Fresh state on the broadcast: the pronunciation block was written in
+        // the transaction above, and a subscriber holding the instance the job
+        // started with would read a `raw_data` from before it existed. The
+        // failure path reloads for the same reason.
+        $assessment->refresh();
 
         // Privacy (plan §5): the recording is kept no longer than the STT pass
         // needs it. Deliberately last — a failure above must leave the audio in

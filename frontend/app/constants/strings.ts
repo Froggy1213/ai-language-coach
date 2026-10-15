@@ -248,6 +248,28 @@ export const level = {
   doneLevel: '現在のレベル',
   doneBody: 'ロードマップを新しいレベルで組み直しました。',
   openRoadmap: 'ロードマップを開く',
+  /**
+   * 発音の目安 — the clarity section.
+   *
+   * The wording carries the honesty the feature depends on: this is how much of
+   * the recording the recogniser was sure about, not a grade of the learner's
+   * pronunciation. A learner who reads it as a phoneme score would be reading a
+   * number the measurement cannot support, so the caveat is shown with the
+   * numbers rather than hidden behind a disclosure.
+   */
+  pronunciationTitle: '発音の目安',
+  pronunciationScore: (percent: number) => `はっきり聞き取れた語 ${percent}%`,
+  pronunciationThinSample: '録音が短いため、全体の目安は出していません。',
+  pronunciationBands: {
+    clear: 'とてもはっきり',
+    mostly_clear: 'おおむねはっきり',
+    uneven: 'ところどころ不明瞭',
+    effortful: '聞き取りにくい語が多め',
+  },
+  pronunciationWordsTitle: '聞き取りにくかった語',
+  pronunciationConfidence: (percent: number) => `認識の確信度 ${percent}%`,
+  pronunciationCaveat:
+    'これは音声認識がどれだけ確信をもてたかの目安です。マイクの位置・周囲の音・なまりでも下がるため、発音そのものの点数ではありません。',
   micDenied: 'マイクを使用できません。ブラウザの設定で許可してください。',
   recorderFailed: 'このブラウザで録音を開始できませんでした。',
   emptyRecording: '録音が空でした。もう一度お試しください。',

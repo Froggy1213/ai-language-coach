@@ -1,4 +1,4 @@
-import type { CefrLevel } from '~/types/graphql'
+import type { Assessment, CefrLevel, PronunciationFeedback } from '~/types/graphql'
 
 /**
  * Hand-written UI projection of the authenticated user in the SPA session state (`useAuth`).
@@ -13,4 +13,20 @@ export interface CurrentUser {
   name: string
   targetLanguage: string
   currentLevel: CefrLevel
+  voiceConsentAt?: string | null
+  latestAssessment?: LatestAssessment | null
 }
+
+/**
+ * The last assessment the learner finished, as `me` returns it.
+ *
+ * The schema type is reused rather than restated: only the fields `ME_QUERY` and
+ * the `assessmentReady` subscription actually select are present at runtime, and
+ * a hand-written copy would drift from the SDL the moment either is widened.
+ */
+export interface LatestAssessment extends Pick<Assessment, 'id' | 'status' | 'cefrLevel'> {
+  pronunciation?: PronunciationFeedback | null
+}
+
+/** The clarity bands the server reports, as the interface names them. */
+export type PronunciationBand = 'clear' | 'mostly_clear' | 'uneven' | 'effortful'

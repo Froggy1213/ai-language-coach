@@ -138,6 +138,37 @@ class SpeechFeaturesTest extends TestCase
         $this->assertSame(['um', 'hmm'], $features->fillers);
     }
 
+    public function test_it_keeps_every_scored_word_for_the_pronunciation_view(): void
+    {
+        // The aggregates answer "how much of this was unclear"; the pronunciation
+        // section needs "which words were", so the pairs are kept in spoken order
+        // rather than only the ten worst.
+        $features = $this->features(words: [
+            $this->word('the', 0.0, 0.3, 0.99),
+            $this->word('thought', 0.4, 0.8, 0.2),
+            $this->word('it', 0.9, 1.1, 0.95),
+        ], duration: 2.0);
+
+        $this->assertSame([
+            ['word' => 'the', 'confidence' => 0.99],
+            ['word' => 'thought', 'confidence' => 0.2],
+            ['word' => 'it', 'confidence' => 0.95],
+        ], $features->wordConfidences());
+    }
+
+    public function test_it_leaves_a_word_the_provider_never_scored_out_of_that_list(): void
+    {
+        // A word without a confidence is absent rather than present at zero: a
+        // zero would read as the least confident word in the recording.
+        $features = $this->features(words: [
+            $this->word('scored', 0.0, 0.4, 0.9),
+            ['word' => 'unscored', 'start' => 0.5, 'end' => 0.9],
+        ], duration: 2.0);
+
+        $this->assertSame(2, $features->wordCount);
+        $this->assertSame([['word' => 'scored', 'confidence' => 0.9]], $features->wordConfidences());
+    }
+
     public function test_it_survives_words_arriving_out_of_order(): void
     {
         // The provider returns them in order; a reordered payload would otherwise
