@@ -57,10 +57,11 @@ x-laravel-environment: &laravel-environment
   # Not decoration: Laravel derives the session cookie's *name* from APP_NAME
   # (`Str::slug(APP_NAME) . '-session'`), so leaving this unset made the API
   # container issue `laravel-session` while the host, whose backend/.env says
-  # "AI Language Coach", issued `ai-language-coach-session`. Same database, same
-  # APP_KEY, and the browser still sent a cookie the other process ignored —
-  # which is the exact parity the root .env claims when it copies APP_KEY across.
-  APP_NAME: ${APP_NAME:-AI Language Coach}
+  # "Kirie", issued `kirie-session`. Same database, same APP_KEY, and the browser
+  # still sent a cookie the other process ignored — which is the exact parity the
+  # root .env claims when it copies APP_KEY across. Keep this default and
+  # backend/.env.example in step: they are the two halves of that parity.
+  APP_NAME: ${APP_NAME:-Kirie}
 
   DB_CONNECTION: mysql
   DB_HOST: mysql

@@ -49,7 +49,7 @@ x-prod-laravel-environment: &prod-laravel-environment
   # Backend/.env is excluded from the image on purpose, so the deployment supplies
   # everything. APP_KEY signs sessions, cookies and signed URLs.
   APP_KEY: ${APP_KEY:?set APP_KEY (php artisan key:generate --show)}
-  APP_NAME: ${APP_NAME:-AI Language Coach}
+  APP_NAME: ${APP_NAME:-Kirie}
 
   # A Secure cookie is only sent over HTTPS, which is what the proxy terminates.
   # Setting this false in production is refused by ProductionSanityCheck.
