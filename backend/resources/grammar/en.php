@@ -12,8 +12,9 @@
 |
 | `code` is matched against LLM output when a mistake is classified (plan §5),
 | so treat codes as stable — renaming one orphans the mistakes that point at
-| it. Cheat sheets are written in the target language; the pitfalls call out
-| the mistakes Russian speakers actually make.
+| it. Cheat sheets are written in the target language (English); the pitfalls
+| call out the mistakes Japanese speakers actually make, which is the only
+| place the learner's first language is allowed to show through.
 |
 | After editing this file run `php artisan db:seed --class=GrammarPointSeeder`
 | and `php artisan test --filter=GrammarCatalogueTest`.
@@ -100,7 +101,7 @@ return [
             ],
             'pitfalls' => [
                 "Match the verb to the real subject: 'There is two problems' → 'There are two problems'.",
-                "Russian speakers often drop be in the present: say 'He is tired', not 'He tired'.",
+                "Japanese adjectives stand alone without a copula, so be gets dropped: say 'He is tired', not 'He tired'.",
                 "Use it is for weather, time and distance: 'It is cold', not 'There is cold'.",
             ],
         ],
@@ -122,7 +123,7 @@ return [
             'pitfalls' => [
                 "Choose a/an by sound, not spelling: 'an hour', 'a university'.",
                 "Do not use the for general statements: 'I like music', not 'I like the music'.",
-                'Russian has no articles, so they are the most frequently dropped words in A1 speech — check every noun.',
+                'Japanese has no articles either, so they are the most frequently dropped words in A1 speech — check every noun.',
             ],
         ],
         'practice_prompt' => 'Describe the things on your desk, then say which of them you use every day and why.',
@@ -187,7 +188,7 @@ return [
             'pitfalls' => [
                 "Never combine it with a finished time: 'I have seen him yesterday' is wrong.",
                 "For a finished period use the past simple: 'I worked there for two years.'",
-                "Russian speakers translate 'уже' with the past simple: 'I already did it' → 'I have already done it'.",
+                "Japanese marks 'already' with one past form, so the past simple slips in: 'I already did it' → 'I have already done it'.",
             ],
         ],
         'practice_prompt' => 'Three things you have never done, two you have just done, and how long you have known your closest friend.',
@@ -290,7 +291,7 @@ return [
             ],
             'pitfalls' => [
                 'Fixed phrases break the rule: at night, in the morning, on Friday night.',
-                "Do not translate Russian 'в' with one preposition — decide whether it is a time, a surface or a place.",
+                'Japanese particles cover time, place and means with a single form, so one preposition gets overworked — decide whether it is a time, a surface or a place.',
             ],
         ],
         'practice_prompt' => 'Describe your next week using in, on and at at least six times.',
@@ -555,7 +556,7 @@ return [
             'rule' => "Use wish and if only for a regret or a desire that the present, the past or someone's behaviour were different.",
             'formula' => "wish + past simple (present) · wish + had + past participle (past) · wish + would (other people's habits)",
             'examples' => [
-                'I wish I spoke Japanese.',
+                'I wish I spoke French.',
                 'She wishes she had taken the offer.',
                 'I wish you would stop interrupting me.',
             ],
