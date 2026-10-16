@@ -44,7 +44,9 @@ export default defineNuxtPlugin(() => {
   )
 
   // pusher-js looks for a global Pusher when it runs in the browser.
-  window.Pusher = Pusher
+  if (typeof window !== 'undefined') {
+    window.Pusher = Pusher
+  }
 
   const echo = new Echo({
     broadcaster: 'reverb',

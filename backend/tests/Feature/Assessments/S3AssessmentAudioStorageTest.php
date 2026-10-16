@@ -148,6 +148,36 @@ class S3AssessmentAudioStorageTest extends TestCase
         $this->assertSame('assessments/7/recording.webm', $upload->key);
     }
 
+    public function test_it_handles_bucket_name_matching_key_prefix_for_virtual_host_url(): void
+    {
+        $user = $this->user(7);
+        $storage = new S3AssessmentAudioStorage(new S3Client([
+            'version' => 'latest',
+            'region' => 'us-east-1',
+            'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
+            'handler' => $this->headHandler(2048),
+        ]), 'assessments');
+
+        $upload = $storage->inspect($user, 'https://assessments.s3.amazonaws.com/assessments/7/recording.webm');
+
+        $this->assertSame('assessments/7/recording.webm', $upload->key);
+    }
+
+    public function test_it_handles_bucket_name_matching_key_prefix_for_path_style_url(): void
+    {
+        $user = $this->user(7);
+        $storage = new S3AssessmentAudioStorage(new S3Client([
+            'version' => 'latest',
+            'region' => 'us-east-1',
+            'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
+            'handler' => $this->headHandler(2048),
+        ]), 'assessments');
+
+        $upload = $storage->inspect($user, 'http://localhost:9000/assessments/assessments/7/recording.webm');
+
+        $this->assertSame('assessments/7/recording.webm', $upload->key);
+    }
+
     public function test_it_normalises_the_content_type_the_bucket_reports(): void
     {
         $user = $this->user(7);

@@ -49,6 +49,25 @@ class AuthGraphQLTest extends TestCase
         $this->assertAuthenticatedAs($user);
     }
 
+    public function test_login_regenerates_session(): void
+    {
+        $user = User::factory()->create(['password' => 'secret-password']);
+
+        $this->withSession(['pre_existing' => 'val']);
+        $oldSessionId = session()->getId();
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                login(email: "'.$user->email.'", password: "secret-password") {
+                    id
+                }
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree();
+
+        $this->assertNotSame($oldSessionId, session()->getId());
+    }
+
     public function test_login_rejects_a_wrong_password(): void
     {
         $user = User::factory()->create(['password' => 'secret-password']);
@@ -103,6 +122,28 @@ class AuthGraphQLTest extends TestCase
         $this->assertSame('en', $user->target_language);
         $this->assertTrue(Hash::check('secret-password', $user->password));
         $this->assertAuthenticatedAs($user);
+    }
+
+    public function test_register_regenerates_session(): void
+    {
+        $this->withSession(['pre_existing' => 'val']);
+        $oldSessionId = session()->getId();
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                register(
+                    name: "RegenUser"
+                    email: "regen@example.com"
+                    password: "secret-password"
+                    targetLanguage: "en"
+                ) {
+                    id
+                }
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree();
+
+        $this->assertNotSame($oldSessionId, session()->getId());
     }
 
     public function test_register_rejects_a_duplicate_email(): void

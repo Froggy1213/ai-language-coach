@@ -23,7 +23,7 @@ export interface PageErrorTracker {
  * address or a genuine application error, still fails the run.
  */
 const IGNORED_EXTERNAL_CONSOLE_ERRORS = [
-  /^WebSocket connection to 'wss?:\/\/(?:localhost|127\.0\.0\.1):8080\/app\//,
+  /^WebSocket connection to 'wss?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|::1):8080\/app\//,
 ];
 
 /**

@@ -16,7 +16,7 @@ const state = ref<OrbState>('idle')
 
     <label class="flex max-w-sm items-center gap-3 text-[0.875rem]">
       energy
-      <input v-model.number="energy" type="range" min="0" max="1" step="0.01" class="flex-1">
+      <input v-model.number="energy" type="range" min="0" max="1" step="0.01" class="flex-1" aria-label="energy">
       <span class="tnum w-10">{{ energy.toFixed(2) }}</span>
     </label>
 

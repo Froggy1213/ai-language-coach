@@ -14,8 +14,10 @@ use App\Models\ReviewItem;
 use App\Models\User;
 use App\Models\VoiceSession;
 use Database\Seeders\GrammarPointSeeder;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 use Mockery;
 use Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions;
 use Tests\TestCase;
@@ -283,6 +285,53 @@ class AnalyzeVoiceSessionMistakesTest extends TestCase
                 'sessionFeedbackReady',
                 Mockery::on(static fn ($root): bool => $root instanceof VoiceSession && $root->id === $session->id),
             );
+    }
+
+    public function test_it_analyzes_late_turn_when_it_arrives_during_empty_utterance_check(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $presentSimple = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->firstOrFail();
+
+        $session = VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [],
+        ]);
+
+        $updated = false;
+        Event::listen(TransactionBeginning::class, static function () use ($session, &$updated): void {
+            if (! $updated) {
+                $updated = true;
+                VoiceSession::query()->whereKey($session->id)->update([
+                    'transcript' => [
+                        ['turn_id' => 'late', 'transcript' => 'He go home.'],
+                    ],
+                ]);
+            }
+        });
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')
+            ->once()
+            ->with('He go home.', Mockery::any())
+            ->andReturn(new MistakeAnalysisResult([
+                new AnalyzedMistake(
+                    grammarPoint: $presentSimple,
+                    userUtterance: 'He go home',
+                    correction: 'He goes home',
+                    explanation: 'Agreement rule',
+                ),
+            ]));
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts);
+
+        $this->assertDatabaseCount('mistakes', 1);
+        $this->assertDatabaseHas('mistakes', [
+            'session_id' => $session->id,
+            'user_utterance' => 'He go home',
+        ]);
     }
 
     public function test_failed_reports_and_broadcasts_session_feedback_ready(): void

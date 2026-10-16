@@ -36,6 +36,10 @@ const stopping = ref(false)
  */
 const pronunciation = ref<LatestAssessment['pronunciation']>(null)
 const storedPronunciation = computed(() => user.value?.latestAssessment?.pronunciation ?? null)
+const hasSubmittedNew = ref(false)
+const displayedPronunciation = computed(() =>
+  hasSubmittedNew.value ? pronunciation.value : (pronunciation.value ?? storedPronunciation.value),
+)
 
 let aborted = false
 let recorder: MediaRecorder | null = null
@@ -155,6 +159,7 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
   }
 
   stage.value = 'uploading'
+  hasSubmittedNew.value = true
   error.value = null
   waitingFailed.value = false
   // A re-recording replaces the previous result: leaving the old words on screen
@@ -208,6 +213,9 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       stage.value = 'waiting'
     }
   } catch (failure) {
+    stopListening?.()
+    stopListening = null
+
     if (aborted) {
       return
     }
@@ -219,12 +227,14 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
 
 /** Manual fallback: the socket may be down, but the level may already be saved. */
 async function checkNow(): Promise<void> {
-  const before = user.value?.currentLevel
   await refresh()
 
-  if (user.value && user.value.currentLevel !== before) {
+  if (user.value?.latestAssessment?.status === 'done' && user.value.currentLevel) {
+    pronunciation.value = user.value.latestAssessment.pronunciation ?? null
     assessedLevel.value = user.value.currentLevel
     stage.value = 'done'
+    stopListening?.()
+    stopListening = null
   }
 }
 
@@ -390,9 +400,7 @@ const activeStep = computed(() => {
       <UiButtonLink to="/roadmap" variant="primary" size="lg">{{ copy.openRoadmap }}</UiButtonLink>
     </div>
 
-    <!-- The clarity evidence for this recording. Rendered outside the result card
-         so it stays visible after a reload, when it comes from `me` rather than
-         from the subscription that closed the recording step. -->
-    <PronunciationPanel :feedback="pronunciation ?? storedPronunciation" />
+    <!-- The clarity evidence for this recording. Rendered when stage is done. -->
+    <PronunciationPanel v-if="stage === 'done'" :feedback="displayedPronunciation" />
   </section>
 </template>

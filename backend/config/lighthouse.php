@@ -477,7 +477,7 @@ return [
         /*
          * Default subscription broadcaster.
          */
-        'broadcaster' => env('LIGHTHOUSE_BROADCASTER', 'pusher'),
+        'broadcaster' => env('LIGHTHOUSE_BROADCASTER', 'reverb'),
 
         /*
          * Subscription broadcasting drivers with config options.

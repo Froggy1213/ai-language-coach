@@ -160,6 +160,7 @@ services:
   # host cron. One replica only: two schedulers would run each task twice.
   # ---------------------------------------------------------------------------
   scheduler:
+    profiles: ["full"]
     build:
       context: ./backend
       dockerfile: Dockerfile

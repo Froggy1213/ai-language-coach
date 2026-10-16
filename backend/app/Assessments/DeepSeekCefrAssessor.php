@@ -264,7 +264,7 @@ final class DeepSeekCefrAssessor implements CefrAssessor
 
                         // A phoneme in IPA or slashes is diagnosis, which the
                         // confidence evidence cannot support.
-                        if (preg_match('#/[^/]{1,12}/|[\[【][a-zɪʊəθðʃʒŋˈˌː]+[\]】]#u', (string) $value) === 1) {
+                        if (preg_match('#/[^/]{1,12}/|[\[【][a-zɑɒæɔəɘɚɛɜɝɞɨɪɯɵɶøyʉʊʌɤɥʜʢʡɕʑʃʒθðŋɲɳɴɱɾɽʀʁffsβvɣχʁħʕɦɬɮʋɹɻjɰlɭʎʟˈˌːˑ.]+[\]】]#u', (string) $value) === 1) {
                             $fail('The pronunciation advice contains a phonetic transcription.');
                         }
                     },

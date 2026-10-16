@@ -269,10 +269,10 @@ def build_worker_options() -> Any:
     return WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
-        agent_name=os.getenv("VOICE_AGENT_NAME", "ai-language-coach"),
+        agent_name=_env_str("VOICE_AGENT_NAME", "ai-language-coach"),
         num_idle_processes=_env_int("NUM_IDLE_PROCESSES", 4),
         load_threshold=_env_float("LOAD_THRESHOLD", 0.7),
-        drain_timeout=_env_float("DRAIN_TIMEOUT_SECONDS", 360.0),
+        drain_timeout=_env_float("DRAIN_TIMEOUT_SECONDS", 110.0),
     )
 
 
@@ -435,11 +435,14 @@ async def report_session_failure(session_id: Optional[int], reason: str) -> None
         except Exception as exc:
             if attempt < max_retries:
                 logger.warning(
-                    "Network error notifying backend about session %s failure: %s; retrying...",
+                    "Retrying failure notification for session %s (attempt %d/%d): %s",
                     session_id,
+                    attempt + 1,
+                    max_retries + 1,
                     exc,
                 )
                 await asyncio.sleep(0.5)
+                continue
             logger.error("Failed to notify backend about session %s failure: %s", session_id, exc)
             capture_exception(
                 exc,
@@ -839,8 +842,12 @@ class TurnMetricsTracker:
                     "Ignoring subsequent TTS chunk for speech_id=%s (first TTFB wins)",
                     speech_id,
                 )
-        elif turn["tts_first_chunk_sec"] is None and speech_id not in self._flush_tasks:
-            self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
+        elif turn.get("tts_first_chunk_sec") is None and turn.get("tts_first_chunk") is None:
+            if info["llm_first_token_sec"] is not None and speech_id in self._flush_tasks:
+                self._cancel_delayed_flush(speech_id)
+                self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
+            elif speech_id not in self._flush_tasks:
+                self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
 
     def _schedule_delayed_flush(self, speech_id: str, delay: Optional[float] = None) -> None:
         if speech_id in self._flush_tasks:
@@ -853,7 +860,7 @@ class TurnMetricsTracker:
                 await asyncio.sleep(flush_delay)
                 await self._dispatch_turn(speech_id)
             except asyncio.CancelledError:
-                pass
+                raise
 
         task = self._create_background_task(_flush_after_delay())
         self._flush_tasks[speech_id] = task
@@ -862,6 +869,13 @@ class TurnMetricsTracker:
         task = self._flush_tasks.pop(speech_id, None)
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
+
+    def close(self) -> None:
+        """Cancel all active flush tasks and clear pending timers."""
+        for task in list(self._flush_tasks.values()):
+            if not task.done() and task is not asyncio.current_task():
+                task.cancel()
+        self._flush_tasks.clear()
 
     async def _dispatch_turn(self, speech_id: str) -> None:
         self._cancel_delayed_flush(speech_id)
@@ -902,7 +916,19 @@ class TurnMetricsTracker:
             total_turnaround_sec=total_sec,
             transcript=turn.get("transcript"),
         )
-        logger.info("TURN_LATENCY %s", json.dumps(cloudwatch_log))
+        total_ms_val = to_ms(total_sec) if to_ms(total_sec) is not None else 0.0
+        stt_ms_val = to_ms(turn["stt_final_sec"]) if to_ms(turn["stt_final_sec"]) is not None else 0.0
+        llm_ms_val = to_ms(turn["llm_first_token_sec"]) if to_ms(turn["llm_first_token_sec"]) is not None else 0.0
+        tts_ms_val = to_ms(turn["tts_first_chunk_sec"]) if to_ms(turn["tts_first_chunk_sec"]) is not None else 0.0
+
+        logger.info(
+            "TURN_LATENCY %s %s %s %s %s",
+            total_ms_val,
+            stt_ms_val,
+            llm_ms_val,
+            tts_ms_val,
+            json.dumps(cloudwatch_log, separators=(",", ":")),
+        )
 
         await report_session_turn(self.session_id, payload)
 
@@ -916,7 +942,7 @@ def build_system_prompt(metadata: Dict[str, Any]) -> str:
         metadata.get("practice_prompt") or "Have a friendly conversation to practice language fluency."
     )
 
-    return f"""You are an expert, empathetic AI Language Coach.
+    return f"""You are Kirie, an expert, empathetic AI Language Coach.
 You are conducting a 1-on-1 spoken practice session with a language learner.
 
 Session Details:
@@ -1253,7 +1279,7 @@ def create_tts(metadata: Optional[Dict[str, Any]] = None):
             api_key=cartesia_key,
         )
 
-    if deepgram_key:
+    if deepgram_key and HAS_PLUGINS and deepgram is not None:
         return deepgram.TTS(
             model=_env_per_language(
                 "DEEPGRAM_TTS_MODEL", language, DEEPGRAM_AURA_VOICES.get(language, DEEPGRAM_AURA_VOICES["en"])
@@ -1386,7 +1412,8 @@ async def entrypoint(ctx: JobContext):
                     turn_handling=build_turn_handling(),
                 )
 
-                tracker = TurnMetricsTracker(session_id=session_id)
+                turn_tracker = TurnMetricsTracker(session_id=session_id)
+                tracker = turn_tracker
 
                 if hasattr(session, "on"):
                     # NOTE: livekit-agents 1.8.4 logs a deprecation notice recommending
@@ -1449,6 +1476,12 @@ async def entrypoint(ctx: JobContext):
                         except Exception as exc:
                             logger.debug("Error reading committed user speech: %s", exc)
 
+                async def _cleanup_tracker() -> None:
+                    turn_tracker.close()
+
+                if hasattr(ctx, "add_shutdown_callback"):
+                    ctx.add_shutdown_callback(_cleanup_tracker)
+
                 await session.start(room=ctx.room, agent=agent_instance)
 
                 # One text-to-speech call, no model in the loop: see build_greeting.
@@ -1479,7 +1512,7 @@ async def entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     init_sentry()
-    agent_name = os.getenv("VOICE_AGENT_NAME", "ai-language-coach")
+    agent_name = _env_str("VOICE_AGENT_NAME", "ai-language-coach")
     logger.info("Registering LiveKit worker with agent_name='%s'", agent_name)
 
     cli.run_app(build_worker_options())

@@ -3,6 +3,7 @@
 namespace App\GraphQL\Mutations;
 
 use App\Enums\LessonCardStatus;
+use App\Enums\RoadmapStatus;
 use App\Models\LessonCard;
 use App\Models\User;
 use GraphQL\Error\Error;
@@ -57,8 +58,19 @@ final class CompleteLessonCard
                 ->lockForUpdate()
                 ->first();
 
-            if ($nextCard instanceof LessonCard && $nextCard->status === LessonCardStatus::Locked) {
-                $nextCard->update(['status' => LessonCardStatus::Ready]);
+            if ($nextCard instanceof LessonCard) {
+                if ($nextCard->status === LessonCardStatus::Locked) {
+                    $nextCard->update(['status' => LessonCardStatus::Ready]);
+                }
+            } else {
+                $hasIncompleteCards = LessonCard::query()
+                    ->where('roadmap_id', $card->roadmap_id)
+                    ->whereIn('status', [LessonCardStatus::Locked, LessonCardStatus::Ready])
+                    ->exists();
+
+                if (! $hasIncompleteCards) {
+                    $card->roadmap()->update(['status' => RoadmapStatus::Completed]);
+                }
             }
 
             return $card->fresh();

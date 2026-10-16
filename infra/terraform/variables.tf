@@ -246,6 +246,12 @@ variable "voice_agent_endpointing_mode" {
   }
 }
 
+variable "voice_agent_endpointing_min_delay" {
+  type        = number
+  description = "Shortest silence the turn detector waits through when confident a sentence has ended, in seconds."
+  default     = 0.3
+}
+
 variable "voice_agent_endpointing_max_delay" {
   type        = number
   description = "Longest silence the turn detector may wait through mid-sentence before committing the turn, in seconds. A learner reaching for a word pauses longer than a native speaker."

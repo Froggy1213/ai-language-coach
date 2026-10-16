@@ -22,7 +22,7 @@ return new class extends Migration
             $table->json('transcript')->nullable();
             $table->timestamps();
 
-            $table->index(['user_id', 'created_at'], 'idx_user_created');
+            $table->index(['user_id', 'created_at'], 'idx_voice_sessions_user_created');
             $table->index(['user_id', 'status'], 'idx_user_status');
         });
     }

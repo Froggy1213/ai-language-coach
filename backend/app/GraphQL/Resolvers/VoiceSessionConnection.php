@@ -47,6 +47,8 @@ final class VoiceSessionConnection
         // address this backend dials for the Twirp API, and the address the
         // browser dials for WebRTC. They coincide on a single host, so the
         // fallback is what keeps the ordinary local setup a one-key config.
-        return (string) (config('voice.livekit.public_url') ?? config('voice.livekit.url'));
+        $publicUrl = config('voice.livekit.public_url');
+
+        return (string) (filled($publicUrl) ? $publicUrl : config('voice.livekit.url'));
     }
 }

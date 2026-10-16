@@ -118,19 +118,20 @@ async function handleDelete(): Promise<void> {
 
             <!-- Segmented control: two mutually exclusive options read better as
                  one control than as two switches. -->
-            <div class="flex rounded-full border border-[var(--line)] p-0.5" role="group" :aria-label="common.theme">
+            <div class="flex rounded-full border border-[var(--line)] p-0.5" role="radiogroup" :aria-label="common.theme">
               <button
-                v-for="option in (['dark', 'light'] as const)"
-                :key="option"
+                v-for="option in ([{ value: 'dark', label: common.themeDark }, { value: 'light', label: common.themeLight }] as const)"
+                :key="option.value"
                 type="button"
+                role="radio"
                 class="min-h-8 rounded-full px-3.5 text-[0.8125rem] transition-colors"
-                :class="theme === option
+                :class="theme === option.value
                   ? 'bg-[var(--accent)] text-[var(--accent-ink)]'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'"
-                :aria-pressed="theme === option"
-                @click="setTheme(option)"
+                :aria-checked="theme === option.value"
+                @click="setTheme(option.value)"
               >
-                {{ option === 'dark' ? common.themeDark : common.themeLight }}
+                {{ option.label }}
               </button>
             </div>
           </div>

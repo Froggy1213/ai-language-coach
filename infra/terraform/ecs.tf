@@ -133,6 +133,7 @@ locals {
   secret_arn = aws_secretsmanager_secret.app_secrets.arn
 
   laravel_common_env = [
+    { name = "APP_NAME", value = "Kirie" },
     { name = "APP_ENV", value = var.environment },
     { name = "APP_DEBUG", value = "false" },
     { name = "APP_URL", value = "https://${var.app_domain}" },
@@ -427,6 +428,8 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
       environment = [
         # Same plaintext endpoint the backend dials — see the livekit-tls TODO
         # above; the worker both signals over it and uses it for TURN.
+        { name = "APP_ENV", value = var.environment },
+        { name = "SENTRY_ENVIRONMENT", value = var.environment },
         { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
         { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
         { name = "BACKEND_INTERNAL_URL", value = "https://${var.app_domain}" },
@@ -447,6 +450,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         # always committing after a fixed wait.
         { name = "TURN_DETECTION", value = var.voice_agent_turn_detection ? "true" : "false" },
         { name = "ENDPOINTING_MODE", value = var.voice_agent_endpointing_mode },
+        { name = "ENDPOINTING_MIN_DELAY_SECONDS", value = tostring(var.voice_agent_endpointing_min_delay) },
         { name = "ENDPOINTING_MAX_DELAY_SECONDS", value = tostring(var.voice_agent_endpointing_max_delay) },
         { name = "PREEMPTIVE_GENERATION", value = var.voice_agent_preemptive_generation ? "true" : "false" },
         # Plan §5, §7: the worker pool, as measured by load/dispatch_capacity.py.

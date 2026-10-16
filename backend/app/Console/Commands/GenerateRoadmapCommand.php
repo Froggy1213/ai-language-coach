@@ -45,6 +45,8 @@ class GenerateRoadmapCommand extends Command
 
         $this->components->info("{$roadmap->title} — {$roadmap->lessonCards->count()} lesson cards for {$user->email}.");
 
+        $roadmap->load('lessonCards.grammarPoint');
+
         $this->table(
             ['#', 'Grammar point', 'Status'],
             $roadmap->lessonCards->map(fn ($card): array => [

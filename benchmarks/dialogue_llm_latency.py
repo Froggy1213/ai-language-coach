@@ -356,13 +356,16 @@ def execute_streaming_request(
                     if choices:
                         delta = choices[0].get("delta") or {}
                         content = delta.get("content") or ""
-                        # Reasoning models may stream thinking tokens under reasoning_content
-                        if not content and "reasoning_content" in delta:
-                            content = delta.get("reasoning_content") or ""
                         if content:
                             if ttft_ms is None:
                                 ttft_ms = (time.perf_counter() - t_start) * 1000.0
                             tokens.append(content)
+                        elif "reasoning_content" in delta:
+                            # Reasoning models stream thinking tokens under reasoning_content;
+                            # do NOT let reasoning tokens trigger ttft_ms (only real content counts).
+                            reasoning_chunk = delta.get("reasoning_content") or ""
+                            if reasoning_chunk:
+                                tokens.append(reasoning_chunk)
                 except json.JSONDecodeError:
                     continue
     finally:

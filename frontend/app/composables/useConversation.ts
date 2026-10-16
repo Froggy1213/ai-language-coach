@@ -1,5 +1,5 @@
 import { Room, RoomEvent, Track, type LocalAudioTrack, type RemoteAudioTrack, type RemoteTrack } from 'livekit-client'
-import { onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { useVoiceSession } from '~/composables/useVoiceSession'
 
 /**
@@ -18,8 +18,10 @@ export interface UseConversationOptions {
 const ENVELOPE_FRAMES = 120
 /** A frame counts as speech above this RMS (0–1). */
 const SPEECH_THRESHOLD = 0.035
-/** Jumping to `thinking` needs this much silence, in frames (~0.35s at 60fps). */
-const THINKING_AFTER_FRAMES = 21
+/** Recent frames to check for speech hangover (~300ms at 60ms polling). */
+const RECENT_SPEECH_FRAMES = 5
+/** Jumping to `thinking` needs this much silence, in frames (~0.36s at 60ms polling). */
+const THINKING_AFTER_FRAMES = 6
 
 /**
  * The conversation controller.
@@ -35,7 +37,6 @@ export function useConversation(options: UseConversationOptions = {}) {
 
   const speaking = shallowRef(false)
   const thinking = shallowRef(false)
-  const phaseIntensity = ref(0)
 
   let context: AudioContext | null = null
   let micSource: MediaStreamAudioSourceNode | null = null
@@ -180,7 +181,7 @@ export function useConversation(options: UseConversationOptions = {}) {
       envelope.shift()
     }
 
-    const speakingNow = envelope.some((value) => value > SPEECH_THRESHOLD)
+    const speakingNow = envelope.slice(-RECENT_SPEECH_FRAMES).some((value) => value > SPEECH_THRESHOLD)
     speaking.value = speakingNow
 
     if (speakingNow) {
@@ -347,7 +348,6 @@ export function useConversation(options: UseConversationOptions = {}) {
     ...voice,
     orbState,
     energy,
-    phaseIntensity,
     start,
   }
 }

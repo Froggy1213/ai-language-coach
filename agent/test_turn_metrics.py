@@ -386,6 +386,76 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(payload["tts_first_chunk"])
             self.assertNotIn("turn-delayed", tracker.pending_turns)
 
+    async def test_llm_metrics_extends_flush_timer(self):
+        tracker = TurnMetricsTracker(session_id=88, flush_delay=0.05)
+        tracker.on_user_speech("Testing LLM metric timer reset")
+
+        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+            # 1. EOUMetrics arrives -> schedules delayed flush
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-timer", end_of_utterance_delay=0.25)
+            )
+            self.assertIn("turn-timer", tracker._flush_tasks)
+            initial_task = tracker._flush_tasks["turn-timer"]
+
+            # Wait 0.03s (< 0.05s initial delay)
+            await asyncio.sleep(0.03)
+            self.assertFalse(initial_task.done())
+            mock_report.assert_not_called()
+
+            # 2. LLMMetrics arrives -> should cancel initial task and schedule new task
+            tracker.handle_metric(
+                DummyMetric(type="llm_metrics", speech_id="turn-timer", ttft=0.35)
+            )
+            self.assertIn("turn-timer", tracker._flush_tasks)
+            new_task = tracker._flush_tasks["turn-timer"]
+            self.assertIsNot(initial_task, new_task)
+            await asyncio.sleep(0.01)
+            self.assertTrue(initial_task.cancelled())
+
+            # Wait 0.03s more (total 0.07s since EOU, so old timer would have fired if not reset)
+            await asyncio.sleep(0.03)
+            mock_report.assert_not_called()
+            self.assertFalse(new_task.done())
+
+            # Wait remaining time for the extended timer to fire (> 0.05s from LLMMetrics)
+            await asyncio.sleep(0.04)
+            mock_report.assert_awaited_once()
+            called_session_id, payload = mock_report.await_args.args
+            self.assertEqual(called_session_id, 88)
+            self.assertEqual(payload["turn_id"], "turn-timer")
+            self.assertEqual(payload["stt_final"], 250.0)
+            self.assertEqual(payload["llm_first_token"], 350.0)
+            self.assertIsNone(payload["tts_first_chunk"])
+
+    async def test_tracker_close_cancels_pending_flush_tasks(self):
+        tracker = TurnMetricsTracker(session_id=77, flush_delay=1.0)
+        tracker.on_user_speech("Testing tracker close")
+
+        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-close-1", end_of_utterance_delay=0.20)
+            )
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-close-2", end_of_utterance_delay=0.30)
+            )
+
+            self.assertEqual(len(tracker._flush_tasks), 2)
+            task1 = tracker._flush_tasks["turn-close-1"]
+            task2 = tracker._flush_tasks["turn-close-2"]
+
+            # Calling close() must cancel tasks and clear the dict
+            tracker.close()
+
+            self.assertEqual(len(tracker._flush_tasks), 0)
+            await asyncio.sleep(0.01)
+            self.assertTrue(task1.cancelled())
+            self.assertTrue(task2.cancelled())
+
+            # Even after waiting, no reports should have been dispatched
+            await asyncio.sleep(0.02)
+            mock_report.assert_not_called()
+
     def test_record_completed_turn_id_deque_eviction(self):
         tracker = TurnMetricsTracker(session_id=1)
         for i in range(10):
@@ -456,10 +526,28 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
 
         with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
              patch("agent.aiohttp", mock_aiohttp), \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+             patch("agent.capture_exception") as mock_capture:
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 2)
             mock_sleep.assert_awaited_once_with(0.5)
+            mock_capture.assert_not_called()
+
+    async def test_report_session_failure_exhausted_retries_calls_capture_exception(self):
+        exc = Exception("network down")
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([exc, exc])
+
+        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("agent.aiohttp", mock_aiohttp), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+             patch("agent.capture_exception") as mock_capture:
+            await report_session_failure(42, "agent_error")
+            self.assertEqual(mock_session.post.call_count, 2)
+            mock_sleep.assert_awaited_once_with(0.5)
+            mock_capture.assert_called_once_with(
+                exc,
+                tags={"voice_session_id": "42", "failure_path": "backend_report"},
+            )
 
     async def test_report_session_failure_422_no_retry(self):
         mock_resp = AsyncMock(status=422)

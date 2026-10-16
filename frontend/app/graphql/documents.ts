@@ -180,6 +180,7 @@ export const VOICE_SESSION_QUERY = /* GraphQL */ `
     voiceSession(id: $id) {
       id
       status
+      analyzed
       failReason
       durationSec
       lessonCard {
@@ -215,6 +216,7 @@ export const SESSION_FEEDBACK_READY_SUBSCRIPTION = /* GraphQL */ `
     sessionFeedbackReady(sessionId: $sessionId) {
       id
       status
+      analyzed
       failReason
       durationSec
       lessonCard {

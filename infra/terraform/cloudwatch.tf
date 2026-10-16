@@ -42,17 +42,17 @@ resource "aws_cloudwatch_log_group" "livekit" {
 # Metric Filter: Voice Turn Latency from stdout logs (Plan §5, §7, decision 32)
 #
 # Exact log shape emitted by agent/agent.py:
-# `YYYY-MM-DD HH:MM:SS,mmm [INFO] ai-language-coach-agent: TURN_LATENCY {"event": "voice_turn_latency", ...}`
+# `YYYY-MM-DD HH:MM:SS,mmm [INFO] ai-language-coach-agent: TURN_LATENCY total_ms stt_ms llm_ms tts_ms {"event": "voice_turn_latency", ...}`
 # ------------------------------------------------------------------------------
 resource "aws_cloudwatch_log_metric_filter" "voice_turnaround_latency" {
   name           = "${var.name_prefix}-turnaround-latency"
   log_group_name = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-  pattern        = "[..., marker = \"TURN_LATENCY\", payload]"
+  pattern        = "[..., marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
 
   metric_transformation {
     name          = "TurnaroundLatencyMs"
     namespace     = "AiLanguageCoach/Voice"
-    value         = "$payload.total_turnaround_ms"
+    value         = "$total_ms"
     unit          = "Milliseconds"
     default_value = "0"
   }
@@ -61,12 +61,12 @@ resource "aws_cloudwatch_log_metric_filter" "voice_turnaround_latency" {
 resource "aws_cloudwatch_log_metric_filter" "voice_stt_latency" {
   name           = "${var.name_prefix}-stt-latency"
   log_group_name = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-  pattern        = "[..., marker = \"TURN_LATENCY\", payload]"
+  pattern        = "[..., marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
 
   metric_transformation {
     name          = "SttLatencyMs"
     namespace     = "AiLanguageCoach/Voice"
-    value         = "$payload.stt_final_ms"
+    value         = "$stt_ms"
     unit          = "Milliseconds"
     default_value = "0"
   }
@@ -75,12 +75,12 @@ resource "aws_cloudwatch_log_metric_filter" "voice_stt_latency" {
 resource "aws_cloudwatch_log_metric_filter" "voice_llm_ttft" {
   name           = "${var.name_prefix}-llm-ttft"
   log_group_name = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-  pattern        = "[..., marker = \"TURN_LATENCY\", payload]"
+  pattern        = "[..., marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
 
   metric_transformation {
     name          = "LlmTtftMs"
     namespace     = "AiLanguageCoach/Voice"
-    value         = "$payload.llm_first_token_ms"
+    value         = "$llm_ms"
     unit          = "Milliseconds"
     default_value = "0"
   }
@@ -89,12 +89,12 @@ resource "aws_cloudwatch_log_metric_filter" "voice_llm_ttft" {
 resource "aws_cloudwatch_log_metric_filter" "voice_tts_ttfb" {
   name           = "${var.name_prefix}-tts-ttfb"
   log_group_name = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-  pattern        = "[..., marker = \"TURN_LATENCY\", payload]"
+  pattern        = "[..., marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
 
   metric_transformation {
     name          = "TtsTtfbMs"
     namespace     = "AiLanguageCoach/Voice"
-    value         = "$payload.tts_first_chunk_ms"
+    value         = "$tts_ms"
     unit          = "Milliseconds"
     default_value = "0"
   }

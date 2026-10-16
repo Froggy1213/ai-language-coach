@@ -89,7 +89,7 @@ if [[ -z "$HOST" ]]; then
     exit 1
 fi
 
-REMOTE_COMMAND="sudo /opt/livekit/update-livekit.sh"
+REMOTE_COMMAND="sudo DRAIN_TIMEOUT=${DRAIN_TIMEOUT} /opt/livekit/update-livekit.sh"
 
 echo "=== LiveKit Deploy / Upgrade Plan ==="
 echo "Target:         $HOST"

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Review;
 
 use App\Enums\LessonCardStatus;
+use App\Enums\RoadmapStatus;
 use App\Models\LessonCard;
 use App\Models\Roadmap;
 use App\Models\User;
@@ -90,6 +91,8 @@ class CompleteLessonCardTest extends TestCase
 
         $lastCard->refresh();
         $this->assertSame(LessonCardStatus::Completed, $lastCard->status);
+        $this->assertSame(RoadmapStatus::Completed, $roadmap->refresh()->status);
+        $this->assertTrue($user->fresh()->roadmap->is($roadmap));
     }
 
     public function test_ownership_refusal_learner_cannot_complete_another_users_card(): void

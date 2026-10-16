@@ -6,6 +6,9 @@ type VoiceSession {
     "Lifecycle of the session."
     status: VoiceSessionStatus!
 
+    "Whether mistake analysis has finished for this session."
+    analyzed: Boolean! @rename(attribute: "analyzed")
+
     """
     WebSocket endpoint the browser dials. Returned per session rather than read
     from the client's build-time environment, so a deployment can move the

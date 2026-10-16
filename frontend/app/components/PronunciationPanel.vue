@@ -83,8 +83,8 @@ function percent(confidence?: number | null): number {
 
       <ul class="flex flex-wrap gap-2">
         <li
-          v-for="word in feedback.uncertainWords"
-          :key="word.word"
+          v-for="(word, idx) in feedback.uncertainWords"
+          :key="`${word.word}-${idx}`"
           class="flex items-baseline gap-2 rounded-full border border-[var(--line)] px-3 py-1"
         >
           <span class="text-[0.9375rem]">{{ word.word }}</span>

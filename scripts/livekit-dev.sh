@@ -79,7 +79,7 @@ livekit-server \
     --keys "$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET" &
 SERVER_PID=$!
 
-trap 'kill -TERM "$SERVER_PID" 2>/dev/null || true; cleanup; exit 143' TERM
-trap 'kill -INT "$SERVER_PID" 2>/dev/null || true; cleanup; exit 130' INT
+trap 'kill -TERM "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; cleanup; exit 143' TERM
+trap 'kill -INT "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; cleanup; exit 130' INT
 
 wait "$SERVER_PID"

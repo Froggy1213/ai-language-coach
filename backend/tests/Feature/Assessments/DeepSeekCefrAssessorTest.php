@@ -317,6 +317,27 @@ class DeepSeekCefrAssessorTest extends TestCase
         $this->assertNull($result->pronunciation?->advice);
     }
 
+    public function test_it_drops_a_sentence_containing_ipa_phonetic_transcription_in_brackets(): void
+    {
+        StructuredAnonymousAgent::fake([[
+            'cefr_level' => 'B1',
+            'summary' => 'You are at B1.',
+            'strengths' => ['Clear everyday vocabulary'],
+            'weaknesses' => ['Present perfect'],
+            'pronunciation_advice' => '「thought」の発音は [θɔːt] の母音を意識しましょう。',
+        ]]);
+
+        $result = $this->assessor()->assess(
+            $this->transcription('I thought it was thorough.', features: new SpeechFeatures(wordCount: 5)),
+            $this->user(),
+            $this->clarity(),
+            $this->analyzer(),
+        );
+
+        $this->assertSame(CefrLevel::B1, $result->level);
+        $this->assertNull($result->pronunciation?->advice);
+    }
+
     public function test_it_leaves_the_advice_empty_when_the_model_wrote_english(): void
     {
         StructuredAnonymousAgent::fake([[

@@ -272,13 +272,21 @@ final class S3AssessmentAudioStorage implements AssessmentAudioStorage
         // A path-style endpoint (MinIO, or AWS with AWS_USE_PATH_STYLE_ENDPOINT)
         // carries the bucket as the first path segment; a virtual-host URL keeps
         // it in the host, so only strip it when it is really there.
+        $host = (string) parse_url($fileUrl, PHP_URL_HOST);
+        $isVirtualHost = str_starts_with($host, $this->bucket().'.');
+
         $bucketPrefix = $this->bucket().'/';
+        $prefix = config('assessments.key_prefix', 'assessments').'/';
 
         if (str_starts_with($key, $bucketPrefix)) {
-            $key = substr($key, strlen($bucketPrefix));
-        }
+            $shouldStrip = $bucketPrefix === $prefix
+                ? str_starts_with($key, $bucketPrefix.$prefix)
+                : (! $isVirtualHost || str_starts_with($key, $bucketPrefix.$prefix));
 
-        $prefix = config('assessments.key_prefix', 'assessments').'/';
+            if ($shouldStrip) {
+                $key = substr($key, strlen($bucketPrefix));
+            }
+        }
 
         if (! str_starts_with($key, $prefix) || str_contains($key, '..')) {
             throw new InvalidAssessmentAudio('That is not an assessment upload URL.');

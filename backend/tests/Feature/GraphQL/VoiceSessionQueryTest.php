@@ -126,4 +126,30 @@ class VoiceSessionQueryTest extends TestCase
             ->assertGraphQLErrorFree();
         $this->assertNotNull($activeResponse->json('data.voiceSession.livekitToken'));
     }
+
+    public function test_livekit_url_falls_back_when_public_url_is_empty_string(): void
+    {
+        config([
+            'voice.livekit.url' => 'ws://127.0.0.1:7880',
+            'voice.livekit.public_url' => '',
+        ]);
+
+        $user = User::factory()->create();
+        $session = VoiceSession::factory()->for($user)->create();
+
+        Sanctum::actingAs($user);
+
+        $query = /** @lang GraphQL */ '
+            query ($id: ID!) {
+                voiceSession(id: $id) {
+                    livekitUrl
+                }
+            }
+        ';
+
+        $response = $this->graphQL($query, ['id' => (string) $session->id])
+            ->assertGraphQLErrorFree();
+
+        $this->assertSame('ws://127.0.0.1:7880', $response->json('data.voiceSession.livekitUrl'));
+    }
 }

@@ -4,11 +4,15 @@ namespace App\GraphQL\Mutations;
 
 use App\Models\User;
 use Illuminate\Auth\AuthManager;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 final class Login
 {
-    public function __construct(private readonly AuthManager $auth) {}
+    public function __construct(
+        private readonly AuthManager $auth,
+        private readonly Request $request,
+    ) {}
 
     /**
      * @param  array{email: string, password: string}  $args
@@ -23,6 +27,10 @@ final class Login
             throw ValidationException::withMessages([
                 'email' => __('auth.failed'),
             ]);
+        }
+
+        if ($this->request->hasSession()) {
+            $this->request->session()->regenerate();
         }
 
         /** @var User $user */

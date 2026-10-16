@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { review as copy } from '~/constants/strings'
+import { common, review as copy } from '~/constants/strings'
 import { countWithUnit, formatReviewDate, COUNTER } from '~/utils/format'
 
 /**
@@ -69,14 +69,14 @@ async function grade(grammarPointId: string, quality: number): Promise<void> {
         :loading="refreshing || loading"
         @click="handleRefresh"
       >
-        {{ refreshing ? '更新中…' : '更新' }}
+        {{ refreshing ? common.refreshing : common.refresh }}
       </UiButton>
     </PageHeader>
 
     <UiNotice v-if="error" :message="error">
       <template #actions>
         <UiButton variant="ghost" size="sm" :loading="refreshing" @click="handleRefresh">
-          再試行
+          {{ common.retryShort }}
         </UiButton>
       </template>
     </UiNotice>

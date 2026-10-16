@@ -30,6 +30,7 @@
         <env name="DB_USERNAME" value="coach_user"/>
         <env name="DB_PASSWORD" value="coach_password"/>
         <env name="DB_URL" value=""/>
+        <env name="LOG_CHANNEL" value="null"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

@@ -24,7 +24,7 @@ class TestWorkerOptionsFromEnvironment(unittest.TestCase):
 
         self.assertEqual(4, options.num_idle_processes)
         self.assertAlmostEqual(0.7, options.load_threshold)
-        self.assertAlmostEqual(360.0, options.drain_timeout)
+        self.assertAlmostEqual(110.0, options.drain_timeout)
 
     def test_it_reads_the_deployment_settings(self):
         with patch.dict(
@@ -54,7 +54,7 @@ class TestWorkerOptionsFromEnvironment(unittest.TestCase):
 
         self.assertEqual(4, options.num_idle_processes)
         self.assertAlmostEqual(0.7, options.load_threshold)
-        self.assertAlmostEqual(360.0, options.drain_timeout)
+        self.assertAlmostEqual(110.0, options.drain_timeout)
 
 
 if __name__ == "__main__":

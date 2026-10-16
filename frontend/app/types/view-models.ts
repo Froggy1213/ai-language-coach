@@ -1,4 +1,4 @@
-import type { Assessment, CefrLevel, PronunciationFeedback } from '~/types/graphql'
+import type { Assessment, CefrLevel, PronunciationFeedback, VoiceSession } from '~/types/graphql'
 
 /**
  * Hand-written UI projection of the authenticated user in the SPA session state (`useAuth`).
@@ -11,6 +11,7 @@ import type { Assessment, CefrLevel, PronunciationFeedback } from '~/types/graph
 export interface CurrentUser {
   id: string
   name: string
+  email: string
   targetLanguage: string
   currentLevel: CefrLevel
   voiceConsentAt?: string | null
@@ -30,3 +31,9 @@ export interface LatestAssessment extends Pick<Assessment, 'id' | 'status' | 'ce
 
 /** The clarity bands the server reports, as the interface names them. */
 export type PronunciationBand = 'clear' | 'mostly_clear' | 'uneven' | 'effortful'
+
+/** Detail view of a voice session including mistake analysis completion flag. */
+export interface VoiceSessionDetail extends VoiceSession {
+  analyzed: boolean
+}
+

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Models;
 
 use App\Enums\CefrLevel;
+use App\Enums\RoadmapStatus;
 use App\Models\Assessment;
 use App\Models\ReviewItem;
 use App\Models\Roadmap;
@@ -51,6 +52,14 @@ class UserTest extends TestCase
         $this->assertTrue($user->roadmap->is($roadmap));
         $this->assertTrue($user->assessments->contains($assessment));
         $this->assertTrue($user->reviewItems->contains($reviewItem));
+    }
+
+    public function test_roadmap_relation_returns_completed_roadmap(): void
+    {
+        $user = User::factory()->create();
+        $roadmap = Roadmap::factory()->for($user)->create(['status' => RoadmapStatus::Completed]);
+
+        $this->assertTrue($user->fresh()->roadmap->is($roadmap));
     }
 
     public function test_deleting_a_user_removes_their_learning_data(): void

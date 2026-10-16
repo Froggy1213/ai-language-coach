@@ -61,15 +61,50 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
 
         $utterances = $this->extractLearnerUtterances($session);
         if (empty($utterances)) {
-            $this->markAnalyzed($session, 0);
+            $shouldReturn = false;
+            $shouldBroadcast = false;
 
-            try {
-                $broadcasts->broadcast(new SessionFeedbackReady, 'sessionFeedbackReady', $session->fresh());
-            } catch (Throwable $exception) {
-                report($exception);
+            DB::transaction(function () use ($session, &$shouldReturn, &$shouldBroadcast, &$utterances): void {
+                $lockedSession = VoiceSession::query()
+                    ->whereKey($session->getKey())
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $lockedSession instanceof VoiceSession) {
+                    $shouldReturn = true;
+
+                    return;
+                }
+
+                if ($lockedSession->mistakes()->exists() || $this->alreadyAnalyzed($lockedSession)) {
+                    $shouldReturn = true;
+
+                    return;
+                }
+
+                $lockedUtterances = $this->extractLearnerUtterances($lockedSession);
+                if (empty($lockedUtterances)) {
+                    $this->markAnalyzed($lockedSession, 0);
+                    $shouldReturn = true;
+                    $shouldBroadcast = true;
+
+                    return;
+                }
+
+                $utterances = $lockedUtterances;
+            });
+
+            if ($shouldReturn) {
+                if ($shouldBroadcast) {
+                    try {
+                        $broadcasts->broadcast(new SessionFeedbackReady, 'sessionFeedbackReady', $session->fresh());
+                    } catch (Throwable $exception) {
+                        report($exception);
+                    }
+                }
+
+                return;
             }
-
-            return;
         }
 
         $transcriptText = implode("\n", $utterances);

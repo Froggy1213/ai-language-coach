@@ -261,6 +261,7 @@ class TestTtsVoiceFollowsTheSessionLanguage(unittest.TestCase):
             patch("agent.cartesia", self.cartesia, create=True),
             patch("agent.HAS_CARTESIA", True),
             patch("agent.deepgram", self.deepgram),
+            patch("agent.HAS_PLUGINS", True),
             patch("agent.openai", self.openai, create=True),
             patch("agent.HAS_OPENAI", True),
         ]

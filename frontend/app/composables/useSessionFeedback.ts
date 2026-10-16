@@ -4,7 +4,8 @@ import {
   SESSION_FEEDBACK_READY_SUBSCRIPTION,
   VOICE_SESSION_QUERY,
 } from '~/graphql/documents'
-import type { Mistake, VoiceSession } from '~/types/graphql'
+import type { Mistake } from '~/types/graphql'
+import type { VoiceSessionDetail } from '~/types/view-models'
 import { AUTH_EXPIRED_MESSAGE, graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { useLighthouseSubscription } from '~/composables/useLighthouseSubscription'
 
@@ -20,7 +21,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   const { $urql } = useNuxtApp()
   const lighthouse = useLighthouseSubscription()
 
-  const session = ref<VoiceSession | null>(null)
+  const session = ref<VoiceSessionDetail | null>(null)
   const loading = ref(true)
   const error = ref<string | null>(null)
   const analyzing = ref(false)
@@ -61,7 +62,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
     }
 
     try {
-      const handle = await lighthouse.open<VoiceSession>({
+      const handle = await lighthouse.open<VoiceSessionDetail>({
         query: SESSION_FEEDBACK_READY_SUBSCRIPTION,
         variables: { sessionId: id },
         event: 'sessionFeedbackReady',
@@ -103,7 +104,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
 
     try {
       const result = await $urql
-        .query<{ voiceSession: VoiceSession | null }>(
+        .query<{ voiceSession: VoiceSessionDetail | null }>(
           VOICE_SESSION_QUERY,
           { id },
           { requestPolicy: 'network-only' },
@@ -136,11 +137,15 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
         || current.status === 'failed'
 
       if (isTerminal) {
-        if (current.mistakes && current.mistakes.length > 0) {
+        if (
+          current.status === 'failed'
+          || current.analyzed === true
+          || (current.mistakes && current.mistakes.length > 0)
+        ) {
           analyzing.value = false
           teardownSubscription()
         } else {
-          // Terminal session with no mistakes yet: async analysis may still be in flight
+          // Terminal session not yet analyzed with 0 mistakes: subscribe to completion
           analyzing.value = true
           void subscribe(id)
         }

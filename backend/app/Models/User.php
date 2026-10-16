@@ -85,7 +85,7 @@ class User extends Authenticatable
     public function roadmap(): HasOne
     {
         return $this->hasOne(Roadmap::class)
-            ->where('status', RoadmapStatus::Active)
+            ->whereIn('status', [RoadmapStatus::Active, RoadmapStatus::Completed])
             ->latest('id');
     }
 

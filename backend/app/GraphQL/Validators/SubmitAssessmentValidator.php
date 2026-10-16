@@ -7,7 +7,7 @@ use Nuwave\Lighthouse\Validation\Validator;
 final class SubmitAssessmentValidator extends Validator
 {
     /**
-     * @return array<int, mixed>
+     * @return array<string, mixed>
      */
     public function rules(): array
     {

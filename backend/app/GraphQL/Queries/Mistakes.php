@@ -22,6 +22,7 @@ final class Mistakes
         assert($user instanceof User);
 
         return $user->mistakes()
+            ->with('grammarPoint')
             ->when(
                 $args['grammarPointId'] ?? null,
                 static fn (Builder $query, string $grammarPointId): Builder => $query->where('grammar_point_id', $grammarPointId),

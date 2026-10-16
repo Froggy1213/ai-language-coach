@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useQuery } from '@urql/vue'
-import { ROADMAP_QUERY } from '~/graphql/documents'
+import { useMutation, useQuery } from '@urql/vue'
+import { COMPLETE_LESSON_CARD_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
 import type { Roadmap } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
-import { talk } from '~/constants/strings'
+import { common, talk } from '~/constants/strings'
 
 /**
  * 会話 — the conversation screen.
@@ -63,6 +63,7 @@ const {
   leave,
 } = useConversation({ audioElement })
 
+const completeLessonMutation = useMutation(COMPLETE_LESSON_CARD_MUTATION)
 const finishPending = ref(false)
 
 async function finish(): Promise<void> {
@@ -70,6 +71,13 @@ async function finish(): Promise<void> {
 
   try {
     await leave()
+    if (card.value && card.value.status === 'ready') {
+      try {
+        await completeLessonMutation.executeMutation({ lessonCardId: card.value.id })
+      } catch {
+        // Non-fatal: navigation to reflect/feedback proceeds regardless
+      }
+    }
   } finally {
     finishPending.value = false
   }
@@ -106,28 +114,28 @@ const ended = computed(() => status.value === 'ended')
       <PageHeader :title="talk.noCards" :lead="talk.noCardsBody" />
       <UiButtonLink to="/roadmap" variant="primary" size="lg">
         <!-- The roadmap is where the current lesson is opened. -->
-        ロードマップへ
+        {{ common.backToRoadmap }}
       </UiButtonLink>
     </div>
 
     <div v-else-if="!roadmap" class="space-y-5 py-10">
       <PageHeader :title="talk.noCards" :lead="talk.noCardsBody" />
       <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        ロードマップへ
+        {{ common.backToRoadmap }}
       </UiButtonLink>
     </div>
 
     <div v-else-if="!card" class="space-y-5 py-10">
       <PageHeader :title="talk.notFound" :lead="talk.notFoundBody" />
       <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        ロードマップへ
+        {{ common.backToRoadmap }}
       </UiButtonLink>
     </div>
 
     <div v-else-if="card.status === 'locked'" class="space-y-5 py-10">
       <PageHeader :title="talk.notReady" :lead="talk.notReadyBody" />
       <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        ロードマップへ
+        {{ common.backToRoadmap }}
       </UiButtonLink>
     </div>
 
@@ -193,6 +201,6 @@ const ended = computed(() => status.value === 'ended')
     </template>
 
     <!-- Remote audio is attached to this element by the LiveKit room. -->
-    <audio ref="audioElement" class="hidden" autoplay playsinline />
+    <audio ref="audioElement" class="sr-only" autoplay playsinline />
   </section>
 </template>

@@ -220,6 +220,31 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertNull($user->roadmap);
     }
 
+    public function test_it_exits_cleanly_when_the_user_was_deleted_while_queued(): void
+    {
+        $user = User::factory()->create();
+        $assessment = $this->assessmentFor($user);
+
+        // Simulate user relation resolving to null (e.g. if user was deleted between fresh() and ->user)
+        User::retrieved(static function (User $retrieved) use ($user): void {
+            if ($retrieved->id === $user->id) {
+                $retrieved->exists = false;
+            }
+        });
+        $user->delete();
+
+        $audio = Mockery::mock(AssessmentAudioStorage::class);
+        $audio->shouldNotReceive('inspect');
+        $audio->shouldNotReceive('fetch');
+
+        $assessor = Mockery::mock(CefrAssessor::class);
+        $broadcasts = Mockery::mock(BroadcastsSubscriptions::class);
+
+        $this->runJob($assessment, $assessor, $audio, $broadcasts);
+
+        $this->assertNull($assessment->fresh());
+    }
+
     public function test_a_broadcast_that_cannot_be_delivered_does_not_throw_the_analysis_away(): void
     {
         $this->seed(GrammarPointSeeder::class);

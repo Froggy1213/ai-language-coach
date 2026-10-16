@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VoiceSessionStatus } from '~/types/graphql'
 import { formatDuration } from '~/utils/format'
-import { reflect } from '~/constants/strings'
+import { common, reflect } from '~/constants/strings'
 
 /**
  * 振り返り — the review of one finished conversation.
@@ -94,7 +94,7 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
 
     <div v-else-if="!session" class="space-y-5 py-10">
       <PageHeader :title="reflect.notFound" :lead="reflect.notFoundBody" />
-      <UiButtonLink to="/roadmap" variant="primary" size="lg">ロードマップへ</UiButtonLink>
+      <UiButtonLink to="/roadmap" variant="primary" size="lg">{{ common.backToRoadmap }}</UiButtonLink>
     </div>
 
     <template v-else>
@@ -126,7 +126,7 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
         {{ error }}
         <template #actions>
           <UiButton variant="ghost" size="sm" :loading="refreshing" @click="handleRefresh">
-            再試行
+            {{ common.retryShort }}
           </UiButton>
         </template>
       </UiNotice>

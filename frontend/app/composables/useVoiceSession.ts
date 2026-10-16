@@ -165,6 +165,9 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     for (const el of attachedElements) {
       try {
         el.srcObject = null
+        if (el !== options.audioElement?.value) {
+          el.remove()
+        }
       } catch {}
     }
     attachedElements.length = 0
@@ -319,21 +322,6 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
       })
 
       await newRoom.connect(session.livekitUrl, session.livekitToken)
-
-      if (disposed) {
-        room = null
-        try {
-          await newRoom.disconnect()
-        } catch {}
-        return
-      }
-
-      if (status.value === 'connecting') {
-        status.value = 'connected'
-        agentPresent.value = newRoom.remoteParticipants.size > 0
-        startTimer()
-        startLevelPolling()
-      }
 
       if (disposed) {
         room = null

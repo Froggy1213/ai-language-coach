@@ -2,6 +2,7 @@
 import { useQuery } from '@urql/vue'
 import { DUE_REVIEWS_QUERY } from '~/graphql/documents'
 import type { ReviewItem } from '~/types/graphql'
+import { nav } from '~/constants/strings'
 
 /**
  * Application shell.
@@ -26,8 +27,6 @@ const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
 })
 
 const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
-
-const isGuestShell = computed(() => !user.value)
 </script>
 
 <template>
@@ -41,10 +40,10 @@ const isGuestShell = computed(() => !user.value)
         </NuxtLink>
 
         <nav class="flex items-center gap-1 text-[0.9375rem]">
-          <NavLink to="/" label="今日" exact />
-          <NavLink to="/roadmap" label="ロードマップ" />
-          <NavLink to="/talk" label="会話" />
-          <NavLink to="/review" label="復習" :badge="dueCount" />
+          <NavLink to="/" :label="nav.today" exact />
+          <NavLink to="/roadmap" :label="nav.roadmap" />
+          <NavLink to="/talk" :label="nav.talk" />
+          <NavLink to="/review" :label="nav.review" :badge="dueCount" />
         </nav>
 
         <div class="ml-auto flex items-center gap-3">
@@ -77,7 +76,7 @@ const isGuestShell = computed(() => !user.value)
       <NuxtPage />
     </main>
 
-    <TabBar v-if="user" :due-count="dueCount" :theme="theme" @toggle-theme="toggleTheme" />
+    <TabBar v-if="user" :due-count="dueCount" />
 
     <NuxtRouteAnnouncer />
   </div>

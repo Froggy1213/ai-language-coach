@@ -53,4 +53,24 @@ class VoiceSession extends Model
     {
         return $this->hasMany(Mistake::class, 'session_id');
     }
+
+    public function getAnalyzedAttribute(): bool
+    {
+        if ($this->status === VoiceSessionStatus::Failed) {
+            return true;
+        }
+
+        $transcript = $this->transcript;
+        if (! is_array($transcript)) {
+            return false;
+        }
+
+        foreach ($transcript as $entry) {
+            if (is_array($entry) && ($entry['type'] ?? null) === 'analysis') {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

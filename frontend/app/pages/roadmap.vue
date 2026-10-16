@@ -4,7 +4,7 @@ import type { CombinedError } from '@urql/vue'
 import { GENERATE_ROADMAP_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
 import type { Roadmap } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
-import { roadmap as copy } from '~/constants/strings'
+import { roadmap as copy, today } from '~/constants/strings'
 import { count, COUNTER } from '~/utils/format'
 
 /**
@@ -113,7 +113,7 @@ async function generate(): Promise<void> {
           {{ generating ? copy.building : copy.build }}
         </UiButton>
         <UiButtonLink to="/level" variant="ghost" size="lg">
-          レベル判定を受ける
+          {{ today.takeAssessment }}
         </UiButtonLink>
       </div>
     </div>

@@ -6,6 +6,7 @@ use App\Enums\AssessmentStatus;
 use App\Grammar\RoadmapGenerator;
 use App\GraphQL\Subscriptions\AssessmentReady;
 use App\Models\Assessment;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -61,6 +62,10 @@ final class AnalyzeAssessment implements ShouldQueue
         }
 
         $user = $assessment->user;
+
+        if (! $user instanceof User) {
+            return;
+        }
 
         // The object is checked again here, not only when the upload was
         // submitted: it may have been replaced or removed since, and the
