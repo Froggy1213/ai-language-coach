@@ -53,6 +53,11 @@ return [
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#send_default_pii
     'send_default_pii' => env('SENTRY_SEND_DEFAULT_PII', false),
 
+    // Scrub learner transcripts, practice prompts, and corrections before shipping (plan §5, §7).
+    // Array callable syntax is used so `php artisan config:cache` can serialise this file.
+    'before_send' => [\App\Observability\SentryEventScrubber::class, 'scrubEvent'],
+    'before_breadcrumb' => [\App\Observability\SentryEventScrubber::class, 'scrubBreadcrumb'],
+
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#ignore_exceptions
     // 'ignore_exceptions' => [],
 

@@ -136,6 +136,8 @@ locals {
     { name = "APP_NAME", value = "Kirie" },
     { name = "APP_ENV", value = var.environment },
     { name = "APP_DEBUG", value = "false" },
+    { name = "LOG_CHANNEL", value = "stderr" },
+    { name = "LOG_LEVEL", value = "info" },
     { name = "APP_URL", value = "https://${var.app_domain}" },
     { name = "DB_CONNECTION", value = "mysql" },
     { name = "DB_HOST", value = aws_db_instance.main.address },

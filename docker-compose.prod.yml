@@ -43,9 +43,17 @@
 # value — it looks like a feature that works for the web request and not for the
 # queue worker, or the other way round.
 # ---------------------------------------------------------------------------
+x-prod-logging: &prod-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-prod-laravel-environment: &prod-laravel-environment
   APP_ENV: production
   APP_DEBUG: "false"
+  LOG_CHANNEL: ${LOG_CHANNEL:-stderr}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
   # Backend/.env is excluded from the image on purpose, so the deployment supplies
   # everything. APP_KEY signs sessions, cookies and signed URLs.
   APP_KEY: ${APP_KEY:?set APP_KEY (php artisan key:generate --show)}
@@ -166,6 +174,7 @@ services:
       dockerfile: Dockerfile
     container_name: coach_scheduler
     restart: unless-stopped
+    logging: *prod-logging
     command: ["php", "artisan", "schedule:work"]
     healthcheck:
       # Inherits the image's /up probe otherwise, which this role does not serve.
@@ -258,6 +267,7 @@ services:
     image: caddy:2.10-alpine
     container_name: coach_proxy
     restart: unless-stopped
+    logging: *prod-logging
     ports:
       - "80:80"
       - "443:443"

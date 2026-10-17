@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Observability;
 
+use App\Observability\SentryEventScrubber;
 use RuntimeException;
+use Sentry\Breadcrumb;
 use Sentry\ClientBuilder;
 use Sentry\Event;
 use Sentry\Laravel\ServiceProvider;
@@ -51,6 +53,8 @@ class SentryConfigurationTest extends TestCase
         // The learner's speech is personal data; the SDK's default has to stay
         // off, which is exactly the kind of default an upgrade can flip.
         $this->assertFalse((bool) config('sentry.send_default_pii'));
+        $this->assertSame([SentryEventScrubber::class, 'scrubEvent'], config('sentry.before_send'));
+        $this->assertSame([SentryEventScrubber::class, 'scrubBreadcrumb'], config('sentry.before_breadcrumb'));
     }
 
     public function test_without_a_dsn_there_is_nothing_to_report_to(): void
@@ -65,7 +69,7 @@ class SentryConfigurationTest extends TestCase
         );
     }
 
-    public function test_a_configured_dsn_delivers_a_captured_exception(): void
+    public function test_a_configured_dsn_delivers_a_captured_exception_via_laravel_report(): void
     {
         $transport = new class implements TransportInterface
         {
@@ -90,6 +94,8 @@ class SentryConfigurationTest extends TestCase
             'environment' => 'testing',
             'release' => 'test-release',
             'send_default_pii' => false,
+            'before_send' => [SentryEventScrubber::class, 'scrubEvent'],
+            'before_breadcrumb' => [SentryEventScrubber::class, 'scrubBreadcrumb'],
         ]);
         $builder->setTransport($transport);
 
@@ -98,12 +104,68 @@ class SentryConfigurationTest extends TestCase
 
         SentrySdk::setCurrentHub($this->app->make(HubInterface::class));
 
-        $eventId = \Sentry\captureException(new RuntimeException('The voice worker lost its LLM'));
+        report(new RuntimeException('The voice worker lost its LLM'));
 
-        $this->assertNotNull($eventId);
         $this->assertCount(1, $transport->events);
         $this->assertSame('testing', $transport->events[0]->getEnvironment());
         $this->assertSame('test-release', $transport->events[0]->getRelease());
         $this->assertSame(RuntimeException::class, $transport->events[0]->getExceptions()[0]->getType());
+    }
+
+    public function test_scrubber_redacts_learner_transcripts_and_prompts_while_keeping_diagnostics(): void
+    {
+        $event = Event::createEvent();
+        $event->setExtra([
+            'session_id' => 42,
+            'turn_id' => 'sp-101',
+            'stt_final' => 250.0,
+            'transcript' => 'I have visited Rome yesterday.',
+            'practice_prompt' => 'Talk about your last holiday.',
+            'nested' => [
+                'user_utterance' => 'I has a dog.',
+                'correction' => 'I have a dog.',
+                'explanation' => 'Use have with first person singular.',
+                'password' => 'secret123',
+            ],
+        ]);
+        $event->setContext('voice_session', [
+            'room_name' => 'lesson-42',
+            'learner_speech' => 'Private spoken text',
+        ]);
+        $event->setBreadcrumb([
+            new Breadcrumb(
+                Breadcrumb::LEVEL_INFO,
+                Breadcrumb::TYPE_DEFAULT,
+                'voice',
+                'Turn recorded',
+                [
+                    'turn_id' => 'sp-101',
+                    'transcript' => 'Private breadcrumb speech',
+                ],
+            ),
+        ]);
+
+        $scrubbed = SentryEventScrubber::scrubEvent($event);
+
+        $this->assertNotNull($scrubbed);
+        $extra = $scrubbed->getExtra();
+        $this->assertSame(42, $extra['session_id']);
+        $this->assertSame('sp-101', $extra['turn_id']);
+        $this->assertSame(250.0, $extra['stt_final']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['transcript']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['practice_prompt']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['nested']['user_utterance']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['nested']['correction']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['nested']['explanation']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $extra['nested']['password']);
+
+        $contexts = $scrubbed->getContexts();
+        $this->assertSame('lesson-42', $contexts['voice_session']['room_name']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $contexts['voice_session']['learner_speech']);
+
+        $breadcrumbs = $scrubbed->getBreadcrumbs();
+        $this->assertCount(1, $breadcrumbs);
+        $this->assertSame('sp-101', $breadcrumbs[0]->getMetadata()['turn_id']);
+        $this->assertSame(SentryEventScrubber::REDACTED, $breadcrumbs[0]->getMetadata()['transcript']);
     }
 }

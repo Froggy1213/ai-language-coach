@@ -13,6 +13,7 @@ use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -175,6 +176,11 @@ final class StartVoiceSession
             $session->update([
                 'status' => VoiceSessionStatus::Failed,
                 'fail_reason' => VoiceSessionFailReason::VoiceFleetBusy->value,
+            ]);
+
+            Log::warning('Voice session start failed: fleet busy.', [
+                'session_id' => $session->getKey(),
+                'room_name' => $session->room_name,
             ]);
 
             throw new Error(

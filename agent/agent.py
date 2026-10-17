@@ -107,7 +107,14 @@ except ImportError:
 
 
 logger = logging.getLogger("ai-language-coach-agent")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    _log_handler = logging.StreamHandler()
+    _log_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    logger.addHandler(_log_handler)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -1316,7 +1323,14 @@ async def entrypoint(ctx: JobContext):
             else:
                 logger.warning("Decoded job metadata is not a dict: %r", parsed)
                 metadata = {}
-            logger.info("Received session metadata: %s", metadata)
+            logger.info(
+                "Received session metadata: session_id=%s room_name=%s grammar_point=%s target_language=%s level=%s",
+                metadata.get("session_id"),
+                metadata.get("room_name"),
+                metadata.get("grammar_point"),
+                metadata.get("target_language"),
+                metadata.get("level"),
+            )
         except json.JSONDecodeError as err:
             logger.warning("Failed to decode job metadata JSON: %s", err)
             metadata = {}

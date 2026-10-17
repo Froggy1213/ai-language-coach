@@ -10,6 +10,7 @@ use App\Observability\PublishSessionMetrics;
 use App\Observability\PublishTurnMetrics;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Moves a voice session between states exactly once (plan §5).
@@ -202,6 +203,14 @@ final class VoiceSessionLifecycle
             $session->fill($attributes);
             $session->status = $to;
             $session->save();
+
+            if ($to === VoiceSessionStatus::Failed) {
+                Log::warning('Voice session failed.', [
+                    'session_id' => $session->getKey(),
+                    'room_name' => $session->room_name,
+                    'fail_reason' => $session->fail_reason,
+                ]);
+            }
 
             if ($to->isTerminal()) {
                 // What the call cost, for the CloudWatch series the AWS Budget

@@ -12,6 +12,8 @@ import { ref, onUnmounted, shallowRef, type Ref } from 'vue'
 import { REQUEST_VOICE_TOKEN_MUTATION } from '~/graphql/documents'
 import type { VoiceSession } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { csrfAwareFetch } from '~/utils/csrf-fetch'
+import { useBackendUrl } from '~/composables/useBackendUrl'
 import { useElapsedTimer } from '~/composables/useElapsedTimer'
 import { talk } from '~/constants/strings'
 
@@ -194,6 +196,31 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     })
   }
 
+  async function reportClientError(
+    currentSessionId: string | null,
+    stage: 'webrtc_connect' | 'microphone' | 'media_devices',
+    rawMessage: unknown,
+  ): Promise<void> {
+    if (!import.meta.client || !currentSessionId) {
+      return
+    }
+
+    const message = typeof rawMessage === 'string'
+      ? rawMessage.slice(0, 255)
+      : String((rawMessage as Error | undefined)?.message ?? 'unknown error').slice(0, 255)
+
+    try {
+      const backendUrl = useBackendUrl()
+      await csrfAwareFetch(backendUrl, `${backendUrl}/api/sessions/${encodeURIComponent(currentSessionId)}/client-error`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage, message }),
+      })
+    } catch {
+      // Telemetry delivery is best-effort and must never interfere with UI state.
+    }
+  }
+
   async function leave(): Promise<void> {
     stopTimer()
     stopLevelPolling()
@@ -319,6 +346,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
 
       newRoom.on(RoomEvent.MediaDevicesError, (err: Error) => {
         error.value = `音声デバイスのエラー：${err?.message || 'マイクを利用できません'}。`
+        void reportClientError(session.id, 'media_devices', err)
       })
 
       await newRoom.connect(session.livekitUrl, session.livekitToken)
@@ -345,10 +373,13 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
         error.value = isDenied
           ? 'マイクの使用がブラウザで拒否されました。ブラウザの設定でマイクを許可してください。'
           : `マイクを有効にできませんでした：${micErr?.message ?? '利用できません'}。`
+
+        void reportClientError(session.id, 'microphone', micErr)
       }
     } catch (connErr: any) {
       error.value = `音声ルームに接続できませんでした：${connErr?.message ?? '接続エラー'}。`
       status.value = 'error'
+      void reportClientError(session.id, 'webrtc_connect', connErr)
       await leave()
     }
   }

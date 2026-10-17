@@ -832,5 +832,13 @@ class TestCreateLlm(unittest.TestCase):
             self.assertIn("No dialogue LLM is configured", str(ctx.exception))
 
 
+class TestAgentLoggerConfiguration(unittest.TestCase):
+    def test_agent_logger_does_not_propagate_to_root(self):
+        import agent
+        self.assertFalse(agent.logger.propagate)
+        self.assertEqual(len(agent.logger.handlers), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
+
