@@ -9,7 +9,13 @@ import { GREETING_PATTERN, appNav, loginAsSeededUser, signedInShell } from './he
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe('Authentication flow @smoke', () => {
-  test('a guest is bounced to /login, signs in to the daily home, and signs out from /settings', async ({ page }) => {
+  test('a guest sees the scrollytelling landing page on /, is bounced from learner routes to /login, signs in to the daily home, and signs out from /settings', async ({ page }) => {
+    // 0. A guest visiting / sees the scrollytelling landing page
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('読む英語から、');
+    await expect(page.getByRole('tab', { name: /1分間の声診断/ })).toBeVisible();
+
     // 1. A guest visiting a learner route lands on /login
     await page.goto('/roadmap');
     await expect(page).toHaveURL(/\/login$/);

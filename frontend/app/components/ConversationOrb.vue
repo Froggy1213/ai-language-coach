@@ -318,10 +318,10 @@ onMounted(() => {
     // The tile is square but the light is round, so a fixed radius would run past
     // the top and bottom edges and get clipped into a rectangle — which reads as
     // a rendering bug, not as light. Scaling the whole gradient by the distance
-    // available along the *diagonal* keeps its shape circular while guaranteeing
-    // the outermost stop lands inside the canvas.
+    // available along the *inscribed circle* keeps its shape circular while
+    // guaranteeing the outermost stop lands safely inside the canvas.
     const slack
-      = ((Math.min(width, height) * 0.5) / Math.max(radius, 1)) / stops[stops.length - 1]!
+      = ((Math.min(width, height) * 0.485) / Math.max(radius, 1)) / stops[stops.length - 1]!
 
     for (let i = 0; i < stops.length; i += 1) {
       const reach = radius * stops[i]! * Math.min(1, slack)
@@ -470,6 +470,8 @@ onMounted(() => {
       return
     }
 
+    const maxReach = Math.min(width, height) * 0.48
+
     for (let i = 0; i < 2; i += 1) {
       const progress = ripple - i * 0.16
 
@@ -477,7 +479,7 @@ onMounted(() => {
         continue
       }
 
-      const reach = Math.max(1, radius * (1.1 + progress * 1.5))
+      const reach = Math.max(1, Math.min(maxReach, radius * (1.08 + progress * 0.65)))
       const alpha = (1 - progress) ** 2 * 0.28
       context!.strokeStyle = rgba(palette.mid, alpha)
       context!.lineWidth = 1.2 * (1 - progress) + 0.3
@@ -559,7 +561,10 @@ onMounted(() => {
 
     const cx = width / 2
     const cy = height / 2
-    const base = Math.min(width, height) * 0.5
+    // Leave generous headroom inside the canvas so wave displacement, outer
+    // halo stops (up to 1.95x), ripples, and the contact shadow never clip
+    // against the rectangular canvas border.
+    const base = Math.min(width, height) * 0.275
 
     if (base < 2) {
       return

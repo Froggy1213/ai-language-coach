@@ -19,6 +19,11 @@ import { nav } from '~/constants/strings'
 
 const { user } = useAuth()
 const { theme, toggle: toggleTheme } = useTheme()
+const route = useRoute()
+
+const isLandingView = computed(
+  () => route.name === 'index' && (!user.value || route.query.preview === 'landing'),
+)
 
 const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
   query: DUE_REVIEWS_QUERY,
@@ -32,7 +37,7 @@ const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
 <template>
   <div class="grain relative flex min-h-dvh flex-col bg-[var(--canvas)] text-[var(--ink)]">
     <!-- Desktop navigation. On phones the tab bar below does this job. -->
-    <header v-if="user" class="sticky top-0 z-40 hidden border-b border-[var(--line)] bg-[color-mix(in_oklab,var(--canvas)_82%,transparent)] backdrop-blur-xl md:block">
+    <header v-if="user && !isLandingView" class="sticky top-0 z-40 hidden border-b border-[var(--line)] bg-[color-mix(in_oklab,var(--canvas)_82%,transparent)] backdrop-blur-xl md:block">
       <div class="mx-auto flex h-16 max-w-5xl items-center gap-8 px-6">
         <NuxtLink to="/" class="group flex items-center gap-2.5">
           <span class="size-1.5 rounded-full bg-[var(--accent)] transition group-hover:scale-150" />
@@ -70,14 +75,20 @@ const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
     </header>
 
     <main
-      class="mx-auto w-full max-w-5xl flex-1 px-5 pt-8 sm:px-6 md:pt-12"
-      :class="user ? 'pb-40 md:pb-24' : 'pb-20'"
+      class="w-full flex-1"
+      :class="isLandingView
+        ? ''
+        : [
+            'mx-auto max-w-5xl px-5 pt-8 sm:px-6 md:pt-12',
+            user ? 'pb-40 md:pb-24' : 'pb-20',
+          ]"
     >
       <NuxtPage />
     </main>
 
-    <TabBar v-if="user" :due-count="dueCount" />
+    <TabBar v-if="user && !isLandingView" :due-count="dueCount" />
 
     <NuxtRouteAnnouncer />
   </div>
 </template>
+
