@@ -1,5 +1,7 @@
 <?php
 
+use App\Observability\SentryEventScrubber;
+
 /**
  * Sentry Laravel SDK configuration file.
  *
@@ -55,8 +57,8 @@ return [
 
     // Scrub learner transcripts, practice prompts, and corrections before shipping (plan §5, §7).
     // Array callable syntax is used so `php artisan config:cache` can serialise this file.
-    'before_send' => [\App\Observability\SentryEventScrubber::class, 'scrubEvent'],
-    'before_breadcrumb' => [\App\Observability\SentryEventScrubber::class, 'scrubBreadcrumb'],
+    'before_send' => [SentryEventScrubber::class, 'scrubEvent'],
+    'before_breadcrumb' => [SentryEventScrubber::class, 'scrubBreadcrumb'],
 
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#ignore_exceptions
     // 'ignore_exceptions' => [],

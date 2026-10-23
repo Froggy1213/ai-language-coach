@@ -381,8 +381,8 @@ export type User = {
 /** One spoken practice session with the voice agent (plan §4). */
 export type VoiceSession = {
   __typename?: 'VoiceSession';
-  /** Whether mistake analysis has finished (or session failed). */
-  analyzed?: Scalars['Boolean']['output'];
+  /** Whether mistake analysis has finished for this session. */
+  analyzed: Scalars['Boolean']['output'];
   /** Length of the conversation in seconds, once it finished. */
   durationSec?: Maybe<Scalars['Int']['output']>;
   /** Why the session failed, when it did. */
