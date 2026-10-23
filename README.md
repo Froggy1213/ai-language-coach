@@ -47,7 +47,7 @@ Full development plan: [`ai-language-coach-plan.md`](ai-language-coach-plan.md) 
 
 | Package | Version | Purpose |
 |---|---|---|
-| `laravel/framework` | ^13.17 | Base framework (`php: ^8.4` in `composer.json`; the host and the images run 8.5) |
+| `laravel/framework` | ^13.17 | Base framework (`php: ^8.4` in `composer.json`; the host and the images run 8.5.12) |
 | `laravel/sanctum` | ^4.0 | SPA cookie authentication |
 | `nuwave/lighthouse` | ^6.70 | GraphQL API at `/graphql` |
 | `laravel/reverb` | ^1.11 | WebSocket realtime (Pusher protocol) |
@@ -206,7 +206,7 @@ Alternatively, to run the **entire stack** (including Laravel API, Reverb, Horiz
 docker compose --profile full up -d
 ```
 
-Prerequisites for hybrid dev loop: PHP 8.5 + Composer (`composer.json` only asks for `^8.4`; CI and the images pin 8.5), Node 22 + npm (CI uses 22, both production images build on Node 24), Docker, and the **`redis` PHP extension** — Homebrew's PHP ships without it, so `pecl install redis` is part of setting up a machine. If pecl fails with `failed to mkdir /opt/homebrew/lib/php/pecl/<api>`, create that directory and re-run it. Subscription storage and Horizon both reach Redis through this extension, so it is required, not optional.
+Prerequisites for hybrid dev loop: PHP 8.5.12 + Composer (`composer.json` only asks for `^8.4`; CI and the images pin 8.5.12), Node 22 + npm (CI uses 22, both production images build on Node 24), Docker, and the **`redis` PHP extension** — Homebrew's PHP ships without it, so `pecl install redis` is part of setting up a machine. If pecl fails with `failed to mkdir /opt/homebrew/lib/php/pecl/<api>`, create that directory and re-run it. Subscription storage and Horizon both reach Redis through this extension, so it is required, not optional.
 
 ```bash
 # 1. Infrastructure (MySQL, Redis, MinIO, LiveKit Server, Voice Agent worker)

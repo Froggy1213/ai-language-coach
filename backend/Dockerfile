@@ -23,7 +23,9 @@
 # docker-compose MySQL/Redis (see README -> "Local setup"). This image exists for
 # CI, staging and ECS.
 
-ARG PHP_VERSION=8.5
+# Pinned to the patched release for CVE-2026-109618 / CVE-2026-109619
+# (PHP 8.5.12, 2026-10-21). Bump deliberately with security releases.
+ARG PHP_VERSION=8.5.12
 ARG NODE_VERSION=24
 
 # ---------------------------------------------------------------------------
