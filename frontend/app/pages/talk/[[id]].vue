@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { useMutation, useQuery } from '@urql/vue'
-import { COMPLETE_LESSON_CARD_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
-import type { Roadmap } from '~/types/graphql'
+import { useMutation } from '@urql/vue'
+import { COMPLETE_LESSON_CARD_MUTATION } from '~/graphql/documents'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { common, talk } from '~/constants/strings'
 
@@ -18,17 +17,11 @@ import { common, talk } from '~/constants/strings'
  */
 const route = useRoute()
 
-const { data, fetching, error: queryError } = useQuery<{ roadmap: Roadmap | null }>({
-  query: ROADMAP_QUERY,
+const { roadmap, readyCard, fetching, error: queryError } = useRoadmap({
   requestPolicy: 'cache-and-network',
 })
 
-const roadmap = computed(() => data.value?.roadmap ?? null)
 const requestedId = computed(() => (route.params.id ? String(route.params.id) : ''))
-
-const readyCard = computed(
-  () => roadmap.value?.lessonCards.find((card) => card.status === 'ready') ?? null,
-)
 
 const card = computed(() => {
   if (!roadmap.value) {
@@ -40,6 +33,22 @@ const card = computed(() => {
   }
 
   return readyCard.value
+})
+
+const emptyState = computed<{ title: string; lead: string } | null>(() => {
+  if (roadmap.value && !readyCard.value && !requestedId.value) {
+    return { title: talk.noCards, lead: talk.noCardsBody }
+  }
+  if (!roadmap.value) {
+    return { title: talk.noCards, lead: talk.noCardsBody }
+  }
+  if (!card.value) {
+    return { title: talk.notFound, lead: talk.notFoundBody }
+  }
+  if (card.value.status === 'locked') {
+    return { title: talk.notReady, lead: talk.notReadyBody }
+  }
+  return null
 })
 
 // `/talk` on its own is a redirect, not a screen.
@@ -109,37 +118,14 @@ const ended = computed(() => status.value === 'ended')
       :message="graphQLErrorMessageFor(queryError, { fallback: talk.loadError })"
     />
 
-    <!-- A roadmap exists but nothing is practisable yet. -->
-    <div v-else-if="roadmap && !readyCard && !requestedId" class="space-y-5 py-10">
-      <PageHeader :title="talk.noCards" :lead="talk.noCardsBody" />
-      <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        <!-- The roadmap is where the current lesson is opened. -->
-        {{ common.backToRoadmap }}
-      </UiButtonLink>
-    </div>
-
-    <div v-else-if="!roadmap" class="space-y-5 py-10">
-      <PageHeader :title="talk.noCards" :lead="talk.noCardsBody" />
+    <div v-else-if="emptyState" class="space-y-5 py-10">
+      <PageHeader :title="emptyState.title" :lead="emptyState.lead" />
       <UiButtonLink to="/roadmap" variant="primary" size="lg">
         {{ common.backToRoadmap }}
       </UiButtonLink>
     </div>
 
-    <div v-else-if="!card" class="space-y-5 py-10">
-      <PageHeader :title="talk.notFound" :lead="talk.notFoundBody" />
-      <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        {{ common.backToRoadmap }}
-      </UiButtonLink>
-    </div>
-
-    <div v-else-if="card.status === 'locked'" class="space-y-5 py-10">
-      <PageHeader :title="talk.notReady" :lead="talk.notReadyBody" />
-      <UiButtonLink to="/roadmap" variant="primary" size="lg">
-        {{ common.backToRoadmap }}
-      </UiButtonLink>
-    </div>
-
-    <template v-else>
+    <template v-else-if="card">
       <!-- Lesson identity. Small on purpose: the orb is the subject here. -->
       <header class="mb-6 flex items-start justify-between gap-4">
         <div class="min-w-0 space-y-0.5">

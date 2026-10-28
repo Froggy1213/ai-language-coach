@@ -167,7 +167,6 @@ jobs:
       # ------------------------------------------------------------------------
       - name: Run Database Migrations
         run: |
-          chmod +x ./scripts/migrate-ecs.sh
           ./scripts/migrate-ecs.sh \
             --cluster "${{ env.NAME_PREFIX }}-cluster" \
             --task-def "${{ env.NAME_PREFIX }}-migration"
@@ -209,23 +208,20 @@ jobs:
           fi
 
           mkdir -p ~/.ssh
+          trap 'rm -f ~/.ssh/livekit_deploy.pem' EXIT
           echo "$SSH_KEY" > ~/.ssh/livekit_deploy.pem
           chmod 600 ~/.ssh/livekit_deploy.pem
 
-          chmod +x ./scripts/deploy-livekit.sh
           ./scripts/deploy-livekit.sh \
             --host "${{ env.LIVEKIT_HOST }}" \
             --key ~/.ssh/livekit_deploy.pem \
             --drain-timeout 900
-
-          rm -f ~/.ssh/livekit_deploy.pem
 
       # ------------------------------------------------------------------------
       # 5. Post-Deployment Smoke Verification (Plan §7 Checklist)
       # ------------------------------------------------------------------------
       - name: Run Smoke Tests
         run: |
-          chmod +x ./scripts/smoke-test.sh
           ./scripts/smoke-test.sh \
             --app-url "https://${{ env.APP_DOMAIN }}" \
             --livekit "${{ env.LIVEKIT_HOST }}"

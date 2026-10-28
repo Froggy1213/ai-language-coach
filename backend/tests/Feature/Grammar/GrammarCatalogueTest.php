@@ -81,6 +81,16 @@ class GrammarCatalogueTest extends TestCase
         $this->assertNull($catalogue->find('xx', 'present_simple'));
     }
 
+    public function test_path_traversal_language_code_returns_empty_array(): void
+    {
+        $catalogue = $this->catalogue();
+
+        $this->assertSame([], $catalogue->forLanguage('../../../etc/passwd'));
+        $this->assertSame([], $catalogue->forLanguage('en/../../config'));
+        $this->assertSame([], $catalogue->upTo('../malicious', CefrLevel::C1));
+        $this->assertNull($catalogue->find('../secret', 'present_simple'));
+    }
+
     private function catalogue(): GrammarCatalogue
     {
         return $this->app->make(GrammarCatalogue::class);

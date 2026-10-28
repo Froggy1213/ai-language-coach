@@ -34,16 +34,22 @@ resource "aws_elasticache_parameter_group" "redis7" {
   }
 }
 
-resource "aws_elasticache_cluster" "main" {
-  cluster_id           = "${var.name_prefix}-redis"
+# AWS ElastiCache requires a replication group (aws_elasticache_replication_group)
+# to enable in-transit (TLS) and at-rest encryption; standalone clusters do not support them.
+resource "aws_elasticache_replication_group" "main" {
+  replication_group_id = "${var.name_prefix}-redis"
+  description          = "Redis replication group for Horizon queues, cache, and Lighthouse"
   engine               = "redis"
   engine_version       = "7.0"
   node_type            = var.redis_node_type
-  num_cache_nodes      = 1
+  num_cache_clusters   = 1
   parameter_group_name = aws_elasticache_parameter_group.redis7.name
   subnet_group_name    = aws_elasticache_subnet_group.redis.name
   security_group_ids   = [aws_security_group.elasticache.id]
   port                 = 6379
+
+  transit_encryption_enabled = true
+  at_rest_encryption_enabled = true
 
   maintenance_window = "Sun:06:00-Sun:07:00"
 

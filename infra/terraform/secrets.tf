@@ -96,7 +96,7 @@ resource "random_password" "voice_internal_secret" {
 resource "aws_secretsmanager_secret" "app_secrets" {
   name                    = "${var.name_prefix}/app-secrets"
   description             = "Production application credentials for AI Language Coach services"
-  recovery_window_in_days = 0 # Immediate deletion on destroy for test teardowns
+  recovery_window_in_days = var.protect_data ? 7 : 0
 
   tags = {
     Name = "${var.name_prefix}-app-secrets"

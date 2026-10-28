@@ -11,7 +11,7 @@ test.describe('Session feedback screen @smoke', () => {
     await expect(page).toHaveURL(/\/reflect\/999999$/);
 
     // 3. No uncaught runtime crashes
-    expect(tracker.pageErrors).toEqual([]);
+    tracker.assertClean();
 
     // 4. Must not remain stuck in an infinite spinner
     await expect(page.locator(SPINNER)).toHaveCount(0);
@@ -24,7 +24,7 @@ test.describe('Session feedback screen @smoke', () => {
     await expect(page.getByText('Page not found: /reflect/999999')).toHaveCount(0);
 
     // 7. Must not log unhandled errors
-    expect(tracker.consoleErrors).toEqual([]);
+    tracker.assertClean();
   });
 
   // The breakdown moved from /session/:id to /reflect/:id; the old address is kept
@@ -35,10 +35,10 @@ test.describe('Session feedback screen @smoke', () => {
     await gotoAsSeededUser(page, '/session/999999');
     await expect(page).toHaveURL(/\/reflect\/999999$/);
 
-    expect(tracker.pageErrors).toEqual([]);
+    tracker.assertClean();
     await expect(page.locator(SPINNER)).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1, name: 'セッションが見つかりません' })).toBeVisible();
     await expect(page.getByText('Page not found: /session/999999')).toHaveCount(0);
-    expect(tracker.consoleErrors).toEqual([]);
+    tracker.assertClean();
   });
 });

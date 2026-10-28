@@ -289,8 +289,7 @@ export function useLighthouseSubscription(): {
   onReconnect: (handler: () => void) => () => void
 } {
   const { $echo } = useNuxtApp()
-  const config = useRuntimeConfig()
-  const backendUrl = String(config.public.backendUrl).replace(/\/$/, '')
+  const backendUrl = useBackendUrl()
   const transport: LighthouseTransport = { echo: $echo, backendUrl }
 
   const activeHandles = new Set<LighthouseSubscriptionHandle>()

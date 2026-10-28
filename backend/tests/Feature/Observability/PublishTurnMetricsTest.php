@@ -6,11 +6,11 @@ use App\Enums\VoiceSessionStatus;
 use App\Models\User;
 use App\Models\VoiceSession;
 use App\Observability\MetricDatum;
-use App\Observability\MetricPublisher;
 use App\Observability\PublishTurnMetrics;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakeMetricPublisher;
 use Tests\TestCase;
 
 class PublishTurnMetricsTest extends TestCase
@@ -19,7 +19,7 @@ class PublishTurnMetricsTest extends TestCase
 
     public function test_the_job_publishes_every_stage_of_a_turn_as_one_series(): void
     {
-        $publisher = $this->recordingPublisher();
+        $publisher = new FakeMetricPublisher;
 
         (new PublishTurnMetrics(7, [
             'stt_final' => 300.0,
@@ -84,19 +84,5 @@ class PublishTurnMetricsTest extends TestCase
         ]);
 
         Queue::assertNotPushed(PublishTurnMetrics::class);
-    }
-
-    private function recordingPublisher(): MetricPublisher
-    {
-        return new class implements MetricPublisher
-        {
-            /** @var list<MetricDatum> */
-            public array $published = [];
-
-            public function putMany(array $data): void
-            {
-                $this->published = array_merge($this->published, $data);
-            }
-        };
     }
 }

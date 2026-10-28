@@ -3,7 +3,34 @@ import tailwindcss from '@tailwindcss/vite'
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true },
+  devtools: { enabled: process.env.NODE_ENV !== 'production' },
+  routeRules: {
+    '/**': {
+      headers: {
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+      },
+    },
+  },
+  hooks: {
+    'pages:extend'(pages) {
+      if (process.env.NODE_ENV === 'production') {
+        const removeDevPages = (pagesList: typeof pages) => {
+          for (let i = pagesList.length - 1; i >= 0; i--) {
+            const page = pagesList[i]
+            if (page?.path?.startsWith('/dev')) {
+              pagesList.splice(i, 1)
+            } else if (page?.children) {
+              removeDevPages(page.children)
+            }
+          }
+        }
+        removeDevPages(pages)
+      }
+    },
+  },
   // SPA (plan §1): the Sanctum session cookie lives in the browser, so there is
   // nothing meaningful to render on the server — and no session to render with.
   ssr: false,

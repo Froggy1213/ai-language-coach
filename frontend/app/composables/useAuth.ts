@@ -48,19 +48,19 @@ export function useAuth() {
     await refresh()
   }
 
+  async function clearSession(): Promise<void> {
+    user.value = null
+    resolved.value = true
+    if (import.meta.client) {
+      window.location.assign('/login')
+    } else {
+      await navigateTo('/login')
+    }
+  }
+
   async function logout(): Promise<void> {
     await $urql.mutation(LOGOUT_MUTATION, {}).toPromise()
-
-    try {
-      user.value = null
-      resolved.value = true
-    } finally {
-      if (import.meta.client) {
-        window.location.assign('/login')
-      } else {
-        await navigateTo('/login')
-      }
-    }
+    await clearSession()
   }
 
   async function ensureResolved(): Promise<void> {
@@ -77,6 +77,7 @@ export function useAuth() {
     login,
     register,
     logout,
+    clearSession,
   }
 }
 

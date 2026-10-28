@@ -1,4 +1,4 @@
-import { Room, RoomEvent, Track, type LocalAudioTrack, type RemoteAudioTrack, type RemoteTrack } from 'livekit-client'
+import { Track, type LocalAudioTrack, type RemoteAudioTrack, type RemoteTrack } from 'livekit-client'
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { useVoiceSession } from '~/composables/useVoiceSession'
 

@@ -39,7 +39,7 @@ final class LiveKitToken
             'room' => $roomName,
             'canPublish' => true,
             'canSubscribe' => true,
-            'canPublishData' => true,
+            'canPublishData' => false,
         ], $identity, $name, ((int) config('voice.livekit.token_ttl_minutes')) * 60);
     }
 

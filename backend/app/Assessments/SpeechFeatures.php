@@ -39,7 +39,7 @@ final readonly class SpeechFeatures
      *
      * @see https://developers.deepgram.com/docs/filler-words
      */
-    private const FILLERS = ['um', 'uh', 'er', 'ah', 'mm', 'hmm', 'mhm', 'uh-huh', 'huh'];
+    public const FILLERS = ['um', 'uh', 'er', 'ah', 'mm', 'hmm', 'mhm', 'uh-huh', 'huh'];
 
     /**
      * Below this per-word confidence the recogniser was guessing. The value is

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { OrbState } from '~/composables/useConversation'
 
+if (process.env.NODE_ENV === 'production') {
+  throw createError({ statusCode: 404, statusMessage: 'Not Found', fatal: true })
+}
+
 /**
  * Design harness for the conversation orb. Not linked from anywhere; used to
  * review every state at a readable size while tuning the canvas.

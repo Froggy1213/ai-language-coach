@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { useQuery } from '@urql/vue'
-import type { CombinedError } from '@urql/vue'
-import {
-  DUE_REVIEWS_QUERY,
-  GENERATE_ROADMAP_MUTATION,
-  ROADMAP_QUERY,
-} from '~/graphql/documents'
-import type { ReviewItem, Roadmap } from '~/types/graphql'
+import { DUE_REVIEWS_QUERY } from '~/graphql/documents'
+import type { ReviewItem } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { greetingFor, COUNTER } from '~/utils/format'
 import { roadmap as roadmapCopy, today } from '~/constants/strings'
@@ -18,7 +13,6 @@ import { roadmap as roadmapCopy, today } from '~/constants/strings'
  * or do something else. Everything above the fold answers "what is next" and
  * nothing else; the numbers sit below as context, not as a dashboard.
  */
-const { $urql } = useNuxtApp()
 const { user } = useAuth()
 const route = useRoute()
 
@@ -26,11 +20,18 @@ const showLanding = computed(
   () => !user.value || route.query.preview === 'landing',
 )
 
-const { data, fetching, error, executeQuery } = useQuery<{ roadmap: Roadmap | null }>({
-  query: ROADMAP_QUERY,
-  pause: showLanding,
-  requestPolicy: 'network-only',
-})
+const {
+  roadmap,
+  readyCard,
+  completedCount,
+  totalCount,
+  isComplete,
+  building,
+  buildError,
+  buildRoadmap,
+  fetching,
+  error,
+} = useRoadmap({ pause: showLanding })
 
 const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
   query: DUE_REVIEWS_QUERY,
@@ -38,46 +39,7 @@ const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
   requestPolicy: 'cache-and-network',
 })
 
-const roadmap = computed(() => data.value?.roadmap ?? null)
 const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
-
-const readyCard = computed(
-  () => roadmap.value?.lessonCards.find((card) => card.status === 'ready') ?? null,
-)
-
-const completedCount = computed(
-  () => roadmap.value?.lessonCards.filter((card) => card.status === 'completed').length ?? 0,
-)
-
-const totalCount = computed(() => roadmap.value?.lessonCards.length ?? 0)
-
-const isComplete = computed(
-  () => totalCount.value > 0 && completedCount.value >= totalCount.value,
-)
-
-const building = ref(false)
-const buildError = ref<string | null>(null)
-
-async function buildRoadmap(): Promise<void> {
-  building.value = true
-  buildError.value = null
-
-  try {
-    const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
-
-    if (failure) {
-      buildError.value = graphQLErrorMessageFor(failure as CombinedError, {
-        fallback: roadmapCopy.buildError,
-      })
-    } else {
-      await executeQuery({ requestPolicy: 'network-only' })
-    }
-  } catch {
-    buildError.value = roadmapCopy.buildError
-  } finally {
-    building.value = false
-  }
-}
 
 const greeting = computed(() => greetingFor())
 

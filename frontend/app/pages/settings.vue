@@ -5,6 +5,8 @@ import { languageDisplayName } from '~/constants/languages'
 import { common, settings as copy } from '~/constants/strings'
 import { formatDate } from '~/utils/format'
 
+import type { CurrentUser } from '~/types/view-models'
+
 /**
  * 設定 — account, appearance, and the data controls.
  *
@@ -12,27 +14,17 @@ import { formatDate } from '~/utils/format'
  * label and value, one section per concern, and the destructive action isolated
  * at the bottom behind its own confirmation.
  */
-interface MeData {
-  me: {
-    id: string
-    name: string
-    email: string
-    targetLanguage: string
-    currentLevel: string
-    voiceConsentAt: string | null
-  } | null
-}
+const { user, logout } = useAuth()
 
-const { data, fetching, error: queryError } = useQuery<MeData>({
+const { data, fetching, error: queryError } = useQuery<{ me: CurrentUser | null }>({
   query: ME_QUERY,
   requestPolicy: 'cache-and-network',
 })
 
-const currentUser = computed(() => data.value?.me ?? null)
+const currentUser = computed(() => data.value?.me ?? user.value)
 
 const { theme, set: setTheme } = useTheme()
 
-const { logout } = useAuth()
 const { deleting, error: deleteError, deleteAccount } = usePrivacy()
 
 const password = ref('')

@@ -58,6 +58,11 @@ resource "aws_db_parameter_group" "mysql84" {
     value = "utf8mb4_unicode_ci"
   }
 
+  parameter {
+    name  = "require_secure_transport"
+    value = "ON"
+  }
+
   tags = {
     Name = "${var.name_prefix}-mysql84-params"
   }

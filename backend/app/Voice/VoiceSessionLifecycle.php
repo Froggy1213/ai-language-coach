@@ -146,7 +146,7 @@ final class VoiceSessionLifecycle
             if ($session->status->isTerminal()
                 && $isLearnerUtterance
                 && ! $session->mistakes()->exists()
-                && ! $this->isAlreadyAnalyzed($session)
+                && ! $session->hasAnalysisMarker()
             ) {
                 $this->dispatchAnalysis($session);
             }
@@ -218,7 +218,7 @@ final class VoiceSessionLifecycle
                 // never delays a webhook LiveKit would then retry.
                 PublishSessionMetrics::dispatch($session->id)->afterCommit();
 
-                if ($this->hasLearnerUtterances($session)) {
+                if ($session->hasLearnerUtterances()) {
                     $this->dispatchAnalysis($session);
                 }
             }
@@ -271,43 +271,6 @@ final class VoiceSessionLifecycle
         }
 
         PublishTurnMetrics::dispatch($session->id, $stages)->afterCommit();
-    }
-
-    private function isAlreadyAnalyzed(VoiceSession $session): bool
-    {
-        $transcript = $session->transcript;
-        if (! is_array($transcript)) {
-            return false;
-        }
-
-        foreach ($transcript as $item) {
-            if (is_array($item) && ($item['type'] ?? null) === 'analysis') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function hasLearnerUtterances(VoiceSession $session): bool
-    {
-        $transcript = $session->transcript;
-        if (! is_array($transcript)) {
-            return false;
-        }
-
-        foreach ($transcript as $turn) {
-            if (! is_array($turn) || ($turn['type'] ?? null) === 'analysis') {
-                continue;
-            }
-
-            $text = trim((string) ($turn['transcript'] ?? ''));
-            if ($text !== '') {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

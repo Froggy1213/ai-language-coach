@@ -461,6 +461,27 @@ services:
       # runner and would sit idle against the `database` driver.
       <<: *laravel-environment
 
+  scheduler:
+    profiles: ["full"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach_scheduler
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      # Inherits the image's /up probe otherwise, which this role does not serve.
+      test: ["CMD-SHELL", "pgrep -f 'artisan schedule:work' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - api
+    environment:
+      <<: *laravel-environment
+
   reverb:
     profiles: ["full"]
     build:

@@ -81,8 +81,8 @@ export function trackPageErrors(page: Page): PageErrorTracker {
 }
 
 export const SEEDED_USER = {
-  email: 'test@example.com',
-  password: 'password',
+  email: process.env.E2E_USER_EMAIL || 'test@example.com',
+  password: process.env.E2E_USER_PASSWORD || 'password',
 };
 
 /** Where the setup project leaves the signed-in session for the other specs. */

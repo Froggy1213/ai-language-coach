@@ -8,8 +8,7 @@ test.describe('Spaced repetition review screen @smoke', () => {
     await gotoAsSeededUser(page, '/review');
 
     // 3. Page must not produce uncaught exceptions or console errors
-    expect(tracker.pageErrors).toEqual([]);
-    expect(tracker.consoleErrors).toEqual([]);
+    tracker.assertClean();
 
     // 4. The screen itself must be there — asserted on its own heading rather
     // than on "something that mentions review", so a blank page cannot pass.
@@ -42,7 +41,6 @@ test.describe('Spaced repetition review screen @smoke', () => {
     await expect(page.getByText('Page not found: /review')).toHaveCount(0);
 
     // 7. Final assert that no console errors or page errors were produced
-    expect(tracker.pageErrors).toEqual([]);
-    expect(tracker.consoleErrors).toEqual([]);
+    tracker.assertClean();
   });
 });

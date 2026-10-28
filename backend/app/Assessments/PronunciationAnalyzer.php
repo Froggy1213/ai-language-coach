@@ -58,13 +58,6 @@ final class PronunciationAnalyzer
      */
     private const MAX_LISTED_WORDS = 8;
 
-    /**
-     * Filler words the recogniser keeps verbatim. Showing "um" as a word to
-     * practise would be advice about hesitation filed under pronunciation, and
-     * the report already names hesitation separately.
-     */
-    private const NOT_PRONUNCIATION = ['um', 'uh', 'er', 'ah', 'mm', 'hmm', 'mhm', 'uh-huh', 'huh'];
-
     public function analyze(SpeechFeatures $features): PronunciationAssessment
     {
         $scored = $this->scoredWords($features);
@@ -161,7 +154,7 @@ final class PronunciationAnalyzer
 
             $key = mb_strtolower($display);
 
-            if (in_array($key, self::NOT_PRONUNCIATION, true)) {
+            if (in_array($key, SpeechFeatures::FILLERS, true)) {
                 continue;
             }
 

@@ -1,4 +1,22 @@
-import type { CombinedError } from '@urql/vue'
+/**
+ * Structural shape of a GraphQL error or Urql CombinedError.
+ */
+export interface GraphQLErrorLike {
+  message?: string
+  graphQLErrors?: ReadonlyArray<{
+    message?: string
+    extensions?: {
+      code?: string
+      category?: string
+      validation?: Record<string, string[]>
+      [key: string]: unknown
+    }
+  }>
+}
+
+function isObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === 'object' && val !== null
+}
 
 /**
  * A message worth showing the user.
@@ -7,28 +25,36 @@ import type { CombinedError } from '@urql/vue'
  * the field [login]." plus a per-field map, so the field messages are what the
  * form should display; everything else falls back to the error itself.
  */
-export function graphQLErrorMessage(error: CombinedError | null | undefined): string | null {
-  if (!error) {
+export function graphQLErrorMessage(error: GraphQLErrorLike | unknown): string | null {
+  if (!isObject(error)) {
     return null
   }
 
-  const extensions = error.graphQLErrors[0]?.extensions as { validation?: Record<string, string[]> } | undefined
-  const fieldMessage = extensions?.validation ? Object.values(extensions.validation)[0]?.[0] : undefined
+  const graphQLErrors = Array.isArray(error.graphQLErrors) ? error.graphQLErrors : []
+  const first = graphQLErrors[0]
+  const extensions = isObject(first) && isObject(first.extensions) ? first.extensions : undefined
+  const validation = extensions && isObject(extensions.validation) ? (extensions.validation as Record<string, string[]>) : undefined
+  const fieldMessage = validation ? Object.values(validation)[0]?.[0] : undefined
 
-  return fieldMessage ?? error.graphQLErrors[0]?.message ?? error.message
+  const firstMsg = isObject(first) && typeof first.message === 'string' ? first.message : undefined
+  const topMsg = typeof error.message === 'string' ? error.message : undefined
+
+  return fieldMessage ?? firstMsg ?? topMsg ?? null
 }
 
 /**
  * Returns the first GraphQL error's extensions.code, if present.
  */
-export function graphQLErrorCode(error: CombinedError | null | undefined): string | null {
-  if (!error) {
+export function graphQLErrorCode(error: GraphQLErrorLike | unknown): string | null {
+  if (!isObject(error)) {
     return null
   }
 
-  const extensions = error.graphQLErrors[0]?.extensions as { code?: string } | undefined
+  const graphQLErrors = Array.isArray(error.graphQLErrors) ? error.graphQLErrors : []
+  const first = graphQLErrors[0]
+  const extensions = isObject(first) && isObject(first.extensions) ? first.extensions : undefined
 
-  return extensions?.code ?? null
+  return typeof extensions?.code === 'string' ? extensions.code : null
 }
 
 /**
@@ -39,16 +65,17 @@ export function graphQLErrorCode(error: CombinedError | null | undefined): strin
  * the interface language. Detecting them lets a caller show its own copy instead
  * of rendering a sentence the learner may not read.
  */
-export function graphQLErrorIsValidation(error: CombinedError | null | undefined): boolean {
-  if (!error) {
+export function graphQLErrorIsValidation(error: GraphQLErrorLike | unknown): boolean {
+  if (!isObject(error)) {
     return false
   }
 
-  const extensions = error.graphQLErrors[0]?.extensions as
-    | { category?: string, validation?: Record<string, string[]> }
-    | undefined
+  const graphQLErrors = Array.isArray(error.graphQLErrors) ? error.graphQLErrors : []
+  const first = graphQLErrors[0]
+  const extensions = isObject(first) && isObject(first.extensions) ? first.extensions : undefined
+  const validation = extensions && isObject(extensions.validation) ? extensions.validation : undefined
 
-  return extensions?.category === 'validation' || Boolean(extensions?.validation)
+  return extensions?.category === 'validation' || Boolean(validation)
 }
 
 /** The one message that must never depend on an index lookup, so it stays total. */
@@ -56,6 +83,10 @@ export const AUTH_EXPIRED_MESSAGE = 'セッションの有効期限が切れま�
 
 export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
   UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
+  REVIEW_ITEM_NOT_FOUND: '復習する項目が見つかりません。',
+  GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
+  CONFIRMATION_REQUIRED: '削除を確定するには DELETE と入力してください。',
+  PASSWORD_MISMATCH: 'パスワードが正しくありません。',
 }
 
 /**
@@ -75,7 +106,7 @@ export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
  * Never returns null or undefined.
  */
 export function graphQLErrorMessageFor(
-  error: CombinedError | null | undefined,
+  error: GraphQLErrorLike | unknown,
   options?: {
     codes?: Record<string, string>
     messages?: Record<string, string>
@@ -84,7 +115,7 @@ export function graphQLErrorMessageFor(
 ): string {
   const fallback = options?.fallback ?? 'リクエストを完了できませんでした。しばらくしてからお試しください。'
 
-  if (!error) {
+  if (!isObject(error)) {
     return fallback
   }
 

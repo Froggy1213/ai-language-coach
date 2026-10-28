@@ -24,6 +24,7 @@ class ProductionSanityCheck
         self::assertDebugDisabled($app);
         self::assertNoDevelopmentSecrets($app);
         self::assertCorsOriginsSecure($app);
+        self::assertReverbOriginsSecure($app);
         self::assertSecureSessionCookies($app);
     }
 
@@ -94,17 +95,49 @@ class ProductionSanityCheck
         $app = $app ?? app();
         $allowedOrigins = $app['config']->get('cors.allowed_origins', []);
 
+        self::assertOriginsListHasNoWildcard(
+            $allowedOrigins,
+            "Production sanity check failed: CORS_ALLOWED_ORIGINS (config('cors.allowed_origins')) cannot contain '*' in production. ".
+            'Because supports_credentials is true, wildcard origins allow arbitrary websites to make credentialed cross-origin requests. '.
+            "Set CORS_ALLOWED_ORIGINS to explicit allowed origin(s) (e.g. 'https://yourdomain.com') in your production environment."
+        );
+    }
+
+    /**
+     * Ensure Reverb allowed origins do not contain wildcard '*' in production.
+     *
+     * @throws RuntimeException
+     */
+    public static function assertReverbOriginsSecure(?Application $app = null): void
+    {
+        $app = $app ?? app();
+        $apps = $app['config']->get('reverb.apps.apps', []);
+
+        if (! is_array($apps)) {
+            return;
+        }
+
+        foreach ($apps as $appConfig) {
+            $allowedOrigins = $appConfig['allowed_origins'] ?? [];
+
+            self::assertOriginsListHasNoWildcard(
+                $allowedOrigins,
+                "Production sanity check failed: REVERB_ALLOWED_ORIGINS (config('reverb.apps.apps.*.allowed_origins')) cannot contain '*' in production. ".
+                'Wildcard origins allow arbitrary websites to connect to your Reverb WebSocket server. '.
+                "Set REVERB_ALLOWED_ORIGINS to explicit allowed origin(s) (e.g. 'https://yourdomain.com') in your production environment."
+            );
+        }
+    }
+
+    private static function assertOriginsListHasNoWildcard(mixed $allowedOrigins, string $errorMessage): void
+    {
         $origins = is_array($allowedOrigins)
             ? $allowedOrigins
             : (is_string($allowedOrigins) ? explode(',', $allowedOrigins) : []);
 
         foreach ($origins as $origin) {
             if (trim((string) $origin) === '*') {
-                throw new RuntimeException(
-                    "Production sanity check failed: CORS_ALLOWED_ORIGINS (config('cors.allowed_origins')) cannot contain '*' in production. ".
-                    'Because supports_credentials is true, wildcard origins allow arbitrary websites to make credentialed cross-origin requests. '.
-                    "Set CORS_ALLOWED_ORIGINS to explicit allowed origin(s) (e.g. 'https://yourdomain.com') in your production environment."
-                );
+                throw new RuntimeException($errorMessage);
             }
         }
     }

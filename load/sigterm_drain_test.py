@@ -26,9 +26,12 @@ import sys
 import time
 from typing import Any, Dict, Optional, Tuple
 
-# Re-use credential resolution and token minting from dispatch_capacity
+# Re-use credential resolution and token minting from livekit_client
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dispatch_capacity import mint_server_token, resolve_credentials, twirp_call, TwirpError
+try:
+    from livekit_client import mint_server_token, resolve_credentials, twirp_call, TwirpError
+except ImportError:
+    from load.livekit_client import mint_server_token, resolve_credentials, twirp_call, TwirpError
 
 
 CONTAINER_NAME = "coach_voice_agent"

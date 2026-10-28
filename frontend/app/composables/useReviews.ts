@@ -6,7 +6,7 @@ import {
   SUBMIT_REVIEW_RESULT_MUTATION,
 } from '~/graphql/documents'
 import type { RecurringMistake, ReviewItem } from '~/types/graphql'
-import { AUTH_EXPIRED_MESSAGE, graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 /**
  * Manages the spaced repetition review queue and SM-2 quality submission (plan §4–6).
@@ -30,11 +30,6 @@ export function useReviews() {
 
   function mapReviewError(failure: CombinedError | null | undefined): string {
     return graphQLErrorMessageFor(failure, {
-      codes: {
-        REVIEW_ITEM_NOT_FOUND: '復習する項目が見つかりません。',
-        GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
-        UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
-      },
       fallback: '復習の結果を保存できませんでした。',
     })
   }

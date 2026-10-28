@@ -1,2 +1,7 @@
 User-Agent: *
-Disallow:
+Disallow: /talk/
+Disallow: /reflect/
+Disallow: /settings
+Disallow: /review
+Disallow: /roadmap
+Disallow: /dev/

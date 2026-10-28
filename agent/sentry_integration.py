@@ -43,6 +43,12 @@ SENSITIVE_KEYS = {
     "user_input",
     "learner_utterance",
     "utterance",
+    # Local variable names holding user speech in stack frames (MED-03)
+    "text",
+    "cleaned",
+    "raw_content",
+    "parts",
+    "tx",
 }
 
 _sentry_initialized = False

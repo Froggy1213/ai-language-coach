@@ -4,7 +4,32 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Callable, Dict, NamedTuple, Optional, TypeVar
+
+T = TypeVar("T")
+
+try:
+    from prompts import (
+        LANGUAGE_NAMES,
+        _language_code,
+        build_greeting,
+        build_system_prompt,
+    )
+except ImportError:
+    try:
+        from .prompts import (
+            LANGUAGE_NAMES,
+            _language_code,
+            build_greeting,
+            build_system_prompt,
+        )
+    except (ImportError, ValueError):
+        from agent.prompts import (
+            LANGUAGE_NAMES,
+            _language_code,
+            build_greeting,
+            build_system_prompt,
+        )
 
 try:
     import aiohttp
@@ -117,31 +142,29 @@ if not logger.handlers:
     logger.addHandler(_log_handler)
 
 
-def _env_int(name: str, default: int) -> int:
-    """Read an integer setting, keeping the default and saying so on a typo."""
-    raw = os.getenv(name, "").strip()
-    if raw == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        logger.warning("Ignoring %s=%r: not an integer", name, raw)
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
+def _env_num(name: str, default: T, cast: Callable[[str], T], type_label: str) -> T:
     """Read a numeric setting, keeping the default and saying so on a typo."""
     raw = os.getenv(name, "").strip()
     if raw == "":
         return default
     try:
-        return float(raw)
-    except ValueError:
-        logger.warning("Ignoring %s=%r: not a number", name, raw)
+        return cast(raw)
+    except (ValueError, TypeError):
+        logger.warning("Ignoring %s=%r: not %s", name, raw, type_label)
         return default
 
 
-def _env_str(name: str, default: str) -> str:
+def _env_int(name: str, default: int) -> int:
+    """Read an integer setting, keeping the default and saying so on a typo."""
+    return _env_num(name, default, int, "an integer")
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a numeric setting, keeping the default and saying so on a typo."""
+    return _env_num(name, default, float, "a number")
+
+
+def _env_str(name: str, default: Optional[str] = "") -> Optional[str]:
     """
     Read a string setting, treating blank as absent.
 
@@ -152,7 +175,8 @@ def _env_str(name: str, default: str) -> str:
     rejects at the first turn instead of at startup. Blank means "not configured"
     everywhere in this file.
     """
-    return (os.getenv(name) or "").strip() or default
+    raw = (os.getenv(name) or "").strip()
+    return raw if raw else default
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -186,19 +210,6 @@ def _env_per_language(name: str, language: str, default: str = "") -> str:
             return value
 
     return (os.getenv(name) or "").strip() or default
-
-
-def _language_code(language: str) -> str:
-    """
-    The base language tag from whatever the session metadata carried.
-
-    Metadata arrives as `en`, `en-US` or `EN`; Deepgram and the voice maps want
-    the bare code, and an empty value means "the default language" rather than
-    "no language".
-    """
-    raw = (language or "").strip().lower().replace("_", "-")
-    base = raw.split("-", 1)[0]
-    return base or "en"
 
 
 def build_turn_handling() -> Dict[str, Any]:
@@ -281,6 +292,10 @@ def build_worker_options() -> Any:
         load_threshold=_env_float("LOAD_THRESHOLD", 0.7),
         drain_timeout=_env_float("DRAIN_TIMEOUT_SECONDS", 110.0),
     )
+
+
+# Maximum voice session duration in seconds (HIGH-04). Defaults to 15 minutes (900 seconds).
+VOICE_MAX_SESSION_SECONDS = _env_float("VOICE_MAX_SESSION_SECONDS", 900.0)
 
 
 class _InternalResponse(NamedTuple):
@@ -486,12 +501,23 @@ def extract_user_transcript(item_or_event: Any) -> Optional[str]:
     if item_or_event is None:
         return None
 
+    # Handle interim transcript events where is_final is False
+    if hasattr(item_or_event, "is_final") and not getattr(item_or_event, "is_final"):
+        return None
+
+    # Direct string input
+    if isinstance(item_or_event, str) and item_or_event.strip():
+        return item_or_event.strip()
+
     # Handle event wrapper (e.g. ConversationItemAddedEvent with .item)
     item = getattr(item_or_event, "item", item_or_event)
 
-    # Must be a user role
+    if hasattr(item, "is_final") and not getattr(item, "is_final"):
+        return None
+
+    # Must be a user role if role attribute is present
     role = getattr(item, "role", None)
-    if role != "user":
+    if role is not None and role != "user":
         return None
 
     # 1. Try text_content property or method (LiveKit ChatMessage has @property text_content)
@@ -525,6 +551,8 @@ def extract_user_transcript(item_or_event: Any) -> Optional[str]:
                 parts.append(p.strip())
             elif hasattr(p, "text") and isinstance(p.text, str) and p.text.strip():
                 parts.append(p.text.strip())
+            elif p is not None and str(p).strip():
+                parts.append(str(p).strip())
         if parts:
             return " ".join(parts)
 
@@ -606,6 +634,7 @@ def build_cloudwatch_turn_log(
     """
     Constructs structured JSON dict for container stdout / CloudWatch log ingestion.
     Metrics are in milliseconds (ms).
+    Learner transcripts are excluded to prevent PII leakage in container logs (HIGH-02).
     """
     return {
         "event": "voice_turn_latency",
@@ -615,7 +644,6 @@ def build_cloudwatch_turn_log(
         "llm_first_token_ms": to_ms(llm_first_token_sec),
         "tts_first_chunk_ms": to_ms(tts_first_chunk_sec),
         "total_turnaround_ms": to_ms(total_turnaround_sec),
-        "transcript": transcript,
     }
 
 
@@ -921,7 +949,6 @@ class TurnMetricsTracker:
             llm_first_token_sec=turn["llm_first_token_sec"],
             tts_first_chunk_sec=turn["tts_first_chunk_sec"],
             total_turnaround_sec=total_sec,
-            transcript=turn.get("transcript"),
         )
         total_ms_val = to_ms(total_sec) if to_ms(total_sec) is not None else 0.0
         stt_ms_val = to_ms(turn["stt_final_sec"]) if to_ms(turn["stt_final_sec"]) is not None else 0.0
@@ -941,76 +968,7 @@ class TurnMetricsTracker:
 
 
 
-def build_system_prompt(metadata: Dict[str, Any]) -> str:
-    target_language = str(metadata.get("target_language") or "en")
-    level = str(metadata.get("level") or "A2")
-    grammar_point = str(metadata.get("grammar_point") or "General conversation")
-    practice_prompt = str(
-        metadata.get("practice_prompt") or "Have a friendly conversation to practice language fluency."
-    )
 
-    return f"""You are Kirie, an expert, empathetic AI Language Coach.
-You are conducting a 1-on-1 spoken practice session with a language learner.
-
-Session Details:
-- Target Language: {target_language}
-- Student CEFR Level: {level}
-- Target Grammar Point: {grammar_point}
-- Practice Goal / Scenario: {practice_prompt}
-
-Guidelines:
-1. Speak exclusively or predominantly in the target language ({target_language}), tailored to level {level}.
-2. Keep your conversational turns concise (1 to 3 short sentences maximum). You are speaking aloud over voice.
-3. Be conversational and interactive: ask open-ended questions so the student does most of the talking.
-4. When the student makes an error related to '{grammar_point}', provide a gentle rephrase or brief correction naturally in conversation.
-5. Keep the atmosphere supportive, friendly, and motivating.
-"""
-
-
-# Names for the languages a greeting can be spoken in. Only used for the opening
-# line; the dialogue itself is driven by `target_language` in the instructions, so
-# a language missing here gets a slightly less idiomatic greeting, not a broken
-# session.
-LANGUAGE_NAMES: Dict[str, str] = {
-    "en": "English",
-    "de": "German",
-    "fr": "French",
-    "es": "Spanish",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "nl": "Dutch",
-    "pl": "Polish",
-    "ru": "Russian",
-    "tr": "Turkish",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "zh": "Chinese",
-}
-
-
-def build_greeting(metadata: Dict[str, Any]) -> str:
-    """
-    The agent's opening line, spoken before the learner says anything.
-
-    Deliberately a fixed sentence rendered by TTS rather than a generated one:
-    `session.say()` reaches the learner after one text-to-speech call, while
-    asking the model to write the greeting would add a full LLM round trip to the
-    very first thing anybody hears. (The turns after it do go through the model,
-    preemptively — see `build_turn_handling`.)
-
-    The previous wording ("Today we are practicing Present Perfect. Practice
-    discussing past travel experiences, and visits.") read the metadata aloud and
-    was ungrammatical. `practice_prompt` is a full instruction to the learner — the
-    catalogue writes "Describe your usual weekday: what you always, usually and
-    never do, and at what time." — so it is spoken verbatim as the task rather than
-    wrapped in a phrase that assumes it is a topic.
-    """
-    language = _language_code(str(metadata.get("target_language") or "en"))
-    language_name = LANGUAGE_NAMES.get(language, language.upper())
-    practice_prompt = str(metadata.get("practice_prompt") or "").strip().rstrip(".")
-    task = practice_prompt or "Let's start with some speaking practice"
-
-    return f"Hi! I'm your {language_name} coach. {task}. Ready when you are."
 
 
 def create_stt(metadata: Dict[str, Any]):
@@ -1144,10 +1102,10 @@ def create_llm():
     if not HAS_OPENAI:
         raise RuntimeError("livekit-plugins-openai is required for LLM integration")
 
-    explicit_provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
-    model_name = (os.getenv("LLM_MODEL") or "").strip() or None
-    base_url = (os.getenv("LLM_BASE_URL") or "").strip() or None
-    llm_key = (os.getenv("LLM_API_KEY") or "").strip() or None
+    explicit_provider = (_env_str("LLM_PROVIDER", "") or "").lower()
+    model_name = _env_str("LLM_MODEL", None)
+    base_url = _env_str("LLM_BASE_URL", None)
+    llm_key = _env_str("LLM_API_KEY", None)
 
     # A provider that was named is a decision; it is checked, not second-guessed.
     if explicit_provider:
@@ -1156,7 +1114,7 @@ def create_llm():
         # there is nothing to classify and no latency figure to hold it to.
         known = KNOWN_DIALOGUE_PROVIDERS.get(provider)
         key_var = known["key_var"] if known else f"{provider.upper()}_API_KEY"
-        api_key = llm_key or (os.getenv(key_var) or "").strip() or None
+        api_key = llm_key or _env_str(key_var, None)
 
         if not api_key:
             raise ValueError(f"{key_var} (or LLM_API_KEY) is required when LLM_PROVIDER is '{provider}'")
@@ -1189,7 +1147,7 @@ def create_llm():
         if provider in SLOW_DIALOGUE_PROVIDERS:
             continue
 
-        api_key = llm_key or (os.getenv(config["key_var"]) or "").strip() or None
+        api_key = llm_key or _env_str(config["key_var"], None)
         if not api_key:
             continue
 
@@ -1211,7 +1169,7 @@ def create_llm():
     # used. Returning a model here rather than falling through matters: the
     # override is the whole point of the escape hatch, and a fall-through would
     # report "nothing is configured" to an operator who had just configured it.
-    slow_key = llm_key or (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
+    slow_key = llm_key or _env_str("DEEPSEEK_API_KEY", None)
     if slow_key:
         assert_dialogue_provider_is_suitable("deepseek")
         logger.warning(
@@ -1270,9 +1228,9 @@ def create_tts(metadata: Optional[Dict[str, Any]] = None):
     metadata = metadata or {}
     language = _language_code(str(metadata.get("target_language") or "en"))
 
-    cartesia_key = os.getenv("CARTESIA_API_KEY")
-    deepgram_key = os.getenv("DEEPGRAM_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+    cartesia_key = _env_str("CARTESIA_API_KEY", None)
+    deepgram_key = _env_str("DEEPGRAM_API_KEY", None)
+    openai_key = _env_str("OPENAI_API_KEY", None)
 
     if cartesia_key and HAS_CARTESIA:
         return cartesia.TTS(
@@ -1363,6 +1321,13 @@ async def entrypoint(ctx: JobContext):
         "target_language": str(target_language),
     }
 
+    async def _handle_session_error(
+        exc: Exception, reason: str, message: str, *args: Any, exc_info: bool = False
+    ) -> None:
+        logger.error(message, *args, exc_info=exc_info)
+        capture_exception(exc, tags=session_tags)
+        await report_session_failure(session_id, reason)
+
     try:
         # 2. Connect worker to LiveKit room
         # This announces participant kind=AGENT to the room, which unblocks StartVoiceSession
@@ -1371,9 +1336,9 @@ async def entrypoint(ctx: JobContext):
             await ctx.connect(auto_subscribe=auto_sub)
             logger.info("Agent successfully connected to room %s as AGENT", room_name)
         except Exception as exc:
-            logger.error("Failed to connect to LiveKit room %s: %s", room_name, exc)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "agent_error")
+            await _handle_session_error(
+                exc, "agent_error", "Failed to connect to LiveKit room %s: %s", room_name, exc
+            )
             return
 
         # 3. Instantiate voice pipeline components
@@ -1382,39 +1347,61 @@ async def entrypoint(ctx: JobContext):
             if vad is None:
                 vad = silero.VAD.load()
         except Exception as exc:
-            logger.error("Failed to load VAD: %s", exc)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "agent_error")
+            await _handle_session_error(exc, "agent_error", "Failed to load VAD: %s", exc)
             return
 
         try:
             stt = create_stt(metadata)
         except Exception as exc:
-            logger.error("Failed to initialize STT: %s", exc)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "stt_failed")
+            await _handle_session_error(exc, "stt_failed", "Failed to initialize STT: %s", exc)
             return
 
         try:
             llm_instance = create_llm()
         except Exception as exc:
-            logger.error("Failed to initialize LLM: %s", exc)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "llm_failed")
+            await _handle_session_error(exc, "llm_failed", "Failed to initialize LLM: %s", exc)
             return
 
         try:
             tts = create_tts(metadata)
         except Exception as exc:
-            logger.error("Failed to initialize TTS: %s", exc)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "tts_failed")
+            await _handle_session_error(exc, "tts_failed", "Failed to initialize TTS: %s", exc)
             return
 
         instructions = build_system_prompt(metadata)
 
         # 4. Run session
         try:
+            max_session_seconds = _env_float("VOICE_MAX_SESSION_SECONDS", VOICE_MAX_SESSION_SECONDS)
+            duration_task: Optional[asyncio.Task] = None
+
+            async def _enforce_max_duration() -> None:
+                try:
+                    await asyncio.sleep(max_session_seconds)
+                    logger.warning(
+                        "Maximum voice session duration reached (%.1fs). Forcing shutdown for session_id=%s, room=%s",
+                        max_session_seconds,
+                        session_id,
+                        room_name,
+                    )
+                    if hasattr(ctx, "shutdown") and callable(ctx.shutdown):
+                        try:
+                            res = ctx.shutdown(reason="max_session_duration_reached")
+                            if asyncio.iscoroutine(res):
+                                await res
+                        except TypeError:
+                            res = ctx.shutdown()
+                            if asyncio.iscoroutine(res):
+                                await res
+                    elif hasattr(ctx, "room") and ctx.room and hasattr(ctx.room, "disconnect") and callable(ctx.room.disconnect):
+                        res = ctx.room.disconnect()
+                        if asyncio.iscoroutine(res):
+                            await res
+                except asyncio.CancelledError:
+                    pass
+                except Exception as dur_exc:
+                    logger.warning("Error during max session duration shutdown: %s", dur_exc)
+
             if USE_AGENT_SESSION:
                 logger.info("Using LiveKit AgentSession interface")
                 agent_instance = Agent(instructions=instructions)
@@ -1453,50 +1440,31 @@ async def entrypoint(ctx: JobContext):
                         except Exception as exc:
                             logger.warning("Error processing collected metric: %s", exc)
 
-                    @session.on("conversation_item_added")
-                    def _on_conversation_item_added(item: Any):
+                    def _on_user_speech_event(item_or_event: Any):
                         try:
-                            transcript = extract_user_transcript(item)
+                            transcript = extract_user_transcript(item_or_event)
                             if transcript:
                                 tracker.on_user_speech(transcript)
                         except Exception as exc:
-                            logger.debug("Error reading conversation item: %s", exc)
+                            logger.debug("Error reading user speech event: %s", exc)
 
-                    @session.on("user_input_transcribed")
-                    def _on_user_input_transcribed(ev: Any):
-                        try:
-                            if getattr(ev, "is_final", False):
-                                tx = getattr(ev, "transcript", None)
-                                if isinstance(tx, str) and tx.strip():
-                                    tracker.on_user_speech(tx.strip())
-                        except Exception as exc:
-                            logger.debug("Error reading user input transcription: %s", exc)
-
-                    # Kept as legacy/defensive fallback in case older/wrapped pipelines emit it
-                    @session.on("user_speech_committed")
-                    def _on_user_speech_committed(msg: Any):
-                        try:
-                            transcript = extract_user_transcript(msg)
-                            if transcript:
-                                tracker.on_user_speech(transcript)
-                            else:
-                                content = getattr(msg, "content", None)
-                                if isinstance(content, str):
-                                    tracker.on_user_speech(content)
-                                elif isinstance(content, list):
-                                    parts = [str(p) for p in content if p]
-                                    if parts:
-                                        tracker.on_user_speech(" ".join(parts))
-                        except Exception as exc:
-                            logger.debug("Error reading committed user speech: %s", exc)
+                    for event_name in (
+                        "conversation_item_added",
+                        "user_input_transcribed",
+                        "user_speech_committed",
+                    ):
+                        session.on(event_name)(_on_user_speech_event)
 
                 async def _cleanup_tracker() -> None:
+                    if duration_task and not duration_task.done():
+                        duration_task.cancel()
                     turn_tracker.close()
 
                 if hasattr(ctx, "add_shutdown_callback"):
                     ctx.add_shutdown_callback(_cleanup_tracker)
 
                 await session.start(room=ctx.room, agent=agent_instance)
+                duration_task = asyncio.create_task(_enforce_max_duration())
 
                 # One text-to-speech call, no model in the loop: see build_greeting.
                 await session.say(build_greeting(metadata), allow_interruptions=True)
@@ -1508,20 +1476,31 @@ async def entrypoint(ctx: JobContext):
                     llm=llm_instance,
                     tts=tts,
                 )
+
+                async def _cleanup_pipeline() -> None:
+                    if duration_task and not duration_task.done():
+                        duration_task.cancel()
+
+                if hasattr(ctx, "add_shutdown_callback"):
+                    ctx.add_shutdown_callback(_cleanup_pipeline)
+
                 pipeline_agent.start(ctx.room)
+                duration_task = asyncio.create_task(_enforce_max_duration())
 
                 await pipeline_agent.say(build_greeting(metadata), allow_interruptions=True)
 
         except Exception as exc:
-            logger.error("Runtime error in voice agent session: %s", exc, exc_info=True)
-            capture_exception(exc, tags=session_tags)
-            await report_session_failure(session_id, "agent_error")
+            if duration_task and not duration_task.done():
+                duration_task.cancel()
+            await _handle_session_error(
+                exc, "agent_error", "Runtime error in voice agent session: %s", exc, exc_info=True
+            )
 
     except Exception as unhandled_exc:
         # Capture any unhandled exception inside a job before the worker disconnects
-        logger.error("Unhandled exception in voice agent job: %s", unhandled_exc, exc_info=True)
-        capture_exception(unhandled_exc, tags=session_tags)
-        await report_session_failure(session_id, "agent_error")
+        await _handle_session_error(
+            unhandled_exc, "agent_error", "Unhandled exception in voice agent job: %s", unhandled_exc, exc_info=True
+        )
 
 
 if __name__ == "__main__":

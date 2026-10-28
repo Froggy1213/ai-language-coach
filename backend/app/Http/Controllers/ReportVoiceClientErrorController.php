@@ -46,12 +46,17 @@ final class ReportVoiceClientErrorController extends Controller
             return response()->json(['logged' => false], 404);
         }
 
+        $rawMessage = $validated['message'] ?? null;
+        $sanitizedMessage = is_string($rawMessage)
+            ? (string) preg_replace('/[\r\n\t]+/', ' ', $rawMessage)
+            : null;
+
         Log::warning('Voice session client error reported by browser.', [
             'session_id' => $voiceSession->getKey(),
             'room_name' => $voiceSession->room_name,
             'user_id' => $user->getKey(),
             'stage' => $validated['stage'],
-            'error' => $validated['message'] ?? null,
+            'error' => $sanitizedMessage,
         ]);
 
         return response()->json(['logged' => true]);

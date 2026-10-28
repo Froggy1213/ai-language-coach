@@ -144,7 +144,8 @@ locals {
     { name = "DB_PORT", value = "3306" },
     { name = "DB_DATABASE", value = var.db_name },
     { name = "DB_USERNAME", value = var.db_username },
-    { name = "REDIS_HOST", value = aws_elasticache_cluster.main.cache_nodes[0].address },
+    { name = "REDIS_SCHEME", value = "tls" },
+    { name = "REDIS_HOST", value = aws_elasticache_replication_group.main.primary_endpoint_address },
     { name = "REDIS_PORT", value = "6379" },
     { name = "SESSION_DRIVER", value = "database" },
     # The SPA and the API share one origin: the ALB routes /graphql*, /api/*,
@@ -177,16 +178,10 @@ locals {
     { name = "AWS_USE_PATH_STYLE_ENDPOINT", value = "false" },
     # TODO(livekit-tls): the LiveKit node terminates TLS for TURN only (5349); its
     # signaling port 7880 is plaintext. The backend's LiveKit admin bearer, the
-    # room and agent-dispatch calls all travel over it, and 7880 is open to
-    # 0.0.0.0/0 — so those calls are readable and replayable by anyone on the path.
-    # LIVEKIT_PUBLIC_URL below already advertises wss://<livekit_domain> to
-    # browsers, but nothing listens for TLS on that hostname yet, so the browser
-    # path is broken as well. Fix by terminating TLS in front of 7880 (Caddy or
-    # nginx on the same host, reusing the certbot certificate, proxying to
-    # 127.0.0.1:7880) and then setting this to https://${var.livekit_domain}; or,
-    # as an interim measure, restrict 7880's ingress in security_groups.tf to the
-    # VPC CIDR. See infra/README.md -> "LiveKit signaling is not encrypted".
-    { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
+    # Internal LiveKit communication dials the private IP inside the VPC so
+    # Twirp admin bearer tokens never traverse the public internet.
+    # Public browser connections use LIVEKIT_PUBLIC_URL (wss://<livekit_domain>).
+    { name = "LIVEKIT_URL", value = "ws://${aws_instance.livekit.private_ip}:7880" },
     { name = "LIVEKIT_PUBLIC_URL", value = "wss://${var.livekit_domain}" },
     { name = "LIVEKIT_SERVER_TOKEN_TTL_SECONDS", value = "60" },
     { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
@@ -197,19 +192,64 @@ locals {
     { name = "DEEPGRAM_DEFAULT_MODEL", value = "nova-3" }
   ]
 
-  laravel_secrets = [
-    { name = "APP_KEY", valueFrom = "${local.secret_arn}:APP_KEY::" },
-    { name = "DB_PASSWORD", valueFrom = "${local.secret_arn}:DB_PASSWORD::" },
-    { name = "REVERB_APP_ID", valueFrom = "${local.secret_arn}:REVERB_APP_ID::" },
-    { name = "REVERB_APP_KEY", valueFrom = "${local.secret_arn}:REVERB_APP_KEY::" },
-    { name = "REVERB_APP_SECRET", valueFrom = "${local.secret_arn}:REVERB_APP_SECRET::" },
-    { name = "LIVEKIT_API_KEY", valueFrom = "${local.secret_arn}:LIVEKIT_API_KEY::" },
-    { name = "LIVEKIT_API_SECRET", valueFrom = "${local.secret_arn}:LIVEKIT_API_SECRET::" },
-    { name = "VOICE_INTERNAL_SECRET", valueFrom = "${local.secret_arn}:VOICE_INTERNAL_SECRET::" },
-    { name = "DEEPGRAM_API_KEY", valueFrom = "${local.secret_arn}:DEEPGRAM_API_KEY::" },
-    { name = "DEEPSEEK_API_KEY", valueFrom = "${local.secret_arn}:DEEPSEEK_API_KEY::" },
-    { name = "SENTRY_DSN", valueFrom = "${local.secret_arn}:SENTRY_DSN::" }
+  laravel_secret_keys = [
+    "APP_KEY",
+    "DB_PASSWORD",
+    "REVERB_APP_ID",
+    "REVERB_APP_KEY",
+    "REVERB_APP_SECRET",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "VOICE_INTERNAL_SECRET",
+    "DEEPGRAM_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "SENTRY_DSN"
   ]
+
+  laravel_secrets = [
+    for k in local.laravel_secret_keys : {
+      name      = k
+      valueFrom = "${local.secret_arn}:${k}::"
+    }
+  ]
+
+  voice_agent_secret_keys = [
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "VOICE_INTERNAL_SECRET",
+    "DEEPGRAM_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+    "CARTESIA_API_KEY",
+    "OPENAI_API_KEY",
+    "SENTRY_DSN"
+  ]
+
+  voice_agent_secrets = [
+    for k in local.voice_agent_secret_keys : {
+      name      = k
+      valueFrom = "${local.secret_arn}:${k}::"
+    }
+  ]
+
+  web_secrets = [
+    for k in ["REVERB_APP_KEY"] : {
+      name      = "NUXT_PUBLIC_${k}"
+      valueFrom = "${local.secret_arn}:${k}::"
+    }
+  ]
+
+  log_configs = {
+    for svc, lg in aws_cloudwatch_log_group.services : svc => {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = lg.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -245,14 +285,7 @@ resource "aws_ecs_task_definition" "laravel_app" {
         retries     = 3
         startPeriod = 20
       }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["laravel-app"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
+      logConfiguration = local.log_configs["laravel-app"]
     }
   ])
 }
@@ -307,14 +340,7 @@ resource "aws_ecs_task_definition" "horizon_worker" {
         retries     = 3
         startPeriod = 20
       }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["horizon-worker"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
+      logConfiguration = local.log_configs["horizon-worker"]
     }
   ])
 }
@@ -368,14 +394,7 @@ resource "aws_ecs_task_definition" "reverb" {
         retries     = 3
         startPeriod = 10
       }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["reverb"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
+      logConfiguration = local.log_configs["reverb"]
     }
   ])
 }
@@ -428,11 +447,10 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         }
       ]
       environment = [
-        # Same plaintext endpoint the backend dials — see the livekit-tls TODO
-        # above; the worker both signals over it and uses it for TURN.
+        # Internal LiveKit endpoint inside VPC — see livekit-tls hardening.
         { name = "APP_ENV", value = var.environment },
         { name = "SENTRY_ENVIRONMENT", value = var.environment },
-        { name = "LIVEKIT_URL", value = "ws://${aws_eip.livekit.public_ip}:7880" },
+        { name = "LIVEKIT_URL", value = "ws://${aws_instance.livekit.private_ip}:7880" },
         { name = "VOICE_AGENT_NAME", value = "ai-language-coach" },
         { name = "BACKEND_INTERNAL_URL", value = "https://${var.app_domain}" },
         # The dialogue model is a decision recorded here, not something inferred
@@ -462,18 +480,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         { name = "LOAD_THRESHOLD", value = tostring(var.voice_agent_load_threshold) },
         { name = "DRAIN_TIMEOUT_SECONDS", value = tostring(var.voice_agent_drain_timeout) }
       ]
-      secrets = [
-        { name = "LIVEKIT_API_KEY", valueFrom = "${local.secret_arn}:LIVEKIT_API_KEY::" },
-        { name = "LIVEKIT_API_SECRET", valueFrom = "${local.secret_arn}:LIVEKIT_API_SECRET::" },
-        { name = "VOICE_INTERNAL_SECRET", valueFrom = "${local.secret_arn}:VOICE_INTERNAL_SECRET::" },
-        { name = "DEEPGRAM_API_KEY", valueFrom = "${local.secret_arn}:DEEPGRAM_API_KEY::" },
-        { name = "DEEPSEEK_API_KEY", valueFrom = "${local.secret_arn}:DEEPSEEK_API_KEY::" },
-        { name = "GROQ_API_KEY", valueFrom = "${local.secret_arn}:GROQ_API_KEY::" },
-        { name = "CEREBRAS_API_KEY", valueFrom = "${local.secret_arn}:CEREBRAS_API_KEY::" },
-        { name = "CARTESIA_API_KEY", valueFrom = "${local.secret_arn}:CARTESIA_API_KEY::" },
-        { name = "OPENAI_API_KEY", valueFrom = "${local.secret_arn}:OPENAI_API_KEY::" },
-        { name = "SENTRY_DSN", valueFrom = "${local.secret_arn}:SENTRY_DSN::" }
-      ]
+      secrets = local.voice_agent_secrets
       healthCheck = {
         # Agent worker exposes health on :8081 once registered with LiveKit
         command     = ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8081/ || exit 1"]
@@ -482,14 +489,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
         retries     = 5
         startPeriod = 25
       }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
+      logConfiguration = local.log_configs["voice-agent-worker"]
     }
   ])
 }
@@ -568,9 +568,7 @@ resource "aws_ecs_task_definition" "web" {
         { name = "NUXT_PUBLIC_REVERB_PORT", value = "443" },
         { name = "NUXT_PUBLIC_REVERB_SCHEME", value = "https" }
       ]
-      secrets = [
-        { name = "NUXT_PUBLIC_REVERB_APP_KEY", valueFrom = "${local.secret_arn}:REVERB_APP_KEY::" }
-      ]
+      secrets = local.web_secrets
       healthCheck = {
         command     = ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
         interval    = 30
@@ -578,14 +576,7 @@ resource "aws_ecs_task_definition" "web" {
         retries     = 3
         startPeriod = 15
       }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["web"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
+      logConfiguration = local.log_configs["web"]
     }
   ])
 }
@@ -629,17 +620,10 @@ resource "aws_ecs_task_definition" "migration" {
       name        = "migration"
       image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
       essential   = true
-      command     = ["php", "artisan", "migrate", "--force"]
-      environment = local.laravel_common_env
-      secrets     = local.laravel_secrets
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.services["laravel-app"].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "migration"
-        }
-      }
+      command          = ["php", "artisan", "migrate", "--force"]
+      environment      = local.laravel_common_env
+      secrets          = local.laravel_secrets
+      logConfiguration = local.log_configs["laravel-app"]
     }
   ])
 }

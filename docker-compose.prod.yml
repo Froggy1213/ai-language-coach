@@ -54,6 +54,7 @@ x-prod-laravel-environment: &prod-laravel-environment
   APP_DEBUG: "false"
   LOG_CHANNEL: ${LOG_CHANNEL:-stderr}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
   # Backend/.env is excluded from the image on purpose, so the deployment supplies
   # everything. APP_KEY signs sessions, cookies and signed URLs.
   APP_KEY: ${APP_KEY:?set APP_KEY (php artisan key:generate --show)}
@@ -130,6 +131,10 @@ x-prod-laravel-environment: &prod-laravel-environment
   PRIVACY_TRANSCRIPT_RETENTION_DAYS: ${PRIVACY_TRANSCRIPT_RETENTION_DAYS:-90}
   PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS: ${PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS:-7}
 
+x-prod-laravel-service: &prod-laravel-service
+  logging: *prod-logging
+  environment: *prod-laravel-environment
+
 services:
   # ---------------------------------------------------------------------------
   # `!override` because the base file makes the API wait for `minio` and
@@ -142,57 +147,24 @@ services:
   # already running by the time anything is asked.
   # ---------------------------------------------------------------------------
   api:
+    <<: *prod-laravel-service
     depends_on: !override
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      <<: *prod-laravel-environment
-      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
 
   horizon:
-    environment:
-      <<: *prod-laravel-environment
-      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+    <<: *prod-laravel-service
 
   # ---------------------------------------------------------------------------
-  # The scheduler. `routes/console.php` registers the two retention purges
-  # (privacy:purge-transcripts, privacy:purge-orphan-audio) as daily tasks, and
-  # nothing else in this stack runs them: Horizon consumes queues, it does not
-  # read the schedule. Without this service a deployment keeps every transcript
-  # and every orphaned recording forever while the privacy policy says otherwise,
-  # and nothing reports an error — the tasks simply never fire.
-  #
-  # `schedule:work` is Laravel's own foreground scheduler loop, so this needs no
-  # host cron. One replica only: two schedulers would run each task twice.
+  # The scheduler runs `php artisan schedule:work` for the daily retention purges.
   # ---------------------------------------------------------------------------
   scheduler:
-    profiles: ["full"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: coach_scheduler
-    restart: unless-stopped
-    logging: *prod-logging
-    command: ["php", "artisan", "schedule:work"]
-    healthcheck:
-      # Inherits the image's /up probe otherwise, which this role does not serve.
-      test: ["CMD-SHELL", "pgrep -f 'artisan schedule:work' > /dev/null || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    depends_on:
-      - api
-    environment:
-      <<: *prod-laravel-environment
-      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+    <<: *prod-laravel-service
 
   reverb:
-    environment:
-      <<: *prod-laravel-environment
-      APP_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
+    <<: *prod-laravel-service
 
   web:
     environment:
@@ -230,31 +202,21 @@ services:
       LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
       VOICE_WEBHOOK_URL: http://api:8080/api/webhooks/livekit
     ports: !override
-      - "${LIVEKIT_PORT:-7880}:7880"
+      - "127.0.0.1:${LIVEKIT_PORT:-7880}:7880"
       - "7881:7881"
       - "7882:7882/udp"
 
   voice-agent:
     environment:
+      LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
-      LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL}
-      VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
       # The API's own address inside the network. In the development profile this
       # is host.docker.internal, which does not exist once the API is a service.
       BACKEND_INTERNAL_URL: http://api:8080
       VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:?set VOICE_INTERNAL_SECRET}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set DEEPGRAM_API_KEY}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
-      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-}
-      LLM_MODEL: ${LLM_MODEL:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-}
-      ALLOW_SLOW_DIALOGUE_LLM: ${ALLOW_SLOW_DIALOGUE_LLM:-false}
-      DEEPGRAM_STT_MODEL: ${DEEPGRAM_STT_MODEL:-nova-3}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: production
 

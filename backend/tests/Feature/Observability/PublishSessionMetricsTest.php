@@ -5,12 +5,11 @@ namespace Tests\Feature\Observability;
 use App\Enums\VoiceSessionStatus;
 use App\Models\User;
 use App\Models\VoiceSession;
-use App\Observability\MetricDatum;
-use App\Observability\MetricPublisher;
 use App\Observability\PublishSessionMetrics;
 use App\Voice\VoiceSessionLifecycle;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakeMetricPublisher;
 use Tests\TestCase;
 
 class PublishSessionMetricsTest extends TestCase
@@ -44,7 +43,7 @@ class PublishSessionMetricsTest extends TestCase
             'duration_sec' => 300,
         ]);
 
-        $publisher = $this->recordingPublisher();
+        $publisher = new FakeMetricPublisher;
 
         (new PublishSessionMetrics($session->id))->handle($publisher);
 
@@ -68,7 +67,7 @@ class PublishSessionMetricsTest extends TestCase
             'duration_sec' => 120,
         ]);
 
-        $publisher = $this->recordingPublisher();
+        $publisher = new FakeMetricPublisher;
 
         (new PublishSessionMetrics($session->id))->handle($publisher);
 
@@ -85,7 +84,7 @@ class PublishSessionMetricsTest extends TestCase
             'duration_sec' => null,
         ]);
 
-        $publisher = $this->recordingPublisher();
+        $publisher = new FakeMetricPublisher;
 
         (new PublishSessionMetrics($session->id))->handle($publisher);
 
@@ -95,24 +94,10 @@ class PublishSessionMetricsTest extends TestCase
 
     public function test_a_session_that_no_longer_exists_publishes_nothing(): void
     {
-        $publisher = $this->recordingPublisher();
+        $publisher = new FakeMetricPublisher;
 
         (new PublishSessionMetrics(999999))->handle($publisher);
 
         $this->assertSame([], $publisher->published);
-    }
-
-    private function recordingPublisher(): MetricPublisher
-    {
-        return new class implements MetricPublisher
-        {
-            /** @var list<MetricDatum> */
-            public array $published = [];
-
-            public function putMany(array $data): void
-            {
-                $this->published = array_merge($this->published, $data);
-            }
-        };
     }
 }

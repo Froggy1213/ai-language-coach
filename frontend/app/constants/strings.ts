@@ -23,22 +23,10 @@ export const nav = {
 } as const
 
 export const common = {
-  loading: '読み込み中…',
-  retry: 'もう一度試す',
   retryShort: '再試行',
-  checking: '確認中…',
   refresh: '更新',
   refreshing: '更新中…',
-  back: '戻る',
   backToRoadmap: 'ロードマップへ',
-  cancel: 'キャンセル',
-  close: '閉じる',
-  save: '保存',
-  start: '始める',
-  finish: '終了する',
-  empty: 'まだありません',
-  unknown: '不明',
-  logout: 'ログアウト',
   theme: 'テーマ',
   themeDark: 'ダーク',
   themeLight: 'ライト',
@@ -304,11 +292,6 @@ export const settings = {
   deleteCta: 'アカウントを削除',
   deleting: '削除しています…',
   loadError: 'アカウント情報を読み込めませんでした。',
-} as const
-
-export const units = {
-  min: '分',
-  sec: '秒',
 } as const
 
 export const landing = {

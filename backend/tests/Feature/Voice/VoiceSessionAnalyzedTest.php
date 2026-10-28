@@ -86,4 +86,26 @@ class VoiceSessionAnalyzedTest extends TestCase
 
         $this->assertTrue($response->json('data.voiceSession.analyzed'));
     }
+
+    public function test_voice_session_transcript_helper_methods(): void
+    {
+        $session = new VoiceSession([
+            'status' => VoiceSessionStatus::Active,
+            'transcript' => [
+                ['turn_id' => '1', 'transcript' => ' Hello world '],
+                ['turn_id' => '2', 'transcript' => '   '],
+                ['type' => 'other', 'transcript' => ''],
+                ['turn_id' => '3', 'transcript' => 'Second turn'],
+            ],
+        ]);
+
+        $this->assertFalse($session->hasAnalysisMarker());
+        $this->assertTrue($session->hasLearnerUtterances());
+        $this->assertSame(['Hello world', 'Second turn'], $session->learnerUtterances());
+
+        $session->transcript = null;
+        $this->assertFalse($session->hasAnalysisMarker());
+        $this->assertFalse($session->hasLearnerUtterances());
+        $this->assertSame([], $session->learnerUtterances());
+    }
 }

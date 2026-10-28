@@ -68,6 +68,10 @@ final class GrammarCatalogue
             return $this->languages[$language];
         }
 
+        if (preg_match('/^[a-z]{2,5}(-[A-Za-z0-9]{2,8})?$/', $language) !== 1) {
+            return $this->languages[$language] = [];
+        }
+
         $path = resource_path("grammar/{$language}.php");
 
         if (! is_file($path)) {

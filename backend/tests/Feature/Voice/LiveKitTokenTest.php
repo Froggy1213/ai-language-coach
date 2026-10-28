@@ -34,6 +34,7 @@ class LiveKitTokenTest extends TestCase
         $this->assertSame('lesson-42', $video->room);
         $this->assertTrue($video->canPublish);
         $this->assertTrue($video->canSubscribe);
+        $this->assertFalse($video->canPublishData ?? false);
     }
 
     public function test_a_participant_token_carries_no_administrative_grant(): void

@@ -152,6 +152,20 @@ class ProductionSanityCheckTest extends TestCase
     }
 
     /**
+     * Condition: reverb.apps.apps.*.allowed_origins must not contain wildcard '*' in production.
+     */
+    public function test_refuses_to_boot_when_reverb_allowed_origins_contains_wildcard(): void
+    {
+        $this->configureValidProduction();
+        config(['reverb.apps.apps.0.allowed_origins' => ['*']]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('REVERB_ALLOWED_ORIGINS');
+
+        ProductionSanityCheck::check($this->app);
+    }
+
+    /**
      * Condition (c): cors.allowed_origins must not contain wildcard '*' (string format).
      */
     public function test_condition_c_refuses_to_boot_when_cors_allowed_origins_contains_wildcard_string(): void

@@ -75,8 +75,7 @@ fi
 livekit-server \
     --config "$CONF_FILE" \
     --bind 127.0.0.1 \
-    --node-ip 127.0.0.1 \
-    --keys "$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET" &
+    --node-ip 127.0.0.1 &
 SERVER_PID=$!
 
 trap 'kill -TERM "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; cleanup; exit 143' TERM

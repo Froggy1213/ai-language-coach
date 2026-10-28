@@ -22,6 +22,48 @@ import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
+# Try importing dialogue configuration and prompts from agent to avoid drift
+_AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agent"))
+if _AGENT_DIR not in sys.path:
+    sys.path.insert(0, _AGENT_DIR)
+
+try:
+    from prompts import build_system_prompt  # type: ignore
+except ImportError:
+    try:
+        from agent.prompts import build_system_prompt  # type: ignore
+    except ImportError:
+        try:
+            from agent import build_system_prompt  # type: ignore
+        except ImportError:
+            build_system_prompt = None  # type: ignore
+
+try:
+    from agent import KNOWN_DIALOGUE_PROVIDERS  # type: ignore
+except ImportError:
+    KNOWN_DIALOGUE_PROVIDERS = {  # type: ignore
+        "groq": {
+            "model": "openai/gpt-oss-120b",
+            "base_url": "https://api.groq.com/openai/v1",
+            "key_var": "GROQ_API_KEY",
+        },
+        "cerebras": {
+            "model": "gpt-oss-120b",
+            "base_url": "https://api.cerebras.ai/v1",
+            "key_var": "CEREBRAS_API_KEY",
+        },
+        "openai": {
+            "model": "gpt-4o-mini",
+            "base_url": "",
+            "key_var": "OPENAI_API_KEY",
+        },
+        "deepseek": {
+            "model": "deepseek-chat",
+            "base_url": "https://api.deepseek.com",
+            "key_var": "DEEPSEEK_API_KEY",
+        },
+    }
+
 
 # ---------------------------------------------------------------------------
 # Default Candidate Configurations & Environment
@@ -43,7 +85,15 @@ DEFAULT_CANDIDATES = [
     "openai:gpt-4o-mini",
 ]
 
-DEFAULT_SYSTEM_PROMPT = """You are an expert, empathetic AI Language Coach.
+if callable(build_system_prompt):
+    DEFAULT_SYSTEM_PROMPT = build_system_prompt({
+        "target_language": "en",
+        "level": "A2",
+        "grammar_point": "Present Perfect (past experiences vs finished past actions)",
+        "practice_prompt": "Practice discussing past travel experiences and visits.",
+    })
+else:
+    DEFAULT_SYSTEM_PROMPT = """You are an expert, empathetic AI Language Coach.
 You are conducting a 1-on-1 spoken practice session with a language learner.
 
 Session Details:
@@ -189,22 +239,12 @@ class CandidateModel:
         """
         universal_key = (os.getenv("LLM_API_KEY") or "").strip() or None
 
-        if self.provider == "deepseek":
-            self.api_key = universal_key or (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
-            default_base = "https://api.deepseek.com"
-            missing_var = "DEEPSEEK_API_KEY"
-        elif self.provider == "openai":
-            self.api_key = universal_key or (os.getenv("OPENAI_API_KEY") or "").strip() or None
-            default_base = "https://api.openai.com/v1"
-            missing_var = "OPENAI_API_KEY"
-        elif self.provider == "groq":
-            self.api_key = universal_key or (os.getenv("GROQ_API_KEY") or "").strip() or None
-            default_base = "https://api.groq.com/openai/v1"
-            missing_var = "GROQ_API_KEY"
-        elif self.provider == "cerebras":
-            self.api_key = universal_key or (os.getenv("CEREBRAS_API_KEY") or "").strip() or None
-            default_base = "https://api.cerebras.ai/v1"
-            missing_var = "CEREBRAS_API_KEY"
+        known = KNOWN_DIALOGUE_PROVIDERS.get(self.provider) if KNOWN_DIALOGUE_PROVIDERS else None
+        if known:
+            key_var = known["key_var"]
+            self.api_key = universal_key or (os.getenv(key_var) or "").strip() or None
+            default_base = known["base_url"] or "https://api.openai.com/v1"
+            missing_var = key_var
         else:
             provider_var = f"{self.provider.upper()}_API_KEY"
             self.api_key = universal_key or (os.getenv(provider_var) or "").strip() or None

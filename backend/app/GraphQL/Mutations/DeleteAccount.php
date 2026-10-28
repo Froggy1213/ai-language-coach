@@ -48,12 +48,6 @@ final class DeleteAccount
 
         $this->deletionService->delete($user);
 
-        $request = $context->request();
-        if ($request?->hasSession()) {
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
-        }
-
         return true;
     }
 }

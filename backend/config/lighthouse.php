@@ -256,7 +256,7 @@ return [
     'security' => [
         'max_query_complexity' => (int) env('LIGHTHOUSE_MAX_QUERY_COMPLEXITY', 50),
         'max_query_depth' => (int) env('LIGHTHOUSE_MAX_QUERY_DEPTH', 10),
-        'disable_introspection' => (bool) env('LIGHTHOUSE_SECURITY_DISABLE_INTROSPECTION', false)
+        'disable_introspection' => (bool) env('LIGHTHOUSE_SECURITY_DISABLE_INTROSPECTION', env('APP_ENV') === 'production')
             ? DisableIntrospection::ENABLED
             : DisableIntrospection::DISABLED,
     ],
@@ -405,7 +405,7 @@ return [
     |
     */
 
-    'force_fill' => true,
+    'force_fill' => false,
 
     /*
     |--------------------------------------------------------------------------

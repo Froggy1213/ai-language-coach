@@ -175,38 +175,42 @@ export const REQUEST_VOICE_TOKEN_MUTATION = /* GraphQL */ `
   }
 `
 
+export const VOICE_SESSION_FEEDBACK_FIELDS = /* GraphQL */ `
+  id
+  status
+  analyzed
+  failReason
+  durationSec
+  lessonCard {
+    id
+    orderIndex
+    status
+    practicePrompt
+    grammarPoint {
+      id
+      code
+      title
+      category
+    }
+  }
+  mistakes {
+    id
+    userUtterance
+    correction
+    explanation
+    grammarPoint {
+      id
+      code
+      title
+      category
+    }
+  }
+`
+
 export const VOICE_SESSION_QUERY = /* GraphQL */ `
   query VoiceSession($id: ID!) {
     voiceSession(id: $id) {
-      id
-      status
-      analyzed
-      failReason
-      durationSec
-      lessonCard {
-        id
-        orderIndex
-        status
-        practicePrompt
-        grammarPoint {
-          id
-          code
-          title
-          category
-        }
-      }
-      mistakes {
-        id
-        userUtterance
-        correction
-        explanation
-        grammarPoint {
-          id
-          code
-          title
-          category
-        }
-      }
+      ${VOICE_SESSION_FEEDBACK_FIELDS}
     }
   }
 `
@@ -214,53 +218,29 @@ export const VOICE_SESSION_QUERY = /* GraphQL */ `
 export const SESSION_FEEDBACK_READY_SUBSCRIPTION = /* GraphQL */ `
   subscription SessionFeedbackReady($sessionId: ID!) {
     sessionFeedbackReady(sessionId: $sessionId) {
-      id
-      status
-      analyzed
-      failReason
-      durationSec
-      lessonCard {
-        id
-        orderIndex
-        status
-        practicePrompt
-        grammarPoint {
-          id
-          code
-          title
-          category
-        }
-      }
-      mistakes {
-        id
-        userUtterance
-        correction
-        explanation
-        grammarPoint {
-          id
-          code
-          title
-          category
-        }
-      }
+      ${VOICE_SESSION_FEEDBACK_FIELDS}
     }
   }
+`
+
+export const REVIEW_ITEM_FIELDS = /* GraphQL */ `
+  id
+  grammarPoint {
+    id
+    code
+    title
+    category
+  }
+  easeFactor
+  intervalDays
+  repetitionNumber
+  nextReviewAt
 `
 
 export const DUE_REVIEWS_QUERY = /* GraphQL */ `
   query DueReviews {
     dueReviews {
-      id
-      grammarPoint {
-        id
-        code
-        title
-        category
-      }
-      easeFactor
-      intervalDays
-      repetitionNumber
-      nextReviewAt
+      ${REVIEW_ITEM_FIELDS}
     }
   }
 `
@@ -268,17 +248,7 @@ export const DUE_REVIEWS_QUERY = /* GraphQL */ `
 export const SUBMIT_REVIEW_RESULT_MUTATION = /* GraphQL */ `
   mutation SubmitReviewResult($grammarPointId: ID!, $quality: Int!) {
     submitReviewResult(grammarPointId: $grammarPointId, quality: $quality) {
-      id
-      grammarPoint {
-        id
-        code
-        title
-        category
-      }
-      easeFactor
-      intervalDays
-      repetitionNumber
-      nextReviewAt
+      ${REVIEW_ITEM_FIELDS}
     }
   }
 `

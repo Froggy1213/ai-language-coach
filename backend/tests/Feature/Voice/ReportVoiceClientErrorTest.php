@@ -52,6 +52,32 @@ class ReportVoiceClientErrorTest extends TestCase
             ]);
     }
 
+    public function test_sanitizes_crlf_in_message_before_logging(): void
+    {
+        Log::spy();
+
+        $user = User::factory()->create();
+        $session = $this->createSessionFor($user);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/sessions/{$session->getKey()}/client-error", [
+                'stage' => 'webrtc_connect',
+                'message' => "line 1\r\nline 2\tinjected",
+            ])
+            ->assertOk()
+            ->assertJson(['logged' => true]);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->with('Voice session client error reported by browser.', [
+                'session_id' => $session->getKey(),
+                'room_name' => $session->room_name,
+                'user_id' => $user->getKey(),
+                'stage' => 'webrtc_connect',
+                'error' => 'line 1 line 2 injected',
+            ]);
+    }
+
     public function test_returns_not_found_when_session_belongs_to_another_user(): void
     {
         $owner = User::factory()->create();

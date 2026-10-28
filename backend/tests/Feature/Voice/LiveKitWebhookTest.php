@@ -3,9 +3,6 @@
 namespace Tests\Feature\Voice;
 
 use App\Enums\VoiceSessionStatus;
-use App\Models\LessonCard;
-use App\Models\Roadmap;
-use App\Models\User;
 use App\Models\VoiceSession;
 use Firebase\JWT\JWT;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -244,6 +241,24 @@ class LiveKitWebhookTest extends TestCase
         $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
         $token = JWT::encode([
             'iss' => 'test-api-key',
+            'sha256' => base64_encode(hash('sha256', json_encode($body), true)),
+        ], self::SECRET, 'HS256');
+
+        $this->call(
+            'POST',
+            '/api/webhooks/livekit',
+            server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token, 'CONTENT_TYPE' => 'application/json'],
+            content: json_encode($body),
+        )->assertUnauthorized();
+    }
+
+    public function test_rejects_a_signature_with_future_iat_claim(): void
+    {
+        $body = ['event' => 'room_finished', 'room' => ['name' => 'lesson-1']];
+        $token = JWT::encode([
+            'iss' => 'test-api-key',
+            'iat' => time() + 300,
+            'exp' => time() + 600,
             'sha256' => base64_encode(hash('sha256', json_encode($body), true)),
         ], self::SECRET, 'HS256');
 
@@ -536,16 +551,5 @@ class LiveKitWebhookTest extends TestCase
     private function activeSession(): VoiceSession
     {
         return $this->sessionWithStatus(VoiceSessionStatus::Active);
-    }
-
-    private function sessionWithStatus(VoiceSessionStatus $status): VoiceSession
-    {
-        $user = User::factory()->create();
-        $roadmap = Roadmap::factory()->for($user)->create();
-        $card = LessonCard::factory()->for($roadmap)->create();
-
-        return VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
-            'status' => $status,
-        ]);
     }
 }

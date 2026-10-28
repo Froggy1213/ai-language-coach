@@ -44,7 +44,6 @@ test.describe('Account settings screen @smoke', () => {
     await expect(deleteButton).toBeVisible();
     await expect(deleteButton).toBeDisabled();
 
-    expect(tracker.pageErrors).toEqual([]);
-    expect(tracker.consoleErrors).toEqual([]);
+    tracker.assertClean();
   });
 });

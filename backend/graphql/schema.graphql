@@ -65,6 +65,7 @@ type Mutation {
         contentType: String!
     ): PresignedUpload!
         @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\CreateAssessmentUploadUrl")
         @validator(class: "App\\GraphQL\\Validators\\CreateAssessmentUploadUrlValidator")
 
@@ -77,6 +78,7 @@ type Mutation {
         audioUrl: String!
     ): Assessment!
         @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\SubmitAssessment")
         @validator(class: "App\\GraphQL\\Validators\\SubmitAssessmentValidator")
 

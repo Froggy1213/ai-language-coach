@@ -89,6 +89,16 @@ if [[ -z "$HOST" ]]; then
     exit 1
 fi
 
+if [[ "$HOST" =~ ^- ]] || [[ ! "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: Invalid host '$HOST'. Host must not start with '-' and can only contain alphanumeric characters, dots, underscores, and dashes." >&2
+    exit 1
+fi
+
+if [[ ! "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$DRAIN_TIMEOUT" -le 0 ]]; then
+    echo "Error: DRAIN_TIMEOUT must be a positive integer, got '$DRAIN_TIMEOUT'." >&2
+    exit 1
+fi
+
 REMOTE_COMMAND="sudo DRAIN_TIMEOUT=${DRAIN_TIMEOUT} /opt/livekit/update-livekit.sh"
 
 echo "=== LiveKit Deploy / Upgrade Plan ==="

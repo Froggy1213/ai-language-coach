@@ -44,6 +44,10 @@ final class SubmitAssessment
                 return [$existing, false];
             }
 
+            if ($user->assessments()->where('status', AssessmentStatus::Processing)->exists()) {
+                throw ValidationException::withMessages(['audioUrl' => ['An assessment is already being processed.']]);
+            }
+
             if ($lockedUser instanceof User) {
                 $lockedUser->recordVoiceConsent();
             }

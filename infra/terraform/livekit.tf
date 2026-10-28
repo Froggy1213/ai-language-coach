@@ -62,7 +62,7 @@ resource "aws_iam_instance_profile" "livekit" {
 }
 
 locals {
-  user_data_template = fileexists("${path.module}/../livekit/user-data.sh") ? "${path.module}/../livekit/user-data.sh" : "${path.module}/user-data.sh"
+  user_data_template = "${path.module}/../livekit/user-data.sh"
 }
 
 # EC2 Instance for LiveKit Server
@@ -79,6 +79,12 @@ resource "aws_instance" "livekit" {
     volume_type           = "gp3"
     encrypted             = true
     delete_on_termination = true
+  }
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
   }
 
   user_data = templatefile(local.user_data_template, {

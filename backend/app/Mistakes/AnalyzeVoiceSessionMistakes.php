@@ -55,11 +55,11 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
         }
 
         // Idempotency guard: skip if this session already has analysed mistakes or was marked analysed.
-        if ($session->mistakes()->exists() || $this->alreadyAnalyzed($session)) {
+        if ($session->mistakes()->exists() || $session->hasAnalysisMarker()) {
             return;
         }
 
-        $utterances = $this->extractLearnerUtterances($session);
+        $utterances = $session->learnerUtterances();
         if (empty($utterances)) {
             $shouldReturn = false;
             $shouldBroadcast = false;
@@ -76,15 +76,15 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
                     return;
                 }
 
-                if ($lockedSession->mistakes()->exists() || $this->alreadyAnalyzed($lockedSession)) {
+                if ($lockedSession->mistakes()->exists() || $lockedSession->hasAnalysisMarker()) {
                     $shouldReturn = true;
 
                     return;
                 }
 
-                $lockedUtterances = $this->extractLearnerUtterances($lockedSession);
+                $lockedUtterances = $lockedSession->learnerUtterances();
                 if (empty($lockedUtterances)) {
-                    $this->markAnalyzed($lockedSession, 0);
+                    $lockedSession->markAnalyzed(0);
                     $shouldReturn = true;
                     $shouldBroadcast = true;
 
@@ -120,7 +120,7 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
                 return;
             }
 
-            if ($lockedSession->mistakes()->exists() || $this->alreadyAnalyzed($lockedSession)) {
+            if ($lockedSession->mistakes()->exists() || $lockedSession->hasAnalysisMarker()) {
                 return;
             }
 
@@ -149,7 +149,7 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
                 );
             }
 
-            $this->markAnalyzed($lockedSession, count($result->mistakes));
+            $lockedSession->markAnalyzed(count($result->mistakes));
         });
 
         try {
@@ -157,64 +157,6 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
         } catch (Throwable $exception) {
             report($exception);
         }
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function extractLearnerUtterances(VoiceSession $session): array
-    {
-        $transcript = $session->transcript;
-        if (! is_array($transcript)) {
-            return [];
-        }
-
-        $utterances = [];
-        foreach ($transcript as $turn) {
-            if (! is_array($turn) || ($turn['type'] ?? null) === 'analysis') {
-                continue;
-            }
-
-            $text = trim((string) ($turn['transcript'] ?? ''));
-            if ($text !== '') {
-                $utterances[] = $text;
-            }
-        }
-
-        return $utterances;
-    }
-
-    private function alreadyAnalyzed(VoiceSession $session): bool
-    {
-        $transcript = $session->transcript;
-        if (! is_array($transcript)) {
-            return false;
-        }
-
-        foreach ($transcript as $item) {
-            if (is_array($item) && ($item['type'] ?? null) === 'analysis') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function markAnalyzed(VoiceSession $session, int $mistakesCount): void
-    {
-        $transcript = $session->transcript ?? [];
-        if (! is_array($transcript)) {
-            $transcript = [];
-        }
-
-        $transcript[] = [
-            'type' => 'analysis',
-            'analyzed_at' => Carbon::now()->toIso8601String(),
-            'mistakes_count' => $mistakesCount,
-        ];
-
-        $session->transcript = array_values($transcript);
-        $session->save();
     }
 
     /**

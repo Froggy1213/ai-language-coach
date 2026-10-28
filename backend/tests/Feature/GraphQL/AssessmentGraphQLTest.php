@@ -158,6 +158,37 @@ class AssessmentGraphQLTest extends TestCase
         Queue::assertPushed(AnalyzeAssessment::class, 1);
     }
 
+    public function test_it_rejects_submission_when_another_assessment_is_already_processing(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        // Pre-existing assessment in processing state
+        Assessment::factory()->for($user)->create([
+            'status' => AssessmentStatus::Processing,
+            'audio_url' => "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/old.webm",
+        ]);
+
+        $fileUrl = "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/new.webm";
+        $storage = Mockery::mock(AssessmentAudioStorage::class);
+        $storage->shouldReceive('inspect')
+            ->once()
+            ->with(Mockery::on(static fn (User $caller): bool => $caller->is($user)), $fileUrl)
+            ->andReturn(new AudioUpload(
+                key: "assessments/{$user->id}/new.webm",
+                fileUrl: $fileUrl,
+                sizeBytes: 2048,
+                contentType: 'audio/webm',
+            ));
+        $this->app->instance(AssessmentAudioStorage::class, $storage);
+
+        $this->graphQL(self::SUBMIT, ['audioUrl' => $fileUrl])
+            ->assertGraphQLValidationError('audioUrl', 'An assessment is already being processed.');
+
+        Queue::assertNothingPushed();
+    }
+
     public function test_it_refuses_an_upload_that_does_not_belong_to_the_learner(): void
     {
         Queue::fake();

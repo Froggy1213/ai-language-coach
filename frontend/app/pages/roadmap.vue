@@ -1,8 +1,4 @@
 <script setup lang="ts">
-import { useQuery } from '@urql/vue'
-import type { CombinedError } from '@urql/vue'
-import { GENERATE_ROADMAP_MUTATION, ROADMAP_QUERY } from '~/graphql/documents'
-import type { Roadmap } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { roadmap as copy, today } from '~/constants/strings'
 import { count, COUNTER } from '~/utils/format'
@@ -14,48 +10,17 @@ import { count, COUNTER } from '~/utils/format'
  * where they are in it. So it is one continuous vertical path with the current
  * stop marked, not a grid of equal-weight cards.
  */
-const { $urql } = useNuxtApp()
-
-const { data, fetching, error, executeQuery } = useQuery<{ roadmap: Roadmap | null }>({
-  query: ROADMAP_QUERY,
-  requestPolicy: 'network-only',
-})
-
-const roadmap = computed(() => data.value?.roadmap ?? null)
-
-const completedCount = computed(
-  () => roadmap.value?.lessonCards.filter((card) => card.status === 'completed').length ?? 0,
-)
-
-const totalCount = computed(() => roadmap.value?.lessonCards.length ?? 0)
-
-const allDone = computed(() => totalCount.value > 0 && completedCount.value >= totalCount.value)
-
-const generating = ref(false)
-const generateError = ref<string | null>(null)
-
-async function generate(): Promise<void> {
-  generating.value = true
-  generateError.value = null
-
-  try {
-    const { error: failure } = await $urql.mutation(GENERATE_ROADMAP_MUTATION, {}).toPromise()
-
-    if (failure) {
-      generateError.value = graphQLErrorMessageFor(failure as CombinedError, {
-        fallback: copy.buildError,
-      })
-    } else {
-      // The mutation is idempotent and reports only the title; the card list is
-      // the query's job.
-      await executeQuery({ requestPolicy: 'network-only' })
-    }
-  } catch {
-    generateError.value = copy.buildError
-  } finally {
-    generating.value = false
-  }
-}
+const {
+  roadmap,
+  completedCount,
+  totalCount,
+  allDone,
+  generating,
+  generateError,
+  generate,
+  fetching,
+  error,
+} = useRoadmap()
 </script>
 
 <template>

@@ -5,7 +5,6 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\CefrLevel;
 use App\Enums\RoadmapStatus;
-use App\Privacy\VoiceConsent;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -14,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Date;
 use Laravel\Sanctum\HasApiTokens;
 
 #[Fillable(['name', 'email', 'password', 'target_language', 'timezone'])]
@@ -61,7 +61,15 @@ class User extends Authenticatable
      */
     public function recordVoiceConsent(): bool
     {
-        return VoiceConsent::record($this);
+        if ($this->hasGivenVoiceConsent()) {
+            return false;
+        }
+
+        $this->forceFill([
+            'voice_consent_at' => Date::now(),
+        ])->save();
+
+        return true;
     }
 
     /**

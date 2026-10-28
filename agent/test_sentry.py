@@ -303,6 +303,11 @@ class TestBeforeSendScrubber(unittest.TestCase):
                                     "vars": {
                                         "transcript": "Secret utterance",
                                         "practice_prompt": "Secret topic",
+                                        "text": "Secret user speech text",
+                                        "cleaned": "Cleaned speech text",
+                                        "raw_content": "Raw content utterance",
+                                        "parts": ["part1", "part2"],
+                                        "tx": "Secret tx text",
                                         "session_id": 99,
                                     },
                                 }
@@ -324,6 +329,11 @@ class TestBeforeSendScrubber(unittest.TestCase):
         frame_vars = scrubbed["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]
         self.assertEqual(frame_vars["transcript"], REDACTED_SENTINEL)
         self.assertEqual(frame_vars["practice_prompt"], REDACTED_SENTINEL)
+        self.assertEqual(frame_vars["text"], REDACTED_SENTINEL)
+        self.assertEqual(frame_vars["cleaned"], REDACTED_SENTINEL)
+        self.assertEqual(frame_vars["raw_content"], REDACTED_SENTINEL)
+        self.assertEqual(frame_vars["parts"], REDACTED_SENTINEL)
+        self.assertEqual(frame_vars["tx"], REDACTED_SENTINEL)
         self.assertEqual(frame_vars["session_id"], 99)
 
     def test_scrubber_redacts_embedded_json_log_string(self):
@@ -354,17 +364,42 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         sentry_integration._sentry_initialized = False
 
-    async def test_simulated_stt_failure_calls_capture_exception(self):
+    def _make_ctx(
+        self,
+        session_id="42",
+        room_name=None,
+        metadata=None,
+        has_vad=True,
+    ):
         ctx = MagicMock()
-        ctx.room.name = "lesson-10"
-        ctx.job.metadata = json.dumps({
-            "session_id": 42,
-            "grammar_point": "present_perfect",
-            "practice_prompt": "Talk about past experiences",
-            "target_language": "en",
-        })
+        if metadata is not None:
+            ctx.job.metadata = metadata if isinstance(metadata, str) else json.dumps(metadata)
+        elif session_id is not None:
+            ctx.job.metadata = json.dumps({"session_id": session_id})
+        else:
+            ctx.job.metadata = ""
+
+        if room_name:
+            ctx.room.name = room_name
+
         ctx.connect = AsyncMock()
-        ctx.proc.userdata.get.return_value = "fake_vad"
+        if has_vad:
+            ctx.proc.userdata.get.return_value = "fake_vad"
+        else:
+            ctx.proc.userdata = None
+
+        return ctx
+
+    async def test_simulated_stt_failure_calls_capture_exception(self):
+        ctx = self._make_ctx(
+            room_name="lesson-10",
+            metadata={
+                "session_id": 42,
+                "grammar_point": "present_perfect",
+                "practice_prompt": "Talk about past experiences",
+                "target_language": "en",
+            },
+        )
 
         captured_exceptions = []
 
@@ -390,15 +425,14 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             mock_fail.assert_awaited_once_with(42, "stt_failed")
 
     async def test_simulated_llm_failure_calls_capture_exception(self):
-        ctx = MagicMock()
-        ctx.room.name = "lesson-11"
-        ctx.job.metadata = json.dumps({
-            "session_id": 55,
-            "grammar_point": "past_simple",
-            "target_language": "en",
-        })
-        ctx.connect = AsyncMock()
-        ctx.proc.userdata.get.return_value = "fake_vad"
+        ctx = self._make_ctx(
+            room_name="lesson-11",
+            metadata={
+                "session_id": 55,
+                "grammar_point": "past_simple",
+                "target_language": "en",
+            },
+        )
 
         captured_exceptions = []
 
@@ -420,15 +454,14 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             mock_fail.assert_awaited_once_with(55, "llm_failed")
 
     async def test_simulated_tts_failure_calls_capture_exception(self):
-        ctx = MagicMock()
-        ctx.room.name = "lesson-12"
-        ctx.job.metadata = json.dumps({
-            "session_id": 66,
-            "grammar_point": "conditionals",
-            "target_language": "en",
-        })
-        ctx.connect = AsyncMock()
-        ctx.proc.userdata.get.return_value = "fake_vad"
+        ctx = self._make_ctx(
+            room_name="lesson-12",
+            metadata={
+                "session_id": 66,
+                "grammar_point": "conditionals",
+                "target_language": "en",
+            },
+        )
 
         captured_exceptions = []
 
@@ -450,9 +483,7 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             mock_fail.assert_awaited_once_with(66, "tts_failed")
 
     async def test_simulated_room_connect_failure_calls_capture_exception(self):
-        ctx = MagicMock()
-        ctx.room.name = "lesson-13"
-        ctx.job.metadata = json.dumps({"session_id": 77})
+        ctx = self._make_ctx(session_id=77, room_name="lesson-13")
         ctx.connect = AsyncMock(side_effect=Exception("webrtc connection refused"))
 
         captured_exceptions = []
@@ -472,12 +503,7 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             mock_fail.assert_awaited_once_with(77, "agent_error")
 
     async def test_unhandled_job_exception_captured_before_disconnect(self):
-        ctx = MagicMock()
-        ctx.room.name = "lesson-99"
-        ctx.job.metadata = json.dumps({"session_id": 99})
-        # Simulate an unexpected exception during build_system_prompt
-        ctx.connect = AsyncMock()
-        ctx.proc.userdata.get.return_value = "fake_vad"
+        ctx = self._make_ctx(session_id=99, room_name="lesson-99")
 
         captured_exceptions = []
 
