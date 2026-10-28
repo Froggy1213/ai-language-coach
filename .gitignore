@@ -36,6 +36,10 @@ playwright-report/
 e2e/.auth/
 .auth/
 
+# Benchmark & load test run outputs
+benchmarks/results/*.json
+load/results/*.json
+
 # Terraform: provider cache and local state are machine-specific and enormous
 # (the AWS provider alone is ~650 MB); `.terraform.lock.hcl` stays tracked
 # because it is the dependency lockfile a build must reproduce.

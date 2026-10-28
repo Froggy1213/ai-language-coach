@@ -102,7 +102,7 @@ All measurements below were captured on the live local containerised stack (Live
 
 ### 3.1 Capacity Sweep Table
 
-Run artifact: [`load/results/20261006T131204Z.json`](results/20261006T131204Z.json)
+Run artifact format: timestamped JSON in `load/results/` (see section 6)
 
 | Concurrency | Dispatched | Success | Failed | Success Rate | Min (ms) | p50 (ms) | p95 (ms) | Max (ms) | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
