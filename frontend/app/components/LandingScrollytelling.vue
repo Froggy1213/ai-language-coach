@@ -82,12 +82,36 @@ const currentChapter = computed(
   () => landing.chapters[activeChapterIndex.value] ?? landing.chapters[0]!,
 )
 
+/**
+ * When the user clicks a chapter pill in the scrubber bar, lock the active
+ * chapter index during the programmatic smooth scroll so intermediate scenes
+ * do not flash or overlap along the way.
+ */
+let lockedChapterIndex: number | null = null
+let unlockChapterTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearChapterLock(): void {
+  lockedChapterIndex = null
+  if (unlockChapterTimer) {
+    clearTimeout(unlockChapterTimer)
+    unlockChapterTimer = null
+  }
+}
+
 function scrollToChapter(index: number): void {
   stopAutoplay()
   const container = trackedContainer.value
   if (!container) {
     return
   }
+
+  clearChapterLock()
+  lockedChapterIndex = index
+  activeChapterIndex.value = index
+  unlockChapterTimer = setTimeout(() => {
+    lockedChapterIndex = null
+    unlockChapterTimer = null
+  }, 650)
 
   const headerOffset = 64
   const rect = container.getBoundingClientRect()
@@ -119,6 +143,7 @@ function toggleAutoplay(): void {
     return
   }
 
+  clearChapterLock()
   const container = trackedContainer.value
   if (!container) {
     return
@@ -190,56 +215,46 @@ onMounted(() => {
 
     const chapterCount = landing.chapters.length
     const idx = Math.min(chapterCount - 1, Math.floor(clamped * chapterCount))
-    activeChapterIndex.value = idx
+    if (lockedChapterIndex !== null) {
+      if (idx === lockedChapterIndex) {
+        clearChapterLock()
+      }
+    } else {
+      activeChapterIndex.value = idx
+    }
+  }
+
+  const onUserScrollInput = (): void => {
+    clearChapterLock()
+    stopAutoplay()
   }
 
   window.addEventListener('scroll', updateScrollDirector, { passive: true })
   window.addEventListener('resize', updateScrollDirector, { passive: true })
-  window.addEventListener('wheel', stopAutoplay, { passive: true })
-  window.addEventListener('touchstart', stopAutoplay, { passive: true })
+  window.addEventListener('wheel', onUserScrollInput, { passive: true })
+  window.addEventListener('touchstart', onUserScrollInput, { passive: true })
   updateScrollDirector()
 
   cleanupFns.push(() => {
     window.removeEventListener('scroll', updateScrollDirector)
     window.removeEventListener('resize', updateScrollDirector)
-    window.removeEventListener('wheel', stopAutoplay)
-    window.removeEventListener('touchstart', stopAutoplay)
+    window.removeEventListener('wheel', onUserScrollInput)
+    window.removeEventListener('touchstart', onUserScrollInput)
+    clearChapterLock()
     if (decayTimer) {
       clearTimeout(decayTimer)
     }
   })
 
   // Fallback for browsers that do not support CSS Scroll-Driven Animations
-  // (`scrollytelling`, `parallax-scroll-effects`, and `scroll-entry-exit-effects` guides).
+  // (`parallax-scroll-effects` and `scroll-entry-exit-effects` guides).
+  // Note: `#story` (`#animated .cinema-card`) is driven directly by the 60fps
+  // `updateScrollDirector` state machine + non-overlapping `.cinema-card` CSS
+  // transitions across all browsers so adjacent `.scrolly-step` intersections
+  // never write competing inline opacities onto inactive scene cards.
   const supportsViewTimeline =
     typeof CSS !== 'undefined'
     && CSS.supports('(animation-timeline: view()) and (animation-range: entry)')
-  const supportsScrollTimeline =
-    typeof CSS !== 'undefined'
-    && CSS.supports('(animation-timeline: scroll()) and (animation-range: 0% 100%)')
-
-  if (!supportsScrollTimeline && trackedContainer.value) {
-    const animatedSections = document.querySelectorAll<HTMLElement>('#animated .cinema-card')
-    const trackedSections = trackedContainer.value.querySelectorAll<HTMLElement>('.scrolly-step')
-
-    const scrollyObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          const sectionIndex = Array.from(trackedSections).indexOf(entry.target as HTMLElement)
-          if (sectionIndex !== -1 && animatedSections[sectionIndex]) {
-            const animatedSection = animatedSections[sectionIndex]!
-            const ratio = entry.intersectionRatio
-            animatedSection.style.opacity = String(Math.min(1, ratio * 1.6))
-            animatedSection.style.transform = `scale(${0.88 + ratio * 0.12}) translateY(${(1 - ratio) * 24}px)`
-          }
-        })
-      },
-      { threshold: Array.from({ length: 21 }, (_, i) => i / 20) },
-    )
-
-    trackedSections.forEach((section) => scrollyObserver.observe(section))
-    cleanupFns.push(() => scrollyObserver.disconnect())
-  }
 
   if (!supportsViewTimeline) {
     // Parallax fallback for hero layers
@@ -509,44 +524,40 @@ onMounted(() => {
         <!-- Main Split Cinema Frame: Left Narrative + Right Interactive Stage -->
         <div class="relative z-20 mx-auto grid w-full max-w-6xl flex-1 items-center gap-6 px-5 py-2 sm:px-6 lg:grid-cols-[0.92fr_1.08fr] lg:gap-12">
           <!-- Left column: Synchronized Chapter Narrative -->
-          <div class="space-y-4 sm:space-y-5">
-            <div class="inline-flex items-center gap-2 rounded-full bg-[var(--accent-dim)] px-3 py-1 font-mono text-[0.6875rem] font-semibold tracking-[0.14em] text-[var(--accent)]">
-              <span>{{ currentChapter.tag }}</span>
+          <Transition name="cinema-copy" mode="out-in">
+            <div :key="currentChapter.id" class="space-y-4 sm:space-y-5">
+              <div class="inline-flex items-center gap-2 rounded-full bg-[var(--accent-dim)] px-3 py-1 font-mono text-[0.6875rem] font-semibold tracking-[0.14em] text-[var(--accent)]">
+                <span>{{ currentChapter.tag }}</span>
+              </div>
+
+              <h2 class="display text-[clamp(1.625rem,3.4vw,2.65rem)] leading-[1.18] tracking-[-0.01em]">
+                {{ currentChapter.title }}
+              </h2>
+
+              <p class="max-w-[44ch] text-[0.9375rem] leading-[1.85] text-[var(--ink-muted)] sm:text-[1rem]">
+                {{ currentChapter.body }}
+              </p>
+
+              <p class="hidden border-l-2 border-[var(--accent)] pl-3.5 text-[0.8125rem] leading-relaxed text-[var(--ink-faint)] sm:block">
+                {{ currentChapter.caption }}
+              </p>
             </div>
-
-            <h2
-              :key="currentChapter.id"
-              class="display rise text-[clamp(1.625rem,3.4vw,2.65rem)] leading-[1.18] tracking-[-0.01em]"
-            >
-              {{ currentChapter.title }}
-            </h2>
-
-            <p
-              :key="`${currentChapter.id}-body`"
-              class="rise max-w-[44ch] text-[0.9375rem] leading-[1.85] text-[var(--ink-muted)] sm:text-[1rem]"
-            >
-              {{ currentChapter.body }}
-            </p>
-
-            <p class="hidden border-l-2 border-[var(--accent)] pl-3.5 text-[0.8125rem] leading-relaxed text-[var(--ink-faint)] sm:block">
-              {{ currentChapter.caption }}
-            </p>
-          </div>
+          </Transition>
 
           <!-- Right column: The Animated Scrollytelling Stage (#animated) -->
           <div
             id="animated"
             class="relative flex min-h-[22rem] w-full items-center justify-center sm:min-h-[27rem]"
           >
-            <!-- Persistent Live Orb Backplane that scales & shifts per scene without clipping -->
+            <!-- Persistent Live Orb Backplane: anchored at center and choreographed purely via transform + opacity so it never snaps or clips -->
             <div
-              class="pointer-events-none absolute transition-all duration-700 ease-out"
+              class="pointer-events-none absolute top-1/2 left-1/2 z-0 size-52 transition-[transform,opacity] duration-700 ease-out sm:size-60"
               :class="[
-                activeChapterIndex === 0 ? 'top-0 size-60 sm:size-72 opacity-100 scale-100' : '',
-                activeChapterIndex === 1 ? 'top-1 right-2 size-40 sm:size-48 opacity-90 scale-95' : '',
-                activeChapterIndex === 2 ? 'bottom-1 right-2 size-36 sm:size-44 opacity-45 scale-90' : '',
-                activeChapterIndex === 3 ? 'top-0 left-1/2 -translate-x-1/2 size-48 sm:size-56 opacity-95 scale-100' : '',
-                activeChapterIndex === 4 ? 'bottom-1 right-4 size-32 sm:size-40 opacity-40 scale-90' : '',
+                activeChapterIndex === 0 ? '-translate-x-1/2 -translate-y-[66%] scale-100 opacity-100' : '',
+                activeChapterIndex === 1 ? '-translate-x-[6%] -translate-y-[64%] scale-75 opacity-55' : '',
+                activeChapterIndex === 2 ? '-translate-x-[4%] -translate-y-[14%] scale-70 opacity-40' : '',
+                activeChapterIndex === 3 ? '-translate-x-1/2 -translate-y-[70%] scale-80 opacity-70' : '',
+                activeChapterIndex === 4 ? '-translate-x-[6%] -translate-y-[12%] scale-65 opacity-35' : '',
               ]"
             >
               <ConversationOrb :state="stageOrbState" :energy="stageOrbEnergy" />
@@ -554,8 +565,9 @@ onMounted(() => {
 
             <!-- SCENE 1 CARD: Prologue — Acoustic Awakening -->
             <section
-              class="cinema-card absolute inset-x-0 mx-auto max-w-lg rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_76%,transparent)] p-5 shadow-2xl backdrop-blur-xl transition-all duration-500 sm:p-6"
-              :class="activeChapterIndex === 0 ? 'pointer-events-auto translate-y-24 sm:translate-y-28 opacity-100 scale-100' : 'pointer-events-none translate-y-10 opacity-0 scale-90'"
+              class="cinema-card absolute inset-x-0 mx-auto mb-1 max-w-lg self-end rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_92%,transparent)] p-5 shadow-2xl backdrop-blur-xl sm:mb-3 sm:p-6"
+              :class="{ 'is-active': activeChapterIndex === 0 }"
+              :inert="activeChapterIndex !== 0"
             >
               <div class="flex items-center justify-between gap-4">
                 <div>
@@ -583,8 +595,9 @@ onMounted(() => {
 
             <!-- SCENE 2 CARD: 1-Minute Voice Diagnostic & CEFR Level -->
             <section
-              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-4 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_88%,transparent)] p-5 shadow-2xl backdrop-blur-xl transition-all duration-500 sm:p-6"
-              :class="activeChapterIndex === 1 ? 'pointer-events-auto translate-y-0 opacity-100 scale-100' : 'pointer-events-none translate-y-8 opacity-0 scale-90'"
+              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-4 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_94%,transparent)] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
+              :class="{ 'is-active': activeChapterIndex === 1 }"
+              :inert="activeChapterIndex !== 1"
             >
               <div class="flex items-center justify-between">
                 <span class="label">LIVE TRANSCRIPTION · 00:58</span>
@@ -631,8 +644,9 @@ onMounted(() => {
 
             <!-- SCENE 3 CARD: Personalized CEFR Roadmap Rail -->
             <section
-              class="cinema-card absolute inset-x-0 mx-auto max-w-lg rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_90%,transparent)] p-5 shadow-2xl backdrop-blur-xl transition-all duration-500 sm:p-6"
-              :class="activeChapterIndex === 2 ? 'pointer-events-auto translate-y-0 opacity-100 scale-100' : 'pointer-events-none translate-y-8 opacity-0 scale-90'"
+              class="cinema-card absolute inset-x-0 mx-auto max-w-lg rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_94%,transparent)] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
+              :class="{ 'is-active': activeChapterIndex === 2 }"
+              :inert="activeChapterIndex !== 2"
             >
               <div class="mb-4 flex items-center justify-between">
                 <span class="label">PERSONALIZED GRAMMAR RAIL</span>
@@ -680,8 +694,9 @@ onMounted(() => {
 
             <!-- SCENE 4 CARD: Live AI Voice Conversation -->
             <section
-              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-3.5 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_86%,transparent)] p-5 shadow-2xl backdrop-blur-xl transition-all duration-500 sm:p-6"
-              :class="activeChapterIndex === 3 ? 'pointer-events-auto translate-y-12 opacity-100 scale-100' : 'pointer-events-none translate-y-8 opacity-0 scale-90'"
+              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-3.5 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_94%,transparent)] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
+              :class="{ 'is-active': activeChapterIndex === 3 }"
+              :inert="activeChapterIndex !== 3"
             >
               <div class="flex items-center justify-between border-b border-[var(--line)] pb-3">
                 <div class="flex items-center gap-2">
@@ -711,8 +726,9 @@ onMounted(() => {
 
             <!-- SCENE 5 CARD: Mistake Reflection & SM-2 Spaced Repetition -->
             <section
-              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-4 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_92%,transparent)] p-5 shadow-2xl backdrop-blur-xl transition-all duration-500 sm:p-6"
-              :class="activeChapterIndex === 4 ? 'pointer-events-auto translate-y-0 opacity-100 scale-100' : 'pointer-events-none translate-y-8 opacity-0 scale-90'"
+              class="cinema-card absolute inset-x-0 mx-auto max-w-lg space-y-4 rounded-3xl border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--canvas-raised)_95%,transparent)] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
+              :class="{ 'is-active': activeChapterIndex === 4 }"
+              :inert="activeChapterIndex !== 4"
             >
               <div class="space-y-2.5">
                 <div>
@@ -979,6 +995,58 @@ onMounted(() => {
   timeline-scope: --tl-1, --tl-2, --tl-3, --tl-4, --tl-5, --hero-wrapper;
 }
 
+/*
+ * Sequenced scene transitions in `#animated` and the left narrative column:
+ * Outgoing cards fade out immediately (140ms, 0ms delay) and become hidden,
+ * while the incoming active card waits 120ms before gliding in over 260ms.
+ * This prevents two translucent cards from overlapping during scroll or chapter jumps.
+ */
+#animated .cinema-card {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1;
+  transform: translateY(14px) scale(0.96);
+  transition:
+    opacity 140ms cubic-bezier(0.4, 0, 1, 1) 0ms,
+    transform 140ms cubic-bezier(0.4, 0, 1, 1) 0ms,
+    visibility 0ms linear 140ms;
+}
+
+#animated .cinema-card.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 10;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1) 120ms,
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1) 120ms,
+    visibility 0ms linear 0ms;
+}
+
+.cinema-copy-enter-active {
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cinema-copy-leave-active {
+  transition:
+    opacity 120ms cubic-bezier(0.4, 0, 1, 1),
+    transform 120ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+.cinema-copy-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.cinema-copy-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 @keyframes parallax-drift {
   from {
     transform: translateY(var(--offset, 0px));
@@ -1063,8 +1131,11 @@ onMounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .parallax-layer,
   .scroll-reveal-card,
-  #animated .cinema-card {
+  #animated .cinema-card,
+  .cinema-copy-enter-active,
+  .cinema-copy-leave-active {
     animation: none !important;
+    transition: none !important;
     transform: none !important;
     translate: 0 0 !important;
   }
