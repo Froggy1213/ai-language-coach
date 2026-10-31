@@ -20,8 +20,6 @@ const ENVELOPE_FRAMES = 120
 const SPEECH_THRESHOLD = 0.035
 /** Recent frames to check for speech hangover (~300ms at 60ms polling). */
 const RECENT_SPEECH_FRAMES = 5
-/** Jumping to `thinking` needs this much silence, in frames (~0.36s at 60ms polling). */
-const THINKING_AFTER_FRAMES = 6
 
 /**
  * The conversation controller.
@@ -35,8 +33,15 @@ const THINKING_AFTER_FRAMES = 6
 export function useConversation(options: UseConversationOptions = {}) {
   const voice = useVoiceSession(options)
 
+  /**
+   * Loudness fallback for the agent's state, used only when the room does not
+   * publish `lk.agent.state` (the authoritative source is `voice.agentState`).
+   * The envelope below cannot tell "waiting" from "thinking", which is exactly
+   * why it no longer decides `thinking` on its own.
+   */
   const speaking = shallowRef(false)
-  const thinking = shallowRef(false)
+  /** Fundamental of the learner's microphone, refreshed from every analysed frame. */
+  const micLevel = ref(0)
 
   let context: AudioContext | null = null
   let micSource: MediaStreamAudioSourceNode | null = null
@@ -162,6 +167,7 @@ export function useConversation(options: UseConversationOptions = {}) {
 
     if (micAnalyser && micData) {
       micAnalyser.getByteFrequencyData(micData)
+      micLevel.value = fundamentalOf(micData)
     }
 
     let agentVolume = 0
@@ -181,19 +187,7 @@ export function useConversation(options: UseConversationOptions = {}) {
       envelope.shift()
     }
 
-    const speakingNow = envelope.slice(-RECENT_SPEECH_FRAMES).some((value) => value > SPEECH_THRESHOLD)
-    speaking.value = speakingNow
-
-    if (speakingNow) {
-      thinking.value = false
-      return
-    }
-
-    const silent = envelope.slice(-THINKING_AFTER_FRAMES).filter((value) => value <= SPEECH_THRESHOLD).length
-
-    if (silent >= THINKING_AFTER_FRAMES) {
-      thinking.value = true
-    }
+    speaking.value = envelope.slice(-RECENT_SPEECH_FRAMES).some((value) => value > SPEECH_THRESHOLD)
   }
 
   function startAnalysis(): void {
@@ -213,7 +207,7 @@ export function useConversation(options: UseConversationOptions = {}) {
 
     disconnectAnalysers()
     speaking.value = false
-    thinking.value = false
+    micLevel.value = 0
     envelope = []
   }
 
@@ -298,22 +292,32 @@ export function useConversation(options: UseConversationOptions = {}) {
     }
   })
 
-  /** The single visual state the orb renders. */
+  /**
+   * The single visual state the orb renders.
+   *
+   * The agent's own report is authoritative: `listening` while it waits for the
+   * learner, `thinking` while it plans a reply, `speaking` while it talks. Only
+   * when that attribute is unavailable does the loudness envelope decide, since
+   * a fallback can at least tell agent speech from silence. That fallback never
+   * fakes `thinking` — a stuck "the AI is thinking" flag was the bug this
+   * replaces — so the orb can stay in `listening` while the learner speaks.
+   */
   const orbState = computed<OrbState>(() => {
     if (voice.status.value === 'error') {
       return 'error'
     }
 
-    if (speaking.value) {
-      return 'speaking'
-    }
-
-    if (thinking.value) {
-      return 'thinking'
+    switch (voice.agentState.value) {
+      case 'speaking':
+        return 'speaking'
+      case 'thinking':
+        return 'thinking'
+      case 'listening':
+        return 'listening'
     }
 
     if (voice.status.value === 'connected') {
-      return 'listening'
+      return speaking.value ? 'speaking' : 'listening'
     }
 
     return 'idle'
@@ -323,25 +327,25 @@ export function useConversation(options: UseConversationOptions = {}) {
    * 0–1 loudness of whoever is speaking.
    *
    * The orb must react to the *learner* while they talk and to the *agent* while
-   * it answers, so the source switches with the derived state rather than being
-   * one fixed stream. Room-reported levels are the primary reading; the analysers
-   * above refine it when Web Audio is available, and the larger of the two wins so
-   * a quiet microphone cannot flatten the response.
+   * it answers, so the source follows the same state the orb renders rather than
+   * being one fixed stream. While the agent reports `speaking`, its room level
+   * drives the orb; while it reports `thinking`, there is no voice to follow and
+   * the orb gets a flat glow; while it reports `listening` — or the attribute is
+   * unavailable and the loudness fallback is in charge — the learner's
+   * microphone moves it. The larger of the room and analyser readings wins so a
+   * quiet input cannot flatten the response.
    */
   const energy = computed(() => {
-    if (voice.status.value !== 'connected') {
-      return 0
+    switch (orbState.value) {
+      case 'speaking':
+        return Math.max(0.08, voice.agentAudioLevel.value)
+      case 'thinking':
+        return 0.1
+      case 'listening':
+        return Math.max(voice.localAudioLevel.value, micLevel.value)
+      default:
+        return 0
     }
-
-    if (speaking.value) {
-      return Math.max(0.08, voice.agentAudioLevel.value)
-    }
-
-    if (thinking.value) {
-      return 0.1
-    }
-
-    return voice.localAudioLevel.value
   })
 
   return {

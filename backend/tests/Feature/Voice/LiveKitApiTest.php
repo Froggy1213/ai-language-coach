@@ -105,6 +105,30 @@ class LiveKitApiTest extends TestCase
         });
     }
 
+    public function test_delete_room_posts_the_room_name_with_a_room_scoped_token(): void
+    {
+        Http::fake([
+            'livekit.test:7880/twirp/livekit.RoomService/DeleteRoom' => Http::response(['sid' => 'RM_1']),
+        ]);
+
+        $this->api()->deleteRoom('lesson-42');
+
+        Http::assertSent(function (Request $request): bool {
+            if (! str_ends_with($request->url(), '/twirp/livekit.RoomService/DeleteRoom')) {
+                return false;
+            }
+
+            $video = $this->claims($this->bearerToken($request))['video'];
+
+            // Deleting a room is an admin action on one room, so the token must
+            // carry that room claim; the payload names the room itself.
+            return $request->method() === 'POST'
+                && $request['room'] === 'lesson-42'
+                && ($video->room ?? null) === 'lesson-42'
+                && ($video->roomAdmin ?? false) === true;
+        });
+    }
+
     #[DataProvider('transportSchemes')]
     public function test_maps_transport_scheme_to_expected_http_endpoint(string $configuredUrl, string $expectedEndpoint): void
     {

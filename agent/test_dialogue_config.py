@@ -24,6 +24,7 @@ except ImportError:
 from agent import (
     ALLOW_SLOW_DIALOGUE_ENV,
     KNOWN_DIALOGUE_PROVIDERS,
+    LLM_REASONING_EFFORT_ENV,
     _env_per_language,
     _language_code,
     assert_dialogue_provider_is_suitable,
@@ -214,6 +215,53 @@ class TestDialogueProviderSelection(unittest.TestCase):
             self.llm({"LLM_PROVIDER": "myprovider", "MYPROVIDER_API_KEY": "key", "LLM_MODEL": "m"})
 
         self.assertIn("LLM_BASE_URL", str(missing_url.exception))
+
+
+class TestDialogueReasoningEffort(unittest.TestCase):
+    """
+    A hidden thinking pause before every reply (plan §7).
+
+    `openai/gpt-oss-120b` is a reasoning model, and `livekit-plugins-openai` only
+    auto-defaults `reasoning_effort` for GPT-5-family ids, so the production path
+    sent nothing and Groq applied its own default (medium). The tests pin the
+    parameter at the `openai.LLM` boundary, because that is where the plugin
+    would otherwise be left to guess.
+    """
+
+    def llm_kwargs(self, env):
+        # The plugin is mocked rather than installed: this is a configuration
+        # decision, and these tests must run on a host without the audio stack.
+        with patch.dict(os.environ, env, clear=True), \
+             patch("agent.HAS_OPENAI", True), \
+             patch("agent.openai") as mock_openai:
+            create_llm()
+            return mock_openai.LLM.call_args.kwargs
+
+    def test_the_groq_dialogue_asks_for_low_reasoning_effort(self):
+        # LLM_PROVIDER unset is the path a deployment with only a Groq key
+        # takes: auto-detection still has to apply the setting.
+        kwargs = self.llm_kwargs({"GROQ_API_KEY": "gsk-test"})
+
+        self.assertEqual("low", kwargs["reasoning_effort"])
+
+    def test_reasoning_effort_can_be_switched_off_explicitly(self):
+        # `off`, not "", because `_env_str` treats blank as absent: an empty
+        # variable would return the per-provider default instead of disabling it.
+        kwargs = self.llm_kwargs({"GROQ_API_KEY": "gsk-test", LLM_REASONING_EFFORT_ENV: "off"})
+
+        self.assertNotIn("reasoning_effort", kwargs)
+
+    def test_a_provider_that_is_not_a_reasoning_model_gets_no_parameter(self):
+        # gpt-4o-mini does not reason; sending the field would be ignored at best
+        # and rejected by a stricter OpenAI-compatible endpoint at worst.
+        kwargs = self.llm_kwargs({"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"})
+
+        self.assertNotIn("reasoning_effort", kwargs)
+
+    def test_an_explicit_effort_overrides_the_per_provider_default(self):
+        kwargs = self.llm_kwargs({"GROQ_API_KEY": "gsk-test", LLM_REASONING_EFFORT_ENV: "high"})
+
+        self.assertEqual("high", kwargs["reasoning_effort"])
 
 
 class TestSlowProviderGuard(unittest.TestCase):

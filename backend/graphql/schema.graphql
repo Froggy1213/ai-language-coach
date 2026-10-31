@@ -89,9 +89,20 @@ type Mutation {
     the `VOICE_FLEET_BUSY` error code when no agent worker is free.
     """
     requestVoiceToken(
-        "The lesson card to practise; must be one of the learner's own `ready` cards."
+        "The lesson card to practise; must be one of the learner's own `ready` or `completed` cards."
         lessonCardId: ID!
     ): VoiceSession! @guard @field(resolver: "App\\Voice\\StartVoiceSession")
+
+    """
+    End the conversation the learner just finished. Moves the session to
+    `completed`, records its duration, deletes the LiveKit room so `room_finished`
+    cannot arrive minutes later, and queues the mistake analysis. Idempotent: a
+    session that is already terminal is returned unchanged.
+    """
+    finishVoiceSession(
+        "The session to finish; must belong to the authenticated learner."
+        id: ID!
+    ): VoiceSession! @guard @field(resolver: "App\\Voice\\FinishVoiceSession")
 
     """
     Submit the learner's self-assessed recall quality (0 to 5) for a grammar point

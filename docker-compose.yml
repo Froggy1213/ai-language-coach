@@ -279,13 +279,24 @@ services:
 
   # LiveKit WebRTC server for real-time voice sessions (plan §5).
   # Handles room signaling, WebRTC media and webhook delivery to the backend.
-  # rtc.node_ip is pinned to 127.0.0.1 so that ICE candidates announced to local
-  # browsers match the host loopback instead of Docker's internal bridge IP.
+  # `rtc.enable_loopback_candidate: true` announces 127.0.0.1 alongside the
+  # container's own interface IP (e.g. 192.168.97.x on OrbStack) instead of
+  # overriding `rtc.node_ip` to 127.0.0.1: Firefox's ICE stack ignores 127.0.0.1
+  # candidates by default (`media.peerconnection.ice.loopback = false`), so
+  # pinning `node_ip: 127.0.0.1` caused Firefox to drop all ICE candidates and
+  # fail with `could not establish pc connection`.
   livekit:
-    # Matches the tag the deployed EC2 node runs (infra/livekit/*.tpl): the
-    # Python worker is pinned to livekit-agents 1.8.x, so a local server on a
-    # floating tag could pass a session the production pair would refuse.
-    image: livekit/livekit-server:v1.8.4
+    # The tag is chosen for the *browser* SDK, not for the Python worker.
+    #
+    # livekit-client 2.22.x negotiates over the v1 signalling path (protocol 17)
+    # and opens a `_data_track` channel. A server older than v1.9 answers
+    # `/rtc/v1` with 404, the client silently falls back to v0, and every later
+    # offer dies with `NegotiationError: negotiation timed out` — which tears the
+    # call down and reconnects about every 15 seconds, long before the agent can
+    # hold a conversation. v1.13.1 is the version verified against this client
+    # here, and it still registers the pinned livekit-agents 1.8.x worker
+    # (protocol 17). Keep infra/livekit/*.tpl on the same tag.
+    image: livekit/livekit-server:v1.13.1
     container_name: coach_livekit
     restart: unless-stopped
     logging: *default-logging
@@ -295,12 +306,16 @@ services:
       - "127.0.0.1:7882:7882/udp"
     environment:
       <<: *livekit-credentials
-      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-127.0.0.1}
+      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
       VOICE_WEBHOOK_URL: ${VOICE_WEBHOOK_URL:-http://host.docker.internal:8000/api/webhooks/livekit}
     entrypoint:
       - sh
       - -c
       - |
+        NODE_IP_LINE=""
+        if [ -n "$$LIVEKIT_NODE_IP" ] && [ "$$LIVEKIT_NODE_IP" != "127.0.0.1" ]; then
+          NODE_IP_LINE="  node_ip: \"$$LIVEKIT_NODE_IP\""
+        fi
         cat << EOF > /tmp/livekit.yaml
         port: 7880
         bind_addresses:
@@ -308,8 +323,9 @@ services:
         rtc:
           tcp_port: 7881
           udp_port: 7882
-          node_ip: "$$LIVEKIT_NODE_IP"
           use_external_ip: false
+          enable_loopback_candidate: true
+        $$NODE_IP_LINE
         keys:
           "$$LIVEKIT_API_KEY": "$$LIVEKIT_API_SECRET"
         webhook:
@@ -345,6 +361,11 @@ services:
       <<: *livekit-credentials
       LIVEKIT_URL: ws://livekit:7880
       VOICE_AGENT_NAME: ${VOICE_AGENT_NAME:-ai-language-coach}
+      # How long the agent holds its opening line waiting for the learner.
+      # `requestVoiceToken` returns as soon as the agent is in the room, while
+      # the browser still has to acquire the microphone and finish ICE; speaking
+      # before that is speaking into an empty room.
+      GREETING_WAIT_SECONDS: ${GREETING_WAIT_SECONDS:-60}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -361,6 +382,12 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      # gpt-oss is a reasoning model: left alone it deliberates before its first
+      # visible token, and that pause is charged to the learner's turn. "low"
+      # keeps the dialogue responsive; "off" leaves the parameter out for a
+      # provider that would reject it. Blank means the per-provider default in
+      # agent.py (low for Groq, absent everywhere else).
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       # The escape hatch for running the dialogue on a disqualified provider on
       # purpose. Without it in this list the variable would be inert in a
       # container while appearing to work on the host.

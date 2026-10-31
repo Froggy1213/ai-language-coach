@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+import inspect
 import json
 import logging
 import os
@@ -905,6 +906,21 @@ class TurnMetricsTracker:
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
 
+    async def drain(self, timeout: float = 3.0) -> None:
+        """
+        Let the turns already scheduled for reporting reach the backend, then close.
+
+        A session now ends as soon as the learner leaves the room, and shutdown
+        used to cancel whatever flush was in flight. That flush carries the last
+        learner utterance — the one the mistake analysis is about to read — so
+        cancelling it silently shortened the transcript. Waiting for the scheduled
+        flushes, bounded so a hung backend cannot hold the job, keeps that turn.
+        """
+        pending = [task for task in self._flush_tasks.values() if not task.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=timeout)
+        self.close()
+
     def close(self) -> None:
         """Cancel all active flush tasks and clear pending timers."""
         for task in list(self._flush_tasks.values()):
@@ -1041,6 +1057,12 @@ SLOW_DIALOGUE_PROVIDERS = frozenset({"deepseek"})
 #: disqualified. Named here so the message and the tests cannot drift apart.
 ALLOW_SLOW_DIALOGUE_ENV = "ALLOW_SLOW_DIALOGUE_LLM"
 
+#: Overrides the per-provider reasoning effort for the dialogue model. Unset
+#: means "the default for this provider" (low on Groq, unset everywhere else);
+#: `off` is the explicit value that omits the parameter — see
+#: `_reasoning_effort_for` for why it is not an empty string.
+LLM_REASONING_EFFORT_ENV = "LLM_REASONING_EFFORT"
+
 
 def assert_dialogue_provider_is_suitable(provider: str) -> None:
     """
@@ -1074,6 +1096,32 @@ def assert_dialogue_provider_is_suitable(provider: str) -> None:
     )
 
 
+def _reasoning_effort_for(provider: str) -> Optional[str]:
+    """
+    The reasoning effort to send with the dialogue request, if any.
+
+    `openai/gpt-oss-120b` is a reasoning model, but `livekit-plugins-openai` only
+    fills in `reasoning_effort` itself for GPT-5-family model ids
+    (`_supports_reasoning_effort` in the plugin), so the Groq path was sending
+    nothing and Groq applied its own default — medium — which put a hidden
+    thinking pause in front of every reply. `low` is enough for a conversation at
+    this level and is what the latency benchmark points at.
+
+    `LLM_REASONING_EFFORT` overrides the per-provider default for any provider,
+    and `off` omits the parameter entirely. The sentinel is a word rather than an
+    empty string because `_env_str` treats blank as absent: a Compose-forwarded
+    `LLM_REASONING_EFFORT:` would return the default instead of disabling it, so
+    an empty value cannot express "do not send the parameter". `"none"` is never
+    produced here: Groq's GPT-OSS models accept only `low`/`medium`/`high`, and
+    the `"none"` in `benchmarks/dialogue_llm_latency.py` is that harness's own
+    measurement knob, not a value the production dialogue may send.
+    """
+    explicit = _env_str(LLM_REASONING_EFFORT_ENV, None)
+    if explicit is not None:
+        return None if explicit.strip().lower() == "off" else explicit.strip().lower()
+    return "low" if provider == "groq" else None
+
+
 def create_llm():
     """
     Constructs the dialogue LLM instance for LiveKit AgentSession.
@@ -1098,6 +1146,15 @@ def create_llm():
     and base_url from environment variables, applying the benchmark's conclusion
     requires only updating environment configuration (in docker-compose.yml or .env)
     without touching code or rebuilding containers.
+
+    Reasoning effort is part of that decision, not an afterthought. The Groq
+    model is a reasoning model, and the plugin's auto-default does not recognise
+    its id, so the request used to carry no effort setting at all and Groq fell
+    back to medium — latency the benchmark never measured, hidden before the
+    first token. `_reasoning_effort_for` now sends `low` on Groq (and nothing on
+    the non-reasoning providers), with `LLM_REASONING_EFFORT` as the override and
+    `off` as the way to omit the field. `"none"` is deliberately not one of the
+    values: Groq's GPT-OSS models only accept `low`/`medium`/`high`.
     """
     if not HAS_OPENAI:
         raise RuntimeError("livekit-plugins-openai is required for LLM integration")
@@ -1133,11 +1190,15 @@ def create_llm():
             if not base_url:
                 raise ValueError(f"LLM_BASE_URL is required when LLM_PROVIDER is '{provider}', which agent.py has no default endpoint for")
 
-        return openai.LLM(
-            model=model_name or known["model"],
-            base_url=base_url or (known["base_url"] or None),
-            api_key=api_key,
-        )
+        llm_kwargs: Dict[str, Any] = {
+            "model": model_name or known["model"],
+            "base_url": base_url or (known["base_url"] or None),
+            "api_key": api_key,
+        }
+        reasoning_effort = _reasoning_effort_for(provider)
+        if reasoning_effort is not None:
+            llm_kwargs["reasoning_effort"] = reasoning_effort
+        return openai.LLM(**llm_kwargs)
 
     # Nothing named: infer from the keys present, fastest known provider first.
     # The order matters — auto-detection that prefers "whichever key exists"
@@ -1158,11 +1219,15 @@ def create_llm():
             config["key_var"],
         )
 
-        return openai.LLM(
-            model=model_name or config["model"],
-            base_url=base_url or config["base_url"] or None,
-            api_key=api_key,
-        )
+        llm_kwargs = {
+            "model": model_name or config["model"],
+            "base_url": base_url or config["base_url"] or None,
+            "api_key": api_key,
+        }
+        reasoning_effort = _reasoning_effort_for(provider)
+        if reasoning_effort is not None:
+            llm_kwargs["reasoning_effort"] = reasoning_effort
+        return openai.LLM(**llm_kwargs)
 
     # Nothing fast is keyed. The only configuration left is a disqualified
     # provider, which is either refused or — with the override set — actually
@@ -1177,11 +1242,15 @@ def create_llm():
             ALLOW_SLOW_DIALOGUE_ENV,
         )
 
-        return openai.LLM(
-            model=model_name or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["model"],
-            base_url=base_url or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["base_url"],
-            api_key=slow_key,
-        )
+        llm_kwargs = {
+            "model": model_name or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["model"],
+            "base_url": base_url or KNOWN_DIALOGUE_PROVIDERS["deepseek"]["base_url"],
+            "api_key": slow_key,
+        }
+        reasoning_effort = _reasoning_effort_for("deepseek")
+        if reasoning_effort is not None:
+            llm_kwargs["reasoning_effort"] = reasoning_effort
+        return openai.LLM(**llm_kwargs)
 
     raise ValueError(
         "No dialogue LLM is configured. Set LLM_PROVIDER and its key "
@@ -1265,6 +1334,49 @@ def create_tts(metadata: Optional[Dict[str, Any]] = None):
 def prewarm(proc: JobProcess):
     init_sentry()
     proc.userdata["vad"] = silero.VAD.load()
+
+
+async def _wait_for_learner(ctx) -> None:
+    """
+    Wait for the first learner before the greeting is spoken.
+
+    StartVoiceSession returns the browser's token as soon as the AGENT
+    participant appears in the room, but that is not the same moment the browser
+    is ready to listen: the page still has to call getUserMedia, get microphone
+    permission and finish ICE. Speaking the greeting on the next line after
+    `session.start()` therefore put it into a room that still had only the agent
+    in it, and the learner joined in time to hear the silence after it — the
+    first thing they heard was nothing at all. Waiting for the first remote
+    participant puts the greeting on the far side of that race.
+
+    `JobContext.wait_for_participant` also connects the room if the job has not
+    done so already, and returns immediately when a learner is already in it.
+
+    The wait is bounded by `GREETING_WAIT_SECONDS` (default 60 s) because a job
+    that waits forever would hold a worker process (and the backend's
+    VOICE_MAX_SESSION_SECONDS cap) for a learner who never arrives. On timeout
+    the greeting is still spoken, so a slow join degrades to the previous
+    behaviour rather than to a silent session.
+    """
+    timeout = _env_float("GREETING_WAIT_SECONDS", 60.0)
+    waiter = ctx.wait_for_participant()
+
+    # This guard exists only for the failure-path tests in test_turn_metrics.py,
+    # which drive entrypoint() with a MagicMock context whose call returns a
+    # plain mock: awaiting that would raise where the greeting used to be. A real
+    # JobContext always returns a coroutine, so the production path never takes
+    # this branch.
+    if not inspect.isawaitable(waiter):
+        return
+
+    try:
+        await asyncio.wait_for(waiter, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "No learner joined within %.1fs; speaking the greeting anyway "
+            "(GREETING_WAIT_SECONDS)",
+            timeout,
+        )
 
 
 async def entrypoint(ctx: JobContext):
@@ -1402,6 +1514,31 @@ async def entrypoint(ctx: JobContext):
                 except Exception as dur_exc:
                     logger.warning("Error during max session duration shutdown: %s", dur_exc)
 
+            # livekit-agents' RoomIO closes the AgentSession on a client-initiated
+            # disconnect (`close_on_disconnect=True`), but that is all it does:
+            # the job and the agent participant stay in the room, so the room
+            # never becomes empty. The backend then only learns the session ended
+            # from `room_finished`, after VOICE_MAX_SESSION_SECONDS (15 minutes)
+            # plus the room's empty timeout — a quarter of an hour in which the
+            # worker holds a process for nobody and the learner's session stays
+            # open. Shutting the job down when the last remote participant leaves
+            # makes the agent leave the room immediately instead.
+            #
+            # Registered before either start path so both branches get it, and
+            # safe before anyone joins: a disconnect event cannot fire before the
+            # first participant has connected, and `ctx.shutdown` may be called
+            # more than once.
+            if hasattr(ctx.room, "on"):
+                @ctx.room.on("participant_disconnected")
+                def _on_participant_left(participant):
+                    if not ctx.room.remote_participants:
+                        logger.info(
+                            "Learner %s left room %s; shutting the agent job down",
+                            getattr(participant, "identity", "unknown"),
+                            room_name,
+                        )
+                        ctx.shutdown(reason="participant_disconnected")
+
             if USE_AGENT_SESSION:
                 logger.info("Using LiveKit AgentSession interface")
                 agent_instance = Agent(instructions=instructions)
@@ -1458,13 +1595,22 @@ async def entrypoint(ctx: JobContext):
                 async def _cleanup_tracker() -> None:
                     if duration_task and not duration_task.done():
                         duration_task.cancel()
-                    turn_tracker.close()
+                    # Flush before closing: the room is already gone by the time
+                    # shutdown callbacks run, and the turn still in flight is the
+                    # last thing the learner said.
+                    try:
+                        await turn_tracker.drain()
+                    except Exception as exc:
+                        logger.warning("Could not flush pending turn metrics: %s", exc)
+                        turn_tracker.close()
 
                 if hasattr(ctx, "add_shutdown_callback"):
                     ctx.add_shutdown_callback(_cleanup_tracker)
 
                 await session.start(room=ctx.room, agent=agent_instance)
                 duration_task = asyncio.create_task(_enforce_max_duration())
+
+                await _wait_for_learner(ctx)
 
                 # One text-to-speech call, no model in the loop: see build_greeting.
                 await session.say(build_greeting(metadata), allow_interruptions=True)
@@ -1487,6 +1633,7 @@ async def entrypoint(ctx: JobContext):
                 pipeline_agent.start(ctx.room)
                 duration_task = asyncio.create_task(_enforce_max_duration())
 
+                await _wait_for_learner(ctx)
                 await pipeline_agent.say(build_greeting(metadata), allow_interruptions=True)
 
         except Exception as exc:

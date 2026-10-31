@@ -131,7 +131,7 @@ chmod 600 /opt/livekit/livekit.yaml
 cat << EOF > /opt/livekit/docker-compose.yml
 services:
   livekit:
-    image: livekit/livekit-server:v1.8.4
+    image: livekit/livekit-server:v1.13.1
     container_name: livekit-server
     restart: unless-stopped
     network_mode: host

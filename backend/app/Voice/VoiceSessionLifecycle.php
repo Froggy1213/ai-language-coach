@@ -75,6 +75,46 @@ final class VoiceSessionLifecycle
     }
 
     /**
+     * The learner pressed "finish", so the conversation ended deliberately
+     * rather than by walking away.
+     *
+     * Used by the `finishVoiceSession` resolver once the learner has left the
+     * room. Recording the outcome here is what keeps a normally finished lesson
+     * from being written down as an abandonment when the room eventually times
+     * out.
+     */
+    public function completed(int $sessionId, ?int $durationSeconds = null): bool
+    {
+        return $this->transitionById(
+            $sessionId,
+            from: [VoiceSessionStatus::Pending, VoiceSessionStatus::Active],
+            to: VoiceSessionStatus::Completed,
+            attributes: array_filter([
+                'duration_sec' => $durationSeconds,
+            ], static fn (mixed $value): bool => $value !== null),
+        );
+    }
+
+    /**
+     * The session's room is stale: it still says `active` (or `pending`), but
+     * LiveKit reports no agent participant in it, so there is nobody left to
+     * talk to.
+     *
+     * Used by the idempotency guard in `requestVoiceToken` when the learner's
+     * current session points at a room whose agent has exited. Marking it here
+     * is what lets the next attempt open a fresh room instead of handing back a
+     * silent one.
+     */
+    public function abandoned(int $sessionId): bool
+    {
+        return $this->transitionById(
+            $sessionId,
+            from: [VoiceSessionStatus::Pending, VoiceSessionStatus::Active],
+            to: VoiceSessionStatus::Abandoned,
+        );
+    }
+
+    /**
      * The agent hit an STT/TTS/LLM failure and said so itself before
      * disconnecting (plan §5). LiveKit never sees this — a broken provider
      * stream is not a room event — which is why it has its own endpoint.

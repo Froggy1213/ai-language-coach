@@ -6,6 +6,7 @@ use App\Http\Controllers\RecordVoiceSessionTurnController;
 use App\Http\Controllers\ReportVoiceClientErrorController;
 use App\Http\Middleware\VerifyInternalSecret;
 use Illuminate\Support\Facades\Route;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 /*
 | LiveKit calls this one, so it is deliberately outside the Sanctum guard: the
@@ -27,5 +28,5 @@ Route::post('/internal/sessions/{session}/turns', RecordVoiceSessionTurnControll
 
 // The learner's browser reports client-side WebRTC / microphone failures here.
 Route::post('/sessions/{session}/client-error', ReportVoiceClientErrorController::class)
-    ->middleware(['auth:sanctum', 'throttle:30,1'])
+    ->middleware([EnsureFrontendRequestsAreStateful::class, 'auth:sanctum', 'throttle:30,1'])
     ->whereNumber('session');

@@ -8,7 +8,7 @@
 
 services:
   livekit:
-    image: livekit/livekit-server:v1.8.4
+    image: livekit/livekit-server:v1.13.1
     container_name: livekit-server
     restart: unless-stopped
     network_mode: host

@@ -148,7 +148,7 @@ class RequestVoiceTokenTest extends TestCase
         });
     }
 
-    public function test_returns_the_same_session_when_one_is_still_active(): void
+    public function test_returns_the_same_active_session_while_its_agent_is_still_present(): void
     {
         $user = User::factory()->create();
         $card = $this->readyCardFor($user);
@@ -156,6 +156,7 @@ class RequestVoiceTokenTest extends TestCase
             'status' => VoiceSessionStatus::Active,
         ]);
         Sanctum::actingAs($user);
+        $this->fakeAgentPresence();
 
         $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
 
@@ -164,7 +165,69 @@ class RequestVoiceTokenTest extends TestCase
 
         // The guard is the point: a double-click must not open a second room.
         $this->assertSame(1, VoiceSession::query()->count());
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/twirp/livekit.RoomService/CreateRoom'));
+    }
+
+    public function test_an_active_session_whose_agent_has_left_is_abandoned_and_a_new_room_is_opened(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        $dead = VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Active,
+        ]);
+        Sanctum::actingAs($user);
+
+        // The first participant list is the liveness check (the agent is gone),
+        // the second is waitForAgent polling the freshly opened room.
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/ListParticipants' => Http::sequence()
+                ->push(['participants' => []])
+                ->push(['participants' => [['identity' => 'agent-1', 'kind' => 'AGENT']]]),
+            'livekit.test/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
+            'livekit.test/twirp/livekit.AgentDispatchService/CreateDispatch' => Http::response(['id' => 'dispatch-1']),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+
+        // The old room has no agent left to talk to, so it is not handed back:
+        // the learner gets a fresh room instead of a silent call.
+        $this->assertSame(VoiceSessionStatus::Abandoned, $dead->fresh()->status);
+        $this->assertSame(2, VoiceSession::query()->count());
+
+        $new = VoiceSession::query()->latest('id')->firstOrFail();
+        $this->assertSame(VoiceSessionStatus::Active, $new->status);
+        $this->assertSame((string) $new->getKey(), $response->json('data.requestVoiceToken.id'));
+        $this->assertSame('lesson-'.$new->getKey(), $new->room_name);
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/twirp/livekit.RoomService/CreateRoom')
+            && $request['name'] === $new->room_name);
+    }
+
+    public function test_a_flaky_livekit_api_returns_the_existing_active_session(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+        $existing = VoiceSession::factory()->for($user)->for($card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Active,
+        ]);
+        Sanctum::actingAs($user);
+
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/ListParticipants' => fn () => throw new ConnectionException('Connection reset by peer'),
+        ]);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame((string) $existing->getKey(), $response->json('data.requestVoiceToken.id'));
+
+        // Being conservative is the point: an API blip must not mark a live
+        // conversation abandoned and open a second room under the learner.
+        $this->assertSame(VoiceSessionStatus::Active, $existing->fresh()->status);
+        $this->assertSame(1, VoiceSession::query()->count());
     }
 
     public function test_reuses_a_pending_session_instead_of_opening_a_second_room(): void
@@ -181,6 +244,10 @@ class RequestVoiceTokenTest extends TestCase
         $response->assertGraphQLErrorFree();
         $this->assertSame((string) $existing->getKey(), $response->json('data.requestVoiceToken.id'));
         $this->assertSame(1, VoiceSession::query()->count());
+
+        // A pending session is exempt from the liveness check: its agent may
+        // simply not have arrived yet, so no LiveKit call is made at all.
+        Http::assertNothingSent();
     }
 
     public function test_a_session_that_failed_to_start_does_not_block_a_new_attempt(): void
@@ -276,6 +343,27 @@ class RequestVoiceTokenTest extends TestCase
 
         $response->assertGraphQLErrorFree();
         $this->assertSame(2, VoiceSession::query()->count());
+    }
+
+    public function test_a_completed_card_can_be_practised_again(): void
+    {
+        $user = User::factory()->create();
+        // Completing the lesson turned the card to `completed`; the "practice
+        // again" button must still be able to open a session for it.
+        $card = $this->readyCardFor($user, ['status' => LessonCardStatus::Completed]);
+        Sanctum::actingAs($user);
+        $this->fakeLiveKit(agentJoins: true);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorFree();
+        $this->assertSame(VoiceSessionStatus::Active->value, $response->json('data.requestVoiceToken.status'));
+        $this->assertSame(1, VoiceSession::query()->count());
+
+        $session = VoiceSession::query()->sole();
+        $this->assertSame($card->getKey(), $session->lesson_card_id);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/twirp/livekit.RoomService/CreateRoom')
+            && $request['name'] === $session->room_name);
     }
 
     public function test_rejects_a_card_that_belongs_to_another_learner(): void
@@ -519,12 +607,17 @@ class RequestVoiceTokenTest extends TestCase
             'created_at' => now(),
         ]);
 
+        $this->fakeAgentPresence();
+
         $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
 
         $response->assertGraphQLErrorFree();
         $this->assertSame((string) $existing->getKey(), $response->json('data.requestVoiceToken.id'));
         $this->assertSame(2, $user->voiceSessions()->count());
-        Http::assertNothingSent();
+
+        // The guard still answers first for a card that is at the cap, but it
+        // now has to check that the room it hands back still has its agent.
+        Http::assertSentCount(1);
     }
 
     public function test_idempotency_guard_wins_over_daily_cap_for_existing_pending_session(): void
@@ -649,6 +742,21 @@ class RequestVoiceTokenTest extends TestCase
                 'participants' => $agentJoins
                     ? [['identity' => 'agent-1', 'kind' => 'AGENT']]
                     : [['identity' => 'learner-1', 'kind' => 'STANDARD']],
+            ]),
+        ]);
+    }
+
+    /**
+     * The single call the idempotency guard makes when an existing active
+     * session is checked for a live agent.
+     */
+    private function fakeAgentPresence(bool $present = true): void
+    {
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/ListParticipants' => Http::response([
+                'participants' => $present
+                    ? [['identity' => 'agent-1', 'kind' => 'AGENT']]
+                    : [],
             ]),
         ]);
     }

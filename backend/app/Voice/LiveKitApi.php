@@ -39,6 +39,18 @@ final class LiveKitApi
     }
 
     /**
+     * Close the room the learner just finished.
+     *
+     * Deleting it explicitly is what makes LiveKit deliver `room_finished` now
+     * rather than after the empty timeout has elapsed, and it also disconnects
+     * any agent participant still lingering in the room.
+     */
+    public function deleteRoom(string $roomName): void
+    {
+        $this->call('livekit.RoomService/DeleteRoom', ['room' => $roomName], room: $roomName);
+    }
+
+    /**
      * Ask the agent fleet for a worker, telling it which lesson the job is for
      * (plan §2 — explicit dispatch with job metadata).
      *

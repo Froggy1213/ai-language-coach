@@ -453,6 +453,43 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
             mock_report.assert_not_called()
 
+    async def test_drain_flushes_the_in_flight_turn_before_closing(self):
+        tracker = TurnMetricsTracker(session_id=101, flush_delay=0.02)
+        tracker.on_user_speech("Draining the last turn")
+
+        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-drain", end_of_utterance_delay=0.20)
+            )
+
+            # Shutdown calls drain() instead of close(): the turn scheduled for a
+            # delayed flush must still reach the backend, because it carries the
+            # last learner utterance the mistake analysis reads.
+            await tracker.drain(timeout=1.0)
+
+            mock_report.assert_awaited_once()
+            called_session_id, payload = mock_report.await_args.args
+            self.assertEqual(called_session_id, 101)
+            self.assertEqual(payload["turn_id"], "turn-drain")
+            self.assertEqual(payload["transcript"], "Draining the last turn")
+            self.assertEqual(len(tracker._flush_tasks), 0)
+
+    async def test_drain_is_bounded_when_a_flush_does_not_finish(self):
+        tracker = TurnMetricsTracker(session_id=102, flush_delay=5.0)
+        tracker.on_user_speech("Too slow to drain")
+
+        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-drain-slow", end_of_utterance_delay=0.20)
+            )
+
+            # The timeout must release the job rather than let a hung backend hold
+            # shutdown open; close() then cancels the remaining task.
+            await tracker.drain(timeout=0.01)
+
+            mock_report.assert_not_called()
+            self.assertEqual(len(tracker._flush_tasks), 0)
+
     def test_record_completed_turn_id_deque_eviction(self):
         tracker = TurnMetricsTracker(session_id=1)
         for i in range(10):
@@ -825,6 +862,7 @@ class TestCreateLlm(unittest.TestCase):
                 model="openai/gpt-oss-120b",
                 base_url="https://api.groq.com/openai/v1",
                 api_key="gsk-groq-789",
+                reasoning_effort="low",
             )
 
     @patch("agent.HAS_OPENAI", True)
@@ -880,6 +918,7 @@ class TestCreateLlm(unittest.TestCase):
                 model="llama-3.3-70b-versatile",
                 base_url="https://api.groq.com/openai/v1",
                 api_key="gsk-groq-789",
+                reasoning_effort="low",
             )
 
     @patch("agent.HAS_OPENAI", True)

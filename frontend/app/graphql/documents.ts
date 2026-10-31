@@ -175,6 +175,17 @@ export const REQUEST_VOICE_TOKEN_MUTATION = /* GraphQL */ `
   }
 `
 
+export const FINISH_VOICE_SESSION_MUTATION = /* GraphQL */ `
+  mutation FinishVoiceSession($id: ID!) {
+    finishVoiceSession(id: $id) {
+      id
+      status
+      durationSec
+      analyzed
+    }
+  }
+`
+
 export const VOICE_SESSION_FEEDBACK_FIELDS = /* GraphQL */ `
   id
   status

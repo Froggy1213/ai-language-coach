@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useMutation } from '@urql/vue'
-import { COMPLETE_LESSON_CARD_MUTATION } from '~/graphql/documents'
+import {
+  COMPLETE_LESSON_CARD_MUTATION,
+  FINISH_VOICE_SESSION_MUTATION,
+} from '~/graphql/documents'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { common, talk } from '~/constants/strings'
 
@@ -73,12 +76,31 @@ const {
 } = useConversation({ audioElement })
 
 const completeLessonMutation = useMutation(COMPLETE_LESSON_CARD_MUTATION)
+const finishVoiceMutation = useMutation(FINISH_VOICE_SESSION_MUTATION)
 const finishPending = ref(false)
 
 async function finish(): Promise<void> {
+  if (finishPending.value) {
+    return
+  }
+
   finishPending.value = true
 
   try {
+    // Tell the backend the session is over before dropping the room. Without
+    // this call it only learns about the end from LiveKit's `room_finished`
+    // webhook, which arrives minutes later once the room's timeouts expire —
+    // until then `/reflect/:id` shows "in progress" and no mistakes. Best
+    // effort: if the mutation fails, `leave()` and the navigation below must
+    // still happen, and the webhook finishes the session afterwards.
+    if (sessionId.value) {
+      try {
+        await finishVoiceMutation.executeMutation({ id: sessionId.value })
+      } catch {
+        // Ignored on purpose: see above, the webhook is the backstop.
+      }
+    }
+
     await leave()
     if (card.value && card.value.status === 'ready') {
       try {
