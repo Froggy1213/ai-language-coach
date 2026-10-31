@@ -150,6 +150,8 @@ export const reflect = {
   checkNow: '今すぐ確認',
   noMistakes: '間違いは見つかりませんでした',
   noMistakesBody: 'この会話では文法上の誤りは検出されませんでした。その調子です。',
+  analysisUnfinished: '分析が完了していません',
+  analysisUnfinishedBody: 'この会話の分析はまだ終わっていません。「今すぐ確認」で再読み込みするか、しばらくしてからもう一度お試しください。',
   mistakesTitle: '見つかった間違い',
   youSaid: 'あなたの発話',
   correction: '正しい形',

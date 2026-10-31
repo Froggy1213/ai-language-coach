@@ -82,8 +82,30 @@ return [
                     'scheme' => env('REVERB_SCHEME', 'https'),
                     'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
                 ],
+                /*
+                 | Reverb matches these patterns against the *host* of the
+                 | browser's `Origin` header, not against the whole origin:
+                 | `Server::verifyOrigin()` reduces the header with
+                 | `parse_url(..., PHP_URL_HOST)` and compares that to each
+                 | entry, so an entry copied verbatim from
+                 | `CORS_ALLOWED_ORIGINS` ("http://localhost:3000") can never
+                 | match the host "localhost". Every socket was then refused
+                 | with 4009 "Origin not allowed", the SPA fell back to "could
+                 | not establish the realtime connection", and feedback screens
+                 | lost their subscription. Each entry is therefore reduced to
+                 | its host here, while `*` and already-bare hosts pass through
+                 | unchanged.
+                 */
                 'allowed_origins' => array_values(array_filter(array_map(
-                    'trim',
+                    static function (string $origin): string {
+                        $origin = trim($origin);
+
+                        if ($origin === '*' || $origin === '') {
+                            return $origin;
+                        }
+
+                        return parse_url($origin, PHP_URL_HOST) ?? $origin;
+                    },
                     explode(',', (string) (env('REVERB_ALLOWED_ORIGINS') ?? env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000'))),
                 ), fn (string $origin): bool => $origin !== '')),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),

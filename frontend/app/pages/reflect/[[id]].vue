@@ -151,8 +151,25 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
       </div>
 
       <template v-else>
-        <UiNotice v-if="mistakes.length === 0" tone="success" :title="reflect.noMistakes">
+        <!-- An empty mistake list is only good news once the analysis has
+             actually run. Without the `analyzed` guard a session whose analysis
+             never completed — or whose completion push never arrived — was
+             presented as a flawless conversation, which is the one reading the
+             learner must be able to trust. -->
+        <UiNotice
+          v-if="mistakes.length === 0 && session.analyzed"
+          tone="success"
+          :title="reflect.noMistakes"
+        >
           {{ reflect.noMistakesBody }}
+        </UiNotice>
+
+        <UiNotice
+          v-else-if="mistakes.length === 0"
+          tone="warn"
+          :title="reflect.analysisUnfinished"
+        >
+          {{ reflect.analysisUnfinishedBody }}
         </UiNotice>
 
         <div v-else class="space-y-8">
