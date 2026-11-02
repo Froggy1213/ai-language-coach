@@ -207,7 +207,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         async def fake_report(session_id, payload):
             dispatched_payloads.append((session_id, payload))
 
-        with patch("agent.report_session_turn", side_effect=fake_report):
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
             # 1. EOU arrives (anchored to 0.35s)
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="sp-1", transcription_delay=0.21, end_of_utterance_delay=0.35)
@@ -241,7 +241,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         async def fake_report(session_id, payload):
             dispatched_payloads.append((session_id, payload))
 
-        with patch("agent.report_session_turn", side_effect=fake_report):
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
             # Opening session.say(greeting) produces TTSMetrics before any user speech
             greeting_metric = DummyMetric(type="tts_metrics", speech_id="greeting-001", ttfb=0.12)
             tracker.handle_metric(greeting_metric)
@@ -261,7 +261,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         async def fake_report(session_id, payload):
             dispatched_payloads.append((session_id, payload))
 
-        with patch("agent.report_session_turn", side_effect=fake_report):
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
             # EOU + LLM arrive
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-abc", end_of_utterance_delay=0.30)
@@ -301,7 +301,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         async def fake_report(session_id, payload):
             dispatched_payloads.append((session_id, payload))
 
-        with patch("agent.report_session_turn", side_effect=fake_report):
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-xyz", end_of_utterance_delay=0.40)
             )
@@ -334,7 +334,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         async def fake_report(session_id, payload):
             dispatched_payloads.append((session_id, payload))
 
-        with patch("agent.report_session_turn", side_effect=fake_report):
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-1", end_of_utterance_delay=0.30)
             )
@@ -362,7 +362,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         tracker = TurnMetricsTracker(session_id=99, flush_delay=0.02)
         tracker.on_user_speech("Checking delayed flush")
 
-        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
             # EOU arrives without TTS -> schedules delayed flush
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-delayed", end_of_utterance_delay=0.30)
@@ -387,7 +387,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         tracker = TurnMetricsTracker(session_id=88, flush_delay=0.05)
         tracker.on_user_speech("Testing LLM metric timer reset")
 
-        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
             # 1. EOUMetrics arrives -> schedules delayed flush
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-timer", end_of_utterance_delay=0.25)
@@ -429,7 +429,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         tracker = TurnMetricsTracker(session_id=77, flush_delay=1.0)
         tracker.on_user_speech("Testing tracker close")
 
-        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-close-1", end_of_utterance_delay=0.20)
             )
@@ -457,7 +457,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         tracker = TurnMetricsTracker(session_id=101, flush_delay=0.02)
         tracker.on_user_speech("Draining the last turn")
 
-        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-drain", end_of_utterance_delay=0.20)
             )
@@ -478,7 +478,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
         tracker = TurnMetricsTracker(session_id=102, flush_delay=5.0)
         tracker.on_user_speech("Too slow to drain")
 
-        with patch("agent.report_session_turn", new_callable=AsyncMock) as mock_report:
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-drain-slow", end_of_utterance_delay=0.20)
             )
@@ -528,8 +528,8 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_resp = AsyncMock(status=200)
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp):
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp):
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 1)
 
@@ -537,8 +537,8 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_resp = AsyncMock(status=404)
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp):
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp):
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 1)
 
@@ -547,8 +547,8 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_200 = AsyncMock(status=200)
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_500, mock_200])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp), \
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp), \
              patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 2)
@@ -558,10 +558,10 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_200 = AsyncMock(status=200)
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([Exception("network down"), mock_200])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp), \
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp), \
              patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
-             patch("agent.capture_exception") as mock_capture:
+             patch("backend.capture_exception") as mock_capture:
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 2)
             mock_sleep.assert_awaited_once_with(0.5)
@@ -571,10 +571,10 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         exc = Exception("network down")
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([exc, exc])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp), \
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp), \
              patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
-             patch("agent.capture_exception") as mock_capture:
+             patch("backend.capture_exception") as mock_capture:
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 2)
             mock_sleep.assert_awaited_once_with(0.5)
@@ -587,8 +587,8 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_resp = AsyncMock(status=422)
         mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_resp])
 
-        with patch("agent.os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
-             patch("agent.aiohttp", mock_aiohttp):
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp):
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 1)
 
@@ -619,7 +619,7 @@ class TestMetadataAndPipeline(unittest.TestCase):
 
     def test_create_stt_coercion(self):
         mock_dg = MagicMock()
-        with patch("agent.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
+        with patch("speech.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
             create_stt({"target_language": None})
             mock_dg.STT.assert_called_once_with(
                 model="nova-3",
@@ -635,7 +635,7 @@ class TestMetadataAndPipeline(unittest.TestCase):
         # it means every session is transcribed as en-US, which is what the
         # previous implementation did by hard-coding the recogniser.
         mock_dg = MagicMock()
-        with patch("agent.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
+        with patch("speech.deepgram", mock_dg), patch.dict("os.environ", {}, clear=True):
             create_stt({"target_language": "de-DE"})
             mock_dg.STT.assert_called_once_with(
                 model="nova-3",
@@ -646,7 +646,7 @@ class TestMetadataAndPipeline(unittest.TestCase):
 
     def test_create_stt_model_is_a_deployment_setting(self):
         mock_dg = MagicMock()
-        with patch("agent.deepgram", mock_dg), patch.dict(
+        with patch("speech.deepgram", mock_dg), patch.dict(
             "os.environ", {"DEEPGRAM_STT_MODEL": "nova-3-general"}, clear=True
         ):
             create_stt({"target_language": "en"})
@@ -656,7 +656,7 @@ class TestMetadataAndPipeline(unittest.TestCase):
         mock_proc = DummyMetric(userdata={})
         mock_silero = MagicMock()
         mock_silero.VAD.load.return_value = "fake_vad"
-        with patch("agent.silero", mock_silero):
+        with patch("session.silero", mock_silero):
             prewarm(mock_proc)
             self.assertEqual(mock_proc.userdata["vad"], "fake_vad")
 
@@ -694,45 +694,45 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
         mock_silero = MagicMock()
         mock_silero.VAD.load.side_effect = Exception("vad load failed")
 
-        with patch("agent.silero", mock_silero), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+        with patch("session.silero", mock_silero), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "agent_error")
 
     async def test_entrypoint_stt_failure(self):
         ctx = self._make_ctx()
 
-        with patch("agent.create_stt", side_effect=Exception("stt creation failed")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+        with patch("session.create_stt", side_effect=Exception("stt creation failed")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "stt_failed")
 
     async def test_entrypoint_llm_failure(self):
         ctx = self._make_ctx(session_id=42)
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", side_effect=Exception("llm creation failed")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", side_effect=Exception("llm creation failed")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "llm_failed")
 
     async def test_entrypoint_tts_failure(self):
         ctx = self._make_ctx()
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", side_effect=Exception("tts creation failed")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", side_effect=Exception("tts creation failed")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "tts_failed")
 
     async def test_entrypoint_non_dict_metadata(self):
         ctx = self._make_ctx(metadata='["a", "b", "c"]')
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", side_effect=Exception("tts error")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail:
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", side_effect=Exception("tts error")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(None, "tts_failed")
 
@@ -747,12 +747,12 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
         mock_session.start = AsyncMock()
         mock_session.say = AsyncMock()
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", return_value="fake_tts"), \
-             patch("agent.USE_AGENT_SESSION", True), \
-             patch("agent.Agent", MagicMock()), \
-             patch("agent.AgentSession", return_value=mock_session), \
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", return_value="fake_tts"), \
+             patch("session.USE_AGENT_SESSION", True), \
+             patch("session.Agent", MagicMock()), \
+             patch("session.AgentSession", return_value=mock_session), \
              patch.dict("os.environ", {"VOICE_MAX_SESSION_SECONDS": "0.05"}):
             await entrypoint(ctx)
             await asyncio.sleep(0.1)
@@ -773,12 +773,12 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
         mock_session.start = AsyncMock()
         mock_session.say = AsyncMock()
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", return_value="fake_tts"), \
-             patch("agent.USE_AGENT_SESSION", True), \
-             patch("agent.Agent", MagicMock()), \
-             patch("agent.AgentSession", return_value=mock_session), \
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", return_value="fake_tts"), \
+             patch("session.USE_AGENT_SESSION", True), \
+             patch("session.Agent", MagicMock()), \
+             patch("session.AgentSession", return_value=mock_session), \
              patch.dict("os.environ", {"VOICE_MAX_SESSION_SECONDS": "3600"}):
             await entrypoint(ctx)
             self.assertEqual(len(shutdown_callbacks), 1)
@@ -797,11 +797,11 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
         mock_pipeline_instance.say = AsyncMock()
         mock_pipeline_cls = MagicMock(return_value=mock_pipeline_instance)
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", return_value="fake_tts"), \
-             patch("agent.USE_AGENT_SESSION", False), \
-             patch("agent.VoicePipelineAgent", mock_pipeline_cls), \
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", return_value="fake_tts"), \
+             patch("session.USE_AGENT_SESSION", False), \
+             patch("session.VoicePipelineAgent", mock_pipeline_cls), \
              patch.dict("os.environ", {"VOICE_MAX_SESSION_SECONDS": "0.05"}):
             await entrypoint(ctx)
             mock_pipeline_instance.start.assert_called_once_with(ctx.room)
@@ -821,8 +821,8 @@ class TestCreateLlm(unittest.TestCase):
     base URL mapping, model selection, and error reporting.
     """
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_auto_detect_refuses_to_put_deepseek_on_the_dialogue(self, mock_openai):
         # The benchmark in benchmarks/README.md measured deepseek-chat at
         # 1068 ms p95 TTFT against a 600 ms budget. Auto-detection used to pick
@@ -844,8 +844,8 @@ class TestCreateLlm(unittest.TestCase):
 
         self.assertIn("latency budget", str(ctx.exception))
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_auto_detect_prefers_the_fast_provider_when_several_keys_exist(self, mock_openai):
         env = {
             "DEEPSEEK_API_KEY": "dsk-test-123",
@@ -865,8 +865,8 @@ class TestCreateLlm(unittest.TestCase):
                 reasoning_effort="low",
             )
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_the_slow_provider_can_still_be_chosen_deliberately(self, mock_openai):
         env = {
             "DEEPSEEK_API_KEY": "dsk-test-123",
@@ -884,8 +884,8 @@ class TestCreateLlm(unittest.TestCase):
                 api_key="dsk-test-123",
             )
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_default_auto_detect_openai(self, mock_openai):
         env = {
             "DEEPSEEK_API_KEY": "",
@@ -903,8 +903,8 @@ class TestCreateLlm(unittest.TestCase):
                 api_key="sk-openai-456",
             )
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_explicit_groq_provider(self, mock_openai):
         env = {
             "LLM_PROVIDER": "groq",
@@ -921,8 +921,8 @@ class TestCreateLlm(unittest.TestCase):
                 reasoning_effort="low",
             )
 
-    @patch("agent.HAS_OPENAI", True)
-    @patch("agent.openai")
+    @patch("dialogue.HAS_OPENAI", True)
+    @patch("dialogue.openai")
     def test_explicit_provider_with_universal_llm_api_key(self, mock_openai):
         env = {
             "LLM_PROVIDER": "deepseek",
@@ -940,7 +940,7 @@ class TestCreateLlm(unittest.TestCase):
                 api_key="universal-key-000",
             )
 
-    @patch("agent.HAS_OPENAI", True)
+    @patch("dialogue.HAS_OPENAI", True)
     def test_explicit_provider_missing_key_raises(self):
         env = {
             "LLM_PROVIDER": "groq",
@@ -952,7 +952,7 @@ class TestCreateLlm(unittest.TestCase):
                 create_llm()
             self.assertIn("GROQ_API_KEY", str(ctx.exception))
 
-    @patch("agent.HAS_OPENAI", True)
+    @patch("dialogue.HAS_OPENAI", True)
     def test_no_keys_configured_raises(self):
         env = {
             "DEEPSEEK_API_KEY": "",

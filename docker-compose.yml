@@ -386,7 +386,7 @@ services:
       CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3}
       # Dialogue model. `LLM_PROVIDER` is left empty here on purpose: unset means
       # "infer from the keys that are present, fastest known provider first", and
-      # agent.py refuses to run the dialogue on a provider the latency benchmark
+      # agent/dialogue.py refuses to run the dialogue on a provider the latency benchmark
       # disqualified (a DeepSeek-only environment now fails at startup instead of
       # pausing 1.5s after every utterance). Set it explicitly in production.
       LLM_PROVIDER: ${LLM_PROVIDER:-}
@@ -397,7 +397,7 @@ services:
       # visible token, and that pause is charged to the learner's turn. "low"
       # keeps the dialogue responsive; "off" leaves the parameter out for a
       # provider that would reject it. Blank means the per-provider default in
-      # agent.py (low for Groq, absent everywhere else).
+      # agent/dialogue.py (low for Groq, absent everywhere else).
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
       # The escape hatch for running the dialogue on a disqualified provider on
       # purpose. Without it in this list the variable would be inert in a
@@ -421,7 +421,7 @@ services:
       ENDPOINTING_MAX_DELAY_SECONDS: ${ENDPOINTING_MAX_DELAY_SECONDS:-2.5}
       PREEMPTIVE_GENERATION: ${PREEMPTIVE_GENERATION:-true}
       # Worker pool capacity (plan §5, §7). livekit-agents 1.8.5 does not read
-      # these itself — agent.py passes them into WorkerOptions — and it has no
+      # these itself — agent/worker.py passes them into WorkerOptions — and it has no
       # max_processes field at all: the concurrency ceiling is load_threshold
       # plus the container's CPU, measured by load/dispatch_capacity.py.
       NUM_IDLE_PROCESSES: ${NUM_IDLE_PROCESSES:-4}

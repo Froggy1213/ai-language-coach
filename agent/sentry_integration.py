@@ -31,7 +31,7 @@ SENSITIVE_KEYS = {
     "userutterance",
     "correction",
     "explanation",
-    # Agent internals and LiveKit conversation items (agent.py)
+    # Agent internals and LiveKit conversation items (turn_tracker.py, turn_metrics.py)
     "last_user_transcript",
     "text_content",
     "raw_text_content",

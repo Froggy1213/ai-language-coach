@@ -31,13 +31,13 @@ wrong to imply it is on the way out), and Whisper. So:
   load, no network). That is verified by inspection of the installed package, not
   by a vendor page.
 
-Voice ids in `agent/agent.py` (`aura-2-*`) were likewise read from the same
+Voice ids in `agent/speech.py` (`aura-2-*`) were likewise read from the same
 `/v1/models` response rather than taken from the report.
 
 **Dialogue LLM (report §1) — the ranking is unmeasured.** The report is explicit
 that neither Groq nor Cerebras publishes a TTFT figure, so its ordering rests on
 vendor throughput claims. Nothing in this repository depends on that ordering: the
-provider order in `agent.py` is a default, `benchmarks/dialogue_llm_latency.py` is
+provider order in `agent/dialogue.py` is a default, `benchmarks/dialogue_llm_latency.py` is
 the authority, and the guard that keeps a disqualified provider out of the dialogue
 is driven by this project's own measurement (DeepSeek, 1068 ms p95) rather than by
 the report's table. Model ids move; re-run the benchmark against the account's

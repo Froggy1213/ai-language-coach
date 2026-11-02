@@ -169,7 +169,7 @@ Each run prints a summary table and writes a sanitized JSON artifact to `benchma
 
 ## Applying the Winning Model to the Voice Agent
 
-The voice agent in `agent/agent.py` is fully environment-driven:
+The voice agent in `agent/dialogue.py` is fully environment-driven:
 
 ```bash
 # In docker-compose.yml or .env:
@@ -183,7 +183,7 @@ Zero code changes or container image rebuilds are needed to switch the dialogue 
 
 ### The decision is enforced, not just written down
 
-`agent.py` refuses to start the dialogue on a provider this benchmark disqualified
+`agent/dialogue.py` refuses to start the dialogue on a provider this benchmark disqualified
 (`SLOW_DIALOGUE_PROVIDERS`, currently `deepseek`). That is deliberate: before it,
 provider auto-detection preferred whichever API key happened to be present, so a
 DeepSeek-only deployment silently ran the dialogue on the one candidate measured
@@ -200,7 +200,7 @@ two terms are decided elsewhere in the repository:
 
 | Term | Where it is decided | Default |
 |---|---|---|
-| STT final | `build_turn_handling()` in `agent/agent.py` | turn-detector `dynamic`, 0.3–2.5 s |
+| STT final | `build_turn_handling()` in `agent/turn_handling.py` | turn-detector `dynamic`, 0.3–2.5 s |
 | LLM TTFT | this benchmark | ≤ 600 ms p95 to pass |
 | TTS first chunk | `CARTESIA_MODEL` / `DEEPGRAM_TTS_MODEL` | Cartesia `sonic-3` |
 

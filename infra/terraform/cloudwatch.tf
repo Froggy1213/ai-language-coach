@@ -2,7 +2,7 @@
 #
 # Constraints & Requirements:
 # - Log groups with pinned retention for all ECS roles and EC2 LiveKit.
-# - Metric filter parsing the EXACT log line emitted by agent/agent.py (decision 32):
+# - Metric filter parsing the EXACT log line emitted by agent/turn_tracker.py (decision 32):
 #   `TURN_LATENCY {"event": "voice_turn_latency", ...}` (do not alter app code!).
 # - CloudWatch Alarms for:
 #   1. ALB 5xx errors (Target 5XX count)
@@ -60,7 +60,7 @@ resource "aws_cloudwatch_log_group" "livekit" {
 # ------------------------------------------------------------------------------
 # Metric Filter: Voice Turn Latency from stdout logs (Plan §5, §7, decision 32)
 #
-# Exact log shape emitted by agent/agent.py:
+# Exact log shape emitted by agent/turn_tracker.py:
 # `YYYY-MM-DD HH:MM:SS,mmm [INFO] ai-language-coach-agent: TURN_LATENCY total_ms stt_ms llm_ms tts_ms {"event": "voice_turn_latency", ...}`
 # ------------------------------------------------------------------------------
 resource "aws_cloudwatch_log_metric_filter" "voice_latency" {

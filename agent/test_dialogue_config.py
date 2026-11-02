@@ -1,6 +1,6 @@
 """What the deployment configuration actually decides (plan §5, §7, §8).
 
-`agent.py` reads its whole runtime behaviour out of the environment: which model
+The worker reads its whole runtime behaviour out of the environment: which model
 answers the learner, which voice reads it back, how long the agent waits before
 deciding a turn is over. A silent regression in any of those is invisible at
 deploy time — the worker boots, the health check passes, and the only symptom is
@@ -232,8 +232,8 @@ class TestDialogueReasoningEffort(unittest.TestCase):
         # The plugin is mocked rather than installed: this is a configuration
         # decision, and these tests must run on a host without the audio stack.
         with patch.dict(os.environ, env, clear=True), \
-             patch("agent.HAS_OPENAI", True), \
-             patch("agent.openai") as mock_openai:
+             patch("dialogue.HAS_OPENAI", True), \
+             patch("dialogue.openai") as mock_openai:
             create_llm()
             return mock_openai.LLM.call_args.kwargs
 
@@ -306,12 +306,12 @@ class TestTtsVoiceFollowsTheSessionLanguage(unittest.TestCase):
         self.openai = MagicMock()
 
         self.patches = [
-            patch("agent.cartesia", self.cartesia, create=True),
-            patch("agent.HAS_CARTESIA", True),
-            patch("agent.deepgram", self.deepgram),
-            patch("agent.HAS_PLUGINS", True),
-            patch("agent.openai", self.openai, create=True),
-            patch("agent.HAS_OPENAI", True),
+            patch("speech.cartesia", self.cartesia, create=True),
+            patch("speech.HAS_CARTESIA", True),
+            patch("speech.deepgram", self.deepgram),
+            patch("speech.HAS_PLUGINS", True),
+            patch("speech.openai", self.openai, create=True),
+            patch("speech.HAS_OPENAI", True),
         ]
 
         for started in self.patches:

@@ -39,7 +39,7 @@ except ImportError:
             build_system_prompt = None  # type: ignore
 
 try:
-    from agent import KNOWN_DIALOGUE_PROVIDERS  # type: ignore
+    from dialogue import KNOWN_DIALOGUE_PROVIDERS  # type: ignore
 except ImportError:
     KNOWN_DIALOGUE_PROVIDERS = {  # type: ignore
         "groq": {

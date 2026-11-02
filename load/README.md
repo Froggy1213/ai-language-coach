@@ -143,10 +143,10 @@ Based on the measured benchmarks and internal `livekit-agents` architecture, her
 
 | Parameter | Recommended Value | Current Default | Config Location |
 | :--- | :--- | :--- | :--- |
-| `num_idle_processes` | **4** (for 2 vCPU) / **6** (for 4 vCPU) | `4` (prod default) | `WorkerOptions(num_idle_processes=4)` in `agent/agent.py` |
+| `num_idle_processes` | **4** (for 2 vCPU) / **6** (for 4 vCPU) | `4` (prod default) | `WorkerOptions(num_idle_processes=4)` in `agent/worker.py` |
 | `max_processes` | **does not exist** in livekit-agents 1.8.5 | — | The concurrency ceiling is `load_threshold` plus the task's CPU; size the task instead |
-| `load_threshold` | **0.70** (70% CPU) | `0.70` (prod default) | `WorkerOptions(load_threshold=0.70)` in `agent/agent.py` |
-| `drain_timeout` | **110 seconds** | `3600 seconds` (1 hr, library default) | `DRAIN_TIMEOUT_SECONDS` in `docker-compose.yml` and `voice_agent_drain_timeout` in `infra/terraform/variables.tf` (110); `agent.py` falls back to 360 only when the variable is unset |
+| `load_threshold` | **0.70** (70% CPU) | `0.70` (prod default) | `WorkerOptions(load_threshold=0.70)` in `agent/worker.py` |
+| `drain_timeout` | **110 seconds** | `3600 seconds` (1 hr, library default) | `DRAIN_TIMEOUT_SECONDS` in `docker-compose.yml` and `voice_agent_drain_timeout` in `infra/terraform/variables.tf` (110); `agent/worker.py` falls back to 110 only when the variable is unset |
 | `stopTimeout` / `stop_grace_period` | **120 seconds** — Fargate's hard cap, and it must exceed the drain | Docker default: 10s | `voice_agent_stop_timeout` in `infra/terraform/variables.tf`; `stop_grace_period` in `docker-compose.yml` |
 
 ### 4.2 Data Behind Each Recommendation

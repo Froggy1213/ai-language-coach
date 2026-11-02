@@ -204,7 +204,7 @@ sudo systemctl restart livekit.service
 | **Privacy & deletion-by-request** | S3 lifecycle rule `RawAudioCleanup` automatically expires files under `assessments/` after 1 day. `TranscriptsArchiveRetention` tiers transcripts after 30 days and expires after 90 days. User deletion cascades to voice sessions and removes S3 keys. |
 
 ### Telemetry Log Shape (Emitted by Agent)
-CloudWatch Log Metric Filter `ai-language-coach-turnaround-latency` consumes the following structured log pattern emitted by `agent/agent.py`:
+CloudWatch Log Metric Filter `ai-language-coach-turnaround-latency` consumes the following structured log pattern emitted by `agent/turn_tracker.py`:
 ```text
 2026-10-06 12:00:00,000 [INFO] ai-language-coach-agent: TURN_LATENCY {"event": "voice_turn_latency", "session_id": 12, "turn_id": "speech_abc", "stt_final_ms": 280.0, "llm_first_token_ms": 320.0, "tts_first_chunk_ms": 210.0, "total_turnaround_ms": 810.0, "transcript": "I have lived here since three years."}
 ```

@@ -337,7 +337,7 @@ class TestBeforeSendScrubber(unittest.TestCase):
         self.assertEqual(frame_vars["session_id"], 99)
 
     def test_scrubber_redacts_embedded_json_log_string(self):
-        # agent.py logs structured TURN_LATENCY lines containing JSON with transcript
+        # turn_tracker.py logs structured TURN_LATENCY lines containing JSON with transcript
         raw_log = 'TURN_LATENCY {"event": "voice_turn_latency", "transcript": "secret speech", "stt_final_ms": 250.0}'
 
         payload = {"log_line": raw_log}
@@ -407,9 +407,9 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             captured_exceptions.append((exc, tags))
             return "event-id-123"
 
-        with patch("agent.create_stt", side_effect=Exception("stt stream connection failed")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail, \
-             patch("agent.capture_exception", side_effect=fake_capture):
+        with patch("session.create_stt", side_effect=Exception("stt stream connection failed")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail, \
+             patch("session.capture_exception", side_effect=fake_capture):
             await entrypoint(ctx)
 
             # Sentry must capture the exception
@@ -440,10 +440,10 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             captured_exceptions.append((exc, tags))
             return "event-id-456"
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", side_effect=ValueError("llm model key error")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail, \
-             patch("agent.capture_exception", side_effect=fake_capture):
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", side_effect=ValueError("llm model key error")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail, \
+             patch("session.capture_exception", side_effect=fake_capture):
             await entrypoint(ctx)
 
             self.assertEqual(len(captured_exceptions), 1)
@@ -469,11 +469,11 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             captured_exceptions.append((exc, tags))
             return "event-id-789"
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", side_effect=RuntimeError("tts synthesis error")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail, \
-             patch("agent.capture_exception", side_effect=fake_capture):
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", side_effect=RuntimeError("tts synthesis error")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail, \
+             patch("session.capture_exception", side_effect=fake_capture):
             await entrypoint(ctx)
 
             self.assertEqual(len(captured_exceptions), 1)
@@ -492,8 +492,8 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             captured_exceptions.append((exc, tags))
             return "event-id-connect"
 
-        with patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail, \
-             patch("agent.capture_exception", side_effect=fake_capture):
+        with patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail, \
+             patch("session.capture_exception", side_effect=fake_capture):
             await entrypoint(ctx)
 
             self.assertEqual(len(captured_exceptions), 1)
@@ -511,12 +511,12 @@ class TestCaptureExceptionAndSessionFailures(unittest.IsolatedAsyncioTestCase):
             captured_exceptions.append((exc, tags))
             return "event-id-unhandled"
 
-        with patch("agent.create_stt", return_value="fake_stt"), \
-             patch("agent.create_llm", return_value="fake_llm"), \
-             patch("agent.create_tts", return_value="fake_tts"), \
-             patch("agent.build_system_prompt", side_effect=ZeroDivisionError("unexpected division error")), \
-             patch("agent.report_session_failure", new_callable=AsyncMock) as mock_fail, \
-             patch("agent.capture_exception", side_effect=fake_capture):
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", return_value="fake_tts"), \
+             patch("session.build_system_prompt", side_effect=ZeroDivisionError("unexpected division error")), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail, \
+             patch("session.capture_exception", side_effect=fake_capture):
             await entrypoint(ctx)
 
             # Unhandled exception was intercepted and captured to Sentry

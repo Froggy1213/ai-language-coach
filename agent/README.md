@@ -14,6 +14,31 @@ Acts as the conversational language tutor in practice voice rooms (`/practice/{c
   - Reports fatal stream errors to `POST /api/internal/sessions/{id}/fail` with `X-Internal-Secret`.
   - Measures per-turn stage latencies (`stt_final`, `llm_first_token`, `tts_first_chunk`, `total_turnaround` in ms) across LiveKit Agents 1.8 metric events (`metrics_collected`), reports them to `POST /api/internal/sessions/{id}/turns` with `X-Internal-Secret`, and writes structured JSON log lines (`TURN_LATENCY`) to stdout.
 
+## Layout
+
+`agent.py` is the entrypoint and the compatibility surface — `python agent.py start`
+and `import agent` both still resolve to it. The implementation lives beside it,
+one question per module:
+
+| Module | Owns |
+| :--- | :--- |
+| `agent.py` | Entrypoint: initialises Sentry, re-exports the public names, runs the worker CLI |
+| `observability.py` | The process-wide logger and the Sentry adapter |
+| `settings.py` | How one setting is read from the environment (blank = absent, typo = default and a warning) |
+| `livekit_compat.py` | The optional LiveKit imports and the SDK generation (`AgentSession` vs `VoicePipelineAgent`) |
+| `backend.py` | `POST /api/internal/sessions/{id}/fail` and `.../turns`, and the internal secret |
+| `turn_metrics.py` | Pure latency functions: metric extraction, backend payload and CloudWatch line |
+| `turn_tracker.py` | The per-session turn state machine: correlation by `speech_id`, flush and drain |
+| `speech.py` | Deepgram/Silero recognition and Cartesia/Deepgram/OpenAI synthesis, in the session language |
+| `dialogue.py` | Provider selection, the latency guard, and the request's `reasoning_effort` |
+| `turn_handling.py` | End-of-utterance configuration (`build_turn_handling`) |
+| `session.py` | One voice session: metadata, component wiring, duration cap, greeting, failure policy |
+| `worker.py` | `WorkerOptions` built from the deployment's environment |
+
+Tests import through the same facade (`from agent import ...`). A test that
+*patches* a name patches the module that looks it up — `session.create_stt`, not
+`agent.create_stt` — because the facade binding is not what the call site reads.
+
 ## Running with Docker (Recommended)
 
 Included in root `docker-compose.yml`:
