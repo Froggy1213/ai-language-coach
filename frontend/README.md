@@ -24,9 +24,11 @@ success messages are past tense (`保存しました`), errors are blameless req
 - **Auth**: Laravel Sanctum SPA session cookies via double-submit CSRF handshake (`app/utils/csrf-fetch.ts`).
 - **API**: GraphQL via `@urql/vue` (`app/plugins/urql.ts`), installed both as `$urql` and into Vue's `provide`/`inject`.
 - **Realtime**: Laravel Reverb WebSockets via `laravel-echo` and `pusher-js` (`app/plugins/echo.ts`), orchestrated through `app/composables/useLighthouseSubscription.ts`.
-- **Voice**: WebRTC streaming to self-hosted LiveKit via `livekit-client`
-  (`app/composables/useVoiceSession.ts`), with Web Audio analysis layered on top
-  (`app/composables/useConversation.ts`).
+- **Voice**: WebRTC streaming to self-hosted LiveKit via `livekit-client`. The
+  connection lifecycle lives in `app/composables/useVoiceSession.ts`, its transport
+  pieces (agent presence, audio tracks, playback unlock, client-error telemetry) in
+  `app/composables/voice/`, and Web Audio analysis is layered on top in
+  `app/composables/useConversation.ts`.
 
 ## Design system
 
@@ -170,6 +172,8 @@ frontend/
 │   ├── composables/       # useAuth, useAssessment, useConversation, useElapsedTimer,
 │   │                      #   useLighthouseSubscription, usePrivacy, useReviews,
 │   │                      #   useSessionFeedback, useTheme, useVoiceSession
+│   │   └── voice/         # transport pieces of useVoiceSession: agent presence,
+│   │                      #   audio tracks, playback unlock, client-error reporter
 │   ├── constants/         # strings.ts (ALL interface copy), languages.ts
 │   ├── graphql/           # GraphQL queries, mutations, subscriptions (documents.ts)
 │   ├── middleware/        # Global navigation route guard (auth.global.ts)
@@ -177,7 +181,7 @@ frontend/
 │   ├── plugins/           # Client plugins (echo.ts, urql.ts, theme.client.ts)
 │   ├── types/             # graphql.ts (generated), view-models.ts, nuxt.d.ts
 │   └── utils/             # csrf-fetch.ts, format.ts (Japanese formatters),
-│                          #   graphql-error.ts
+│                          #   graphql-error.ts, voice-errors.ts
 ├── codegen.ts             # GraphQL Code Generator configuration
 ├── nuxt.config.ts         # Nuxt configuration, runtimeConfig, fonts, theme bootstrap
 └── package.json           # Dependencies and scripts
@@ -186,8 +190,10 @@ frontend/
 ## Conventions
 
 - **Code formatting**: 2-space indentation, single quotes (`'`), and no semicolons (`;`).
-- **Nuxt auto-imports**: Utilities in `app/utils/`, composables in `app/composables/`,
-  and components in `app/components/` are auto-imported.
+- **Nuxt auto-imports**: Utilities in `app/utils/` (top level), composables directly in
+  `app/composables/`, and components in `app/components/` are auto-imported. Nested
+  modules such as `composables/voice/` are imported explicitly, so their names never
+  enter the global namespace.
 - **All interface copy lives in `app/constants/strings.ts`.** A Japanese string inline in
   a template is a bug: it is the one place a translator (or a reviewer checking tone) has
   to look.
