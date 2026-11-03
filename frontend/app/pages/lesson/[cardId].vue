@@ -5,60 +5,48 @@ import {
   FINISH_VOICE_SESSION_MUTATION,
 } from '~/graphql/documents'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
-import { common, talk } from '~/constants/strings'
+import { common, lesson } from '~/constants/strings'
 
 /**
- * 会話 — the conversation screen.
+ * レッスン — the grammar-lesson conversation screen.
  *
- * One task, one screen: talk to the AI tutor. There is no transcript, no lesson
- * list and no analytics here, because every one of those competes with the only
- * thing the learner is supposed to be doing. Reference material is available but
- * collapsed, and the review of mistakes happens later on 振り返り.
+ * One task, one screen: talk to the AI tutor about the card's grammar point.
+ * There is no transcript, no lesson list and no analytics here, because every
+ * one of those competes with the only thing the learner is supposed to be doing.
+ * Reference material is available but collapsed, and the review of mistakes
+ * happens later on 振り返り.
  *
- * `/talk` resolves "the lesson in progress" and forwards to `/talk/:id`, so the
- * URL always names what is actually being practised.
+ * The route names the card (`/lesson/:cardId`) rather than resolving "the lesson
+ * in progress": the course tab lights up for it, and 今日 / ロードマップ link
+ * here directly. Scenarios live at `/talk` and do not complete a lesson card.
  */
 const route = useRoute()
 
-const { roadmap, readyCard, fetching, error: queryError } = useRoadmap({
+const { roadmap, fetching, error: queryError } = useRoadmap({
   requestPolicy: 'cache-and-network',
 })
 
-const requestedId = computed(() => (route.params.id ? String(route.params.id) : ''))
+const cardId = computed(() => String(route.params.cardId ?? ''))
 
 const card = computed(() => {
   if (!roadmap.value) {
     return null
   }
 
-  if (requestedId.value) {
-    return roadmap.value.lessonCards.find((candidate) => candidate.id === requestedId.value) ?? null
-  }
-
-  return readyCard.value
+  return roadmap.value.lessonCards.find((candidate) => candidate.id === cardId.value) ?? null
 })
 
 const emptyState = computed<{ title: string; lead: string } | null>(() => {
-  if (roadmap.value && !readyCard.value && !requestedId.value) {
-    return { title: talk.noCards, lead: talk.noCardsBody }
-  }
   if (!roadmap.value) {
-    return { title: talk.noCards, lead: talk.noCardsBody }
+    return { title: lesson.noCards, lead: lesson.noCardsBody }
   }
   if (!card.value) {
-    return { title: talk.notFound, lead: talk.notFoundBody }
+    return { title: lesson.notFound, lead: lesson.notFoundBody }
   }
   if (card.value.status === 'locked') {
-    return { title: talk.notReady, lead: talk.notReadyBody }
+    return { title: lesson.notReady, lead: lesson.notReadyBody }
   }
   return null
-})
-
-// `/talk` on its own is a redirect, not a screen.
-watchEffect(() => {
-  if (!requestedId.value && readyCard.value) {
-    void navigateTo(`/talk/${readyCard.value.id}`, { replace: true })
-  }
 })
 
 const audioElement = ref<HTMLAudioElement | null>(null)
@@ -91,7 +79,7 @@ async function finish(): Promise<void> {
     // this call it only learns about the end from LiveKit's `room_finished`
     // webhook, which arrives minutes later once the room's timeouts expire —
     // until then `/reflect/:id` shows "in progress" and no mistakes. Best
-    // effort: if the mutation fails, `leave()` and the navigation below must
+    // effort: if the mutation fails, `leave()` and the ended state below must
     // still happen, and the webhook finishes the session afterwards.
     if (sessionId.value) {
       try {
@@ -106,7 +94,7 @@ async function finish(): Promise<void> {
       try {
         await completeLessonMutation.executeMutation({ lessonCardId: card.value.id })
       } catch {
-        // Non-fatal: navigation to reflect/feedback proceeds regardless
+        // Non-fatal: the reflect link is shown regardless.
       }
     }
   } finally {
@@ -116,7 +104,7 @@ async function finish(): Promise<void> {
 
 function begin(): void {
   if (card.value) {
-    void start(card.value.id)
+    void start({ lessonCardId: card.value.id })
   }
 }
 
@@ -132,12 +120,12 @@ const ended = computed(() => status.value === 'ended')
   <section class="mx-auto flex max-w-2xl flex-col">
     <p v-if="fetching && !roadmap" class="flex items-center gap-3 py-16 text-[0.9375rem] text-[var(--ink-muted)]">
       <UiSpinner />
-      {{ talk.title }}…
+      {{ lesson.title }}…
     </p>
 
     <UiNotice
       v-else-if="queryError && !roadmap"
-      :message="graphQLErrorMessageFor(queryError, { fallback: talk.loadError })"
+      :message="graphQLErrorMessageFor(queryError, { fallback: lesson.loadError })"
     />
 
     <div v-else-if="emptyState" class="space-y-5 py-10">
@@ -148,10 +136,16 @@ const ended = computed(() => status.value === 'ended')
     </div>
 
     <template v-else-if="card">
-      <!-- Lesson identity. Small on purpose: the orb is the subject here. -->
+      <!-- Lesson identity. Small on purpose: the orb is the subject here. The
+           mode pill names what makes this screen different from a scenario. -->
       <header class="mb-6 flex items-start justify-between gap-4">
-        <div class="min-w-0 space-y-0.5">
-          <p class="label">#{{ card.orderIndex }} · {{ card.grammarPoint.category }}</p>
+        <div class="min-w-0 space-y-1">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p class="label">#{{ card.orderIndex }} · {{ card.grammarPoint.category }}</p>
+            <span class="rounded-full bg-[var(--accent-dim)] px-2 py-0.5 text-[0.6875rem] font-semibold tracking-[0.08em] text-[var(--accent)]">
+              {{ lesson.mode }}
+            </span>
+          </div>
           <h1 class="truncate text-[1.0625rem] leading-snug font-medium">
             {{ card.grammarPoint.title }}
           </h1>
@@ -162,7 +156,7 @@ const ended = computed(() => status.value === 'ended')
           to="/roadmap"
           class="shrink-0 rounded-full border border-[var(--line)] px-3 py-1.5 text-[0.8125rem] text-[var(--ink-muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
         >
-          {{ talk.picker }}
+          {{ lesson.picker }}
         </NuxtLink>
       </header>
 
@@ -170,13 +164,13 @@ const ended = computed(() => status.value === 'ended')
            dead orb on screen would invite a tap that does nothing. -->
       <div v-if="ended" class="space-y-6 py-6">
         <div class="space-y-3 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-6">
-          <p class="label">{{ talk.endedTitle }}</p>
-          <p class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ talk.endedBody }}</p>
+          <p class="label">{{ lesson.endedTitle }}</p>
+          <p class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ lesson.endedBody }}</p>
           <div class="flex flex-wrap items-center gap-3 pt-1">
             <UiButtonLink v-if="sessionId" :to="`/reflect/${sessionId}`" variant="primary" size="lg">
-              {{ talk.seeFeedback }}
+              {{ lesson.seeFeedback }}
             </UiButtonLink>
-            <UiButton variant="quiet" size="lg" @click="begin">{{ talk.again }}</UiButton>
+            <UiButton variant="quiet" size="lg" @click="begin">{{ lesson.again }}</UiButton>
           </div>
         </div>
 
@@ -198,7 +192,7 @@ const ended = computed(() => status.value === 'ended')
         </div>
 
         <div class="mt-10 space-y-3">
-          <p class="label">{{ talk.topic }}</p>
+          <p class="label">{{ lesson.topic }}</p>
           <p class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ card.practicePrompt }}</p>
         </div>
 

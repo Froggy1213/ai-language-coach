@@ -137,17 +137,29 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
         || current.status === 'failed'
 
       if (isTerminal) {
-        if (
+        // Grammar analysis is what `analyzed` reports; the scenario goal review
+        // is a second LLM call that finishes afterwards. A page opened between
+        // the two would see `analyzed: true, goalReview: null` and, without this
+        // second reason to stay subscribed, would never receive the review.
+        const awaitingGoalReview =
+          current.scenario != null
+          && current.goalReview == null
+          && current.status === 'completed'
+
+        const grammarSettled =
           current.status === 'failed'
           || current.analyzed === true
           || (current.mistakes && current.mistakes.length > 0)
-        ) {
-          analyzing.value = false
-          teardownSubscription()
-        } else {
-          // Terminal session not yet analyzed with 0 mistakes: subscribe to completion
-          analyzing.value = true
+
+        analyzing.value = !grammarSettled
+
+        // Subscribe for either half still in flight. A settled grammar result
+        // with a pending goal review is not a spinner: the mistakes render now
+        // and the goal block appears when the broadcast arrives.
+        if (!grammarSettled || awaitingGoalReview) {
           void subscribe(id)
+        } else {
+          teardownSubscription()
         }
       } else {
         analyzing.value = false

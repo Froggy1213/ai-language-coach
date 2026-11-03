@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { OrbState } from '~/composables/useConversation'
 import { formatClock } from '~/utils/format'
-import { talk } from '~/constants/strings'
+import { lesson } from '~/constants/strings'
 
 /**
  * The conversation stage: one orb, one state label, one control.
@@ -23,11 +23,11 @@ const props = defineProps<{
 const emit = defineEmits<{ start: []; finish: [] }>()
 
 const STATE_COPY: Record<OrbState, { label: string; hint: string }> = {
-  idle: { label: talk.stateIdle, hint: talk.hintListening },
-  listening: { label: talk.stateListening, hint: talk.hintListening },
-  speaking: { label: talk.stateSpeaking, hint: talk.hintSpeaking },
-  thinking: { label: talk.stateThinking, hint: talk.hintThinking },
-  error: { label: talk.stateError, hint: talk.micNote },
+  idle: { label: lesson.stateIdle, hint: lesson.hintListening },
+  listening: { label: lesson.stateListening, hint: lesson.hintListening },
+  speaking: { label: lesson.stateSpeaking, hint: lesson.hintSpeaking },
+  thinking: { label: lesson.stateThinking, hint: lesson.hintThinking },
+  error: { label: lesson.stateError, hint: lesson.micNote },
 }
 
 const copy = computed(() => STATE_COPY[props.state])
@@ -37,14 +37,14 @@ const busy = computed(() => props.status === 'requesting' || props.status === 'c
 
 const controlLabel = computed(() => {
   if (props.status === 'requesting') {
-    return talk.requesting
+    return lesson.requesting
   }
 
   if (props.status === 'connecting') {
-    return talk.connecting
+    return lesson.connecting
   }
 
-  return sessionLive.value ? talk.finish : talk.start
+  return sessionLive.value ? lesson.finish : lesson.start
 })
 
 const elapsedLabel = computed(() => formatClock(props.elapsedSeconds))
@@ -55,7 +55,7 @@ const connectionNote = computed(() => {
     return ''
   }
 
-  return props.agentPresent ? talk.agentHere : talk.agentWaiting
+  return props.agentPresent ? lesson.agentHere : lesson.agentWaiting
 })
 
 function onOrbActivate(): void {

@@ -79,7 +79,7 @@ defineProps<{
 
         <CheatSheetPanel :cheat-sheet="card.cheatSheet" />
 
-        <UiButtonLink :to="`/talk/${card.id}`" variant="primary">
+        <UiButtonLink :to="`/lesson/${card.id}`" variant="primary">
           {{ roadmap.startCard }}
         </UiButtonLink>
       </div>

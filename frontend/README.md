@@ -101,15 +101,17 @@ harness — not linked from the app, but kept because tuning the orb blind is gu
 |---|---|---|
 | `/` | `pages/index.vue` | **今日** Daily entry point: the next lesson, and the three numbers worth acting on. |
 | `/roadmap` | `pages/roadmap.vue` | **ロードマップ** The learning path as a vertical rail; only the current lesson expands. |
-| `/talk`, `/talk/:id` | `pages/talk/[[id]].vue` | **会話** One task: speak. The orb is both the visualisation and the control. |
-| `/reflect/:id` | `pages/reflect/[[id]].vue` | **振り返り** Mistakes as corrections, grouped by grammar point. |
+| `/lesson/:cardId` | `pages/lesson/[cardId].vue` | **レッスン** One task: speak. A grammar lesson with in-conversation correction: the orb is both the visualisation and the control, supported by the practice prompt and a grammar cheat sheet. |
+| `/talk` | `pages/talk/index.vue` | **会話** The topic picker: 自由に話す first, then the scenario catalogue (title, summary, level, register). The centre tab and `/talk` links land here. |
+| `/talk/:code` | `pages/talk/[code].vue` | **会話** One role-play session: setting, your role, your goal, and the scenario's useful phrases. No correction during the conversation; it is reviewed afterwards. |
+| `/reflect/:id` | `pages/reflect/[[id]].vue` | **振り返り** Mistakes as corrections, grouped by grammar point; for a scenario, also the goal review (goal achieved, and what was missed). |
 | `/review` | `pages/review.vue` | **復習** Spaced repetition; one 0–5 decision per item. |
 | `/level` | `pages/level.vue` | **レベル判定** CEFR placement recording: consent → record → result. |
 | `/settings` | `pages/settings.vue` | **設定** Account, theme, session, data deletion. |
 | `/login`, `/register` | `pages/login.vue`, `pages/register.vue` | Auth. |
 
-Legacy routes kept as redirects: `/practice/:cardId` → `/talk/:cardId`,
-`/session/:id` → `/reflect/:id`.
+Legacy routes kept as 301 redirects: `/practice/:cardId` → `/lesson/:cardId`,
+`/session/:id` → `/reflect/:id`, and `/onboarding` → `/level`.
 
 **One page, one job.** The split exists because talking and reviewing have opposite
 needs: conversation wants no text on screen at all, and review wants the mistakes and
@@ -120,7 +122,9 @@ first ask whether it belongs on a screen of its own.
 
 - The shell (`app/app.vue`) is a capped column with a **persistent bottom tab bar** on
   phones and a sticky header on desktop (≥768px). Five tabs, always-visible labels, at
-  least 44px tall.
+  least 44px tall. The raised centre action means "start a conversation" and opens the
+  **topic picker** (`/talk`), never "the lesson in progress"; a lesson is one tap away
+  from 今日 and ロードマップ. A running lesson (`/lesson*`) keeps the ロードマップ tab lit.
 - **No tab is ever disabled.** A locked lesson shows an explaining empty state on its own
   screen instead — a disabled control teaches nothing.
 - Pages that are a single task (the conversation, the auth forms) opt out of the page
@@ -168,10 +172,11 @@ frontend/
 │   ├── components/        # UI primitives and feature components
 │   │                      #   ConversationOrb.vue / ConversationStage.vue / TabBar.vue
 │   │                      #   RoadmapLesson.vue / MistakeItem.vue / CheatSheetPanel.vue
+│   │                      #   UsefulPhrasesPanel.vue
 │   │                      #   Ui{Button,ButtonLink,Field,Notice,Progress,Spinner}.vue
 │   ├── composables/       # useAuth, useAssessment, useConversation, useElapsedTimer,
 │   │                      #   useLighthouseSubscription, usePrivacy, useReviews,
-│   │                      #   useSessionFeedback, useTheme, useVoiceSession
+│   │                      #   useScenarios, useSessionFeedback, useTheme, useVoiceSession
 │   │   └── voice/         # transport pieces of useVoiceSession: agent presence,
 │   │                      #   audio tracks, playback unlock, client-error reporter
 │   ├── constants/         # strings.ts (ALL interface copy), languages.ts

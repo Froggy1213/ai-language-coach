@@ -1,0 +1,13 @@
+"One role-play scenario the learner can practise."
+type Scenario {
+    code: String!
+    title: String!
+    summary: String!
+    level: CefrLevel!
+    register: String!
+    setting: String!
+    aiRole: String! @rename(attribute: "ai_role")
+    learnerRole: String! @rename(attribute: "learner_role")
+    learnerGoal: String! @rename(attribute: "learner_goal")
+    usefulPhrases: [String!]! @rename(attribute: "useful_phrases")
+}

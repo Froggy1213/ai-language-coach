@@ -8,6 +8,7 @@
  * `count(3, '回')` renders "3回" without any plural logic. Arabic numerals are used
  * throughout because that is the convention in modern Japanese UI.
  */
+import { talk } from '~/constants/strings'
 
 /** Japanese counters used across the product. */
 export const COUNTER = {
@@ -18,6 +19,20 @@ export const COUNTER = {
   lessons: 'レッスン',
   days: '日',
 } as const
+
+/**
+ * Japanese label for a scenario's register.
+ *
+ * `register` is a wire value (`formal` / `casual` / `neutral`); the label is
+ * interface copy. An unknown value falls back to the raw string rather than to
+ * an empty cell, so a future register added server-side still renders something
+ * readable instead of a blank row.
+ */
+export function scenarioRegisterLabel(register: string): string {
+  const labels: Record<string, string> = talk.register
+
+  return labels[register] ?? register
+}
 
 /**
  * Formats a total duration in seconds into a "mm:ss" clock display.

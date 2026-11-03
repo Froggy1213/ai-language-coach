@@ -98,8 +98,15 @@ export const roadmap = {
   allDone: 'すべてのレッスンを終えました',
 } as const
 
-export const talk = {
-  title: '会話',
+export const lesson = {
+  title: 'レッスン',
+  /**
+   * Mode label shown on the lesson screen. The two conversation modes have
+   * different AI behaviour (a lesson corrects during the conversation, a
+   * scenario never does), so each screen names its mode rather than leaving the
+   * difference to be read as instability.
+   */
+  mode: '文法チェックつき',
   picker: 'レッスンを選ぶ',
   topic: 'お題',
   cheatSheet: 'ヒント',
@@ -137,6 +144,37 @@ export const talk = {
   notReadyBody: 'ロードマップを順番に進めると開きます。',
   notReadyCompleted: 'このレッスンは完了済みです。',
   fleetBusy: 'AI講師が混み合っています。少し待ってから、もう一度お試しください。',
+} as const
+
+/**
+ * 会話 — the topic picker and the scenario mode.
+ *
+ * Kept separate from `lesson` on purpose: this is free practice, not a grammar
+ * lesson. Its screens never complete a lesson card and never show a cheat
+ * sheet; the scenario's own useful phrases are the only support on screen.
+ */
+export const talk = {
+  title: '会話',
+  picker: 'お題を選ぶ',
+  freeTalk: '自由に話す',
+  freeTalkBody: '場面は決めずに、今週のことや仕事の話を、そのまま英語で話します。',
+  setting: '場面',
+  yourRole: 'あなたの役',
+  yourGoal: 'あなたの目的',
+  usefulPhrases: '使える表現',
+  modeHint: 'この会話は振り返りに記録されます。',
+  register: {
+    formal: 'フォーマル',
+    casual: 'カジュアル',
+    neutral: 'ニュートラル',
+  },
+  loading: 'お題を読み込んでいます…',
+  loadError: 'お題を読み込めませんでした。',
+  retry: '再試行',
+  empty: '選べるお題がありません',
+  emptyBody: '自由に話すか、ロードマップのレッスンから始めてください。',
+  notFound: 'お題が見つかりません',
+  notFoundBody: 'このお題は配信されていないか、コードが変わった可能性があります。お題の一覧から選び直してください。',
 } as const
 
 export const reflect = {
@@ -177,6 +215,20 @@ export const reflect = {
   failAgent: 'AI講師の内部エラーです。',
   failUnknown: '予期しないエラーで終了しました。',
   failReason: '原因',
+  /** Header label for a scenario session; a lesson shows the grammar category. */
+  scenarioLabel: '会話',
+  /**
+   * Goal review (M6).
+   *
+   * This judges whether the scenario's task was completed, not the grammar of
+   * individual utterances, so it gets its own heading and vocabulary instead of
+   * borrowing the mistake copy.
+   */
+  goalTitle: '目標の達成',
+  goalAchieved: '目標を達成しました',
+  goalMissed: '目標に届きませんでした',
+  goalMissedBody: 'つまずいた表現',
+  goalMissedExpressions: '使えたはずの表現',
 } as const
 
 export const review = {

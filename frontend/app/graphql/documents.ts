@@ -146,9 +146,40 @@ export const ASSESSMENT_READY_SUBSCRIPTION = /* GraphQL */ `
   }
 `
 
+/**
+ * Scenario catalogue for the learner's target language.
+ *
+ * Deliberately narrower than the SDL: `aiGoal` and `complications` are the
+ * agent's private side of the role-play, and sending them to the browser would
+ * turn the scene into a script the learner reads instead of a conversation.
+ */
+export const SCENARIOS_QUERY = /* GraphQL */ `
+  query Scenarios {
+    scenarios {
+      code
+      title
+      summary
+      level
+      register
+      setting
+      aiRole
+      learnerRole
+      learnerGoal
+      usefulPhrases
+    }
+  }
+`
+
+/**
+ * One mutation for both practice modes.
+ *
+ * The backend enforces exactly one of the two arguments (XOR); sending exactly
+ * one is what makes the session a lesson or a scenario. Both variables stay
+ * optional in the document because that is how the SDL declares them.
+ */
 export const REQUEST_VOICE_TOKEN_MUTATION = /* GraphQL */ `
-  mutation RequestVoiceToken($lessonCardId: ID!) {
-    requestVoiceToken(lessonCardId: $lessonCardId) {
+  mutation RequestVoiceToken($lessonCardId: ID, $scenarioCode: String) {
+    requestVoiceToken(lessonCardId: $lessonCardId, scenarioCode: $scenarioCode) {
       id
       status
       livekitUrl
@@ -203,6 +234,22 @@ export const VOICE_SESSION_FEEDBACK_FIELDS = /* GraphQL */ `
       title
       category
     }
+  }
+  scenario {
+    code
+    title
+    summary
+    level
+    register
+    setting
+    aiRole
+    learnerRole
+    learnerGoal
+    usefulPhrases
+  }
+  goalReview {
+    goalAchieved
+    missedExpressions
   }
   mistakes {
     id

@@ -12,10 +12,17 @@ const props = withDefaults(
     label: string
     /** Match the path exactly; needed for `/`, which prefixes every route. */
     exact?: boolean
+    /**
+     * Extra route prefixes that light this link up. Used to keep ロードマップ
+     * active during a lesson (`/lesson/:cardId`), which belongs to the course
+     * even though its URL is not under `/roadmap`.
+     */
+    also?: readonly string[]
     badge?: number
   }>(),
   {
     exact: false,
+    also: () => [],
     badge: 0,
   },
 )
@@ -27,8 +34,11 @@ const active = computed(() => {
     return route.path === props.to
   }
 
-  // `/talk` owns `/talk/:id` too, but must not match `/talkative`.
-  return route.path === props.to || route.path.startsWith(`${props.to}/`)
+  // A prefix owns its children (`/talk` owns `/talk/:code`) but must not match
+  // `/talkative`, hence the trailing slash in the comparison.
+  const prefixes = [props.to, ...props.also]
+
+  return prefixes.some((prefix) => route.path === prefix || route.path.startsWith(`${prefix}/`))
 })
 </script>
 

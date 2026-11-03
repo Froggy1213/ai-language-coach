@@ -1,6 +1,6 @@
 # AI Language Coach — “Kirie”
 
-Голосовой AI-коуч для изучения **английского** (CEFR A1–C1) для японоязычных учеников: онбординг-ассессмент уровня, персональный грамматический роадмап, диалоговая практика с голосовым агентом в реальном времени и интервальное повторение (SM-2) по ошибкам.
+Голосовой AI-коуч для изучения **английского** (CEFR A1–C1) для японоязычных учеников: онбординг-ассессмент уровня, персональный грамматический роадмап, два режима разговора с голосовым агентом в реальном времени (урок с грамматической темой и исправлением по ходу; ролевой сценарий с разбором после разговора) и интервальное повторение (SM-2) по ошибкам.
 
 - **Интерфейс:** японский (`frontend/app/constants/strings.ts`), учебный контент — английский (из API).
 - **Бренд:** **Kirie** (`APP_NAME=Kirie` в бэкенде и `app.name` во фронтенде).
@@ -11,6 +11,7 @@
 |---|---|
 | [`ai-language-coach-plan.md`](ai-language-coach-plan.md) | Архитектурный план и майлстоуны |
 | [`frontend/README.md`](frontend/README.md) | Nuxt 4 SPA, маршруты, дизайн-система и голосовой орб |
+| [`docs/scenario-practice.md`](docs/scenario-practice.md) | План и реализация практики по сценариям: второй режим разговора и разбор достижения цели |
 | [`docs/design/README.md`](docs/design/README.md) | Дизайн-система и референсные рендеры экранов |
 | [`agent/README.md`](agent/README.md) | Python голосовой воркер (`livekit-agents`) |
 | [`e2e/README.md`](e2e/README.md) | Playwright E2E smoke-тесты |
@@ -35,7 +36,7 @@
 | Media | LiveKit Server (WebRTC) |
 | Voice Agent | Python 3.11 + `livekit-agents` |
 | STT / TTS | Deepgram Nova-3 / Cartesia Sonic-3 |
-| LLM (async) | DeepSeek-V3 через `laravel/ai` (анализ ошибок и CEFR-оценка) |
+| LLM (async) | DeepSeek-V3 через `laravel/ai` (анализ ошибок, разбор цели сценария и CEFR-оценка) |
 | LLM (dialogue) | Groq / Cerebras / OpenAI (`LLM_PROVIDER`; медленные провайдеры вроде DeepSeek блокируются на старте) |
 | Observability | Sentry (PII-scrubber), CloudWatch Metrics (`TurnLatencyMs`, `VoiceSeconds`), Laravel Telescope (dev) |
 
@@ -147,7 +148,7 @@ docker build -t ai-language-coach/agent ./agent
   - Требуют `LIGHTHOUSE_BROADCASTER=reverb` и `LIGHTHOUSE_SUBSCRIPTION_STORAGE=redis`.
   - Клиентский хендшейк инкапсулирован в `frontend/app/composables/useLighthouseSubscription.ts` (авторизация приватного канала `/graphql/subscriptions/auth` и распаковка конверта `{more, result}`).
 - **Голосовые сессии и телеметрия:**
-  - Вызов `requestVoiceToken(lessonCardId)` проверяет дневной лимит (`VOICE_DAILY_SESSION_LIMIT`, по умолчанию 10 сессий/сутки в UTC под `lockForUpdate()`), создаёт комнату LiveKit, диспатчит агента и ждёт его входа до `VOICE_AGENT_JOIN_TIMEOUT`.
+  - Вызов `requestVoiceToken(lessonCardId | scenarioCode)` принимает ровно один субъект (урок или сценарий), проверяет дневной лимит (`VOICE_DAILY_SESSION_LIMIT`, по умолчанию 10 сессий/сутки в UTC под `lockForUpdate()`), создаёт комнату LiveKit, диспатчит агента и ждёт его входа до `VOICE_AGENT_JOIN_TIMEOUT`.
   - Жизненный цикл сессии управляется идемпотентно через `App\Voice\VoiceSessionLifecycle` (вебхуки `/api/webhooks/livekit` и внутренние эндпоинты агента `/api/internal/sessions/{id}/fail` и `/turns`, защищённые `X-Internal-Secret`).
 - **Приватность и хранение данных (`PRIVACY.md`):**
   - Согласие фиксируется серверно в `users.voice_consent_at` при первой отправке записи или старте звонка.

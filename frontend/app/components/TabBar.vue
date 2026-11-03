@@ -11,31 +11,52 @@ import { nav } from '~/constants/strings'
  *
  * Tabs live in two fixed groups of two around a raised centre action, which gives
  * the primary task (speaking) the only filled control in the bar.
+ *
+ * Active state follows the information architecture, not the URL prefix: a
+ * lesson runs under `/lesson/:cardId` but belongs to the course, so ロードマップ
+ * stays lit for it. `/talk*` is the only thing that lights 会話.
  */
 defineProps<{ dueCount: number }>()
 
+type TabIconName = 'today' | 'roadmap' | 'talk' | 'review' | 'settings'
+
+interface Tab {
+  to: string
+  label: string
+  exact: boolean
+  icon: TabIconName
+  /** Additional prefixes that keep this tab lit. */
+  also?: readonly string[]
+}
+
 const route = useRoute()
 
-const leftTabs = [
+const leftTabs: Tab[] = [
   { to: '/', label: nav.today, exact: true, icon: 'today' },
-  { to: '/roadmap', label: nav.roadmap, exact: false, icon: 'roadmap' },
-] as const
+  { to: '/roadmap', label: nav.roadmap, exact: false, icon: 'roadmap', also: ['/lesson'] },
+]
 
-const rightTabs = [
+const rightTabs: Tab[] = [
   { to: '/review', label: nav.review, exact: false, icon: 'review' },
   { to: '/settings', label: nav.settings, exact: false, icon: 'settings' },
-] as const
+]
 
-function isActive(to: string, exact: boolean): boolean {
-  return exact ? route.path === to : route.path === to || route.path.startsWith(`${to}/`)
+function isActive(to: string, exact: boolean, also: readonly string[] = []): boolean {
+  if (exact) {
+    return route.path === to
+  }
+
+  const prefixes = [to, ...also]
+
+  return prefixes.some((prefix) => route.path === prefix || route.path.startsWith(`${prefix}/`))
 }
 
 const talkActive = computed(() => isActive('/talk', false))
 
 /**
- * The centre action always resolves to `/talk`, which itself resolves "the lesson
- * in progress" — a deep link into a specific lesson would strand the learner on
- * that lesson forever.
+ * The centre action always opens the topic picker. A lesson is one tap away from
+ * 今日 and ロードマップ, and deep-linking the centre button into one lesson would
+ * strand the learner on it — so this button means "start a conversation".
  */
 const talkTarget = '/talk'
 </script>
@@ -51,8 +72,8 @@ const talkTarget = '/talk'
         :key="tab.to"
         :to="tab.to"
         class="flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-0.5 pt-2.5 transition-colors"
-        :class="isActive(tab.to, tab.exact) ? 'text-[var(--ink)]' : 'text-[var(--ink-faint)]'"
-        :aria-current="isActive(tab.to, tab.exact) ? 'page' : undefined"
+        :class="isActive(tab.to, tab.exact, tab.also) ? 'text-[var(--ink)]' : 'text-[var(--ink-faint)]'"
+        :aria-current="isActive(tab.to, tab.exact, tab.also) ? 'page' : undefined"
       >
         <TabIcon :name="tab.icon" />
         <span class="w-full truncate text-center text-[0.625rem] leading-none font-medium">{{ tab.label }}</span>
@@ -76,8 +97,8 @@ const talkTarget = '/talk'
         :key="tab.to"
         :to="tab.to"
         class="relative flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-0.5 pt-2.5 transition-colors"
-        :class="isActive(tab.to, tab.exact) ? 'text-[var(--ink)]' : 'text-[var(--ink-faint)]'"
-        :aria-current="isActive(tab.to, tab.exact) ? 'page' : undefined"
+        :class="isActive(tab.to, tab.exact, tab.also) ? 'text-[var(--ink)]' : 'text-[var(--ink-faint)]'"
+        :aria-current="isActive(tab.to, tab.exact, tab.also) ? 'page' : undefined"
       >
         <span class="relative">
           <TabIcon :name="tab.icon" />

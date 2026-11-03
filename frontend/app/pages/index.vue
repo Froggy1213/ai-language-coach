@@ -100,7 +100,7 @@ const firstName = computed(() => user.value?.name?.split(/\s+/)[0] ?? '')
             </p>
 
             <div class="flex flex-wrap items-center gap-3 pt-1">
-              <UiButtonLink :to="`/talk/${readyCard.id}`" variant="primary" size="lg">
+              <UiButtonLink :to="`/lesson/${readyCard.id}`" variant="primary" size="lg">
                 {{ today.talkCta }}
               </UiButtonLink>
               <UiButtonLink to="/roadmap" variant="ghost" size="lg">

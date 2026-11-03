@@ -161,6 +161,16 @@ jobs:
         # installs it from requirements.txt.
         run: python -m unittest discover -s . -p "test_*.py"
 
+      - name: Run scenario prompt tests
+        working-directory: agent
+        # `test_prompts.py` is written as plain pytest functions so it reads as a
+        # contract rather than a class hierarchy; unittest discovery cannot see
+        # those, so the second runner is explicit. Pytest is a CI-only test
+        # dependency and deliberately stays out of the worker's runtime image.
+        run: |
+          pip install --quiet pytest
+          python -m pytest -q test_prompts.py
+
   containers:
     # The three jobs above run against a *source checkout*, so none of them can
     # see a defect that only exists inside an image: a build-context exclusion

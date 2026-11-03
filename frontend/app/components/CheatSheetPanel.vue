@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CheatSheet } from '~/types/graphql'
-import { talk } from '~/constants/strings'
+import { lesson } from '~/constants/strings'
 
 /**
  * Lesson reference, collapsed by default.
@@ -31,7 +31,7 @@ const pitfalls = computed(() => props.cheatSheet.pitfalls.filter(Boolean))
       @click="expanded = !expanded"
     >
       <span class="shrink-0 text-[0.8125rem] font-medium tracking-[0.06em] text-[var(--ink-muted)]">
-        {{ expanded ? talk.cheatSheetClose : talk.cheatSheetOpen }}
+        {{ expanded ? lesson.cheatSheetClose : lesson.cheatSheetOpen }}
       </span>
       <span class="ml-auto truncate font-mono text-[0.8125rem] text-[var(--accent)]">
         {{ cheatSheet.formula }}

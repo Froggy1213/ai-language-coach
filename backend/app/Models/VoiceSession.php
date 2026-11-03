@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['user_id', 'lesson_card_id', 'room_name', 'status', 'fail_reason', 'duration_sec', 'transcript'])]
+#[Fillable(['user_id', 'lesson_card_id', 'scenario_code', 'room_name', 'status', 'fail_reason', 'duration_sec', 'transcript', 'goal_review'])]
 class VoiceSession extends Model
 {
     /** @use HasFactory<VoiceSessionFactory> */
@@ -28,6 +28,7 @@ class VoiceSession extends Model
             'status' => VoiceSessionStatus::class,
             'duration_sec' => 'integer',
             'transcript' => 'array',
+            'goal_review' => 'array',
         ];
     }
 
