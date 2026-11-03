@@ -6,6 +6,8 @@ use App\Enums\VoiceSessionStatus;
 use App\GraphQL\Subscriptions\SessionFeedbackReady;
 use App\Mistakes\AnalyzedMistake;
 use App\Mistakes\AnalyzeVoiceSessionMistakes;
+use App\Mistakes\GoalReviewer;
+use App\Mistakes\GoalReviewResult;
 use App\Mistakes\MistakeAnalysisFailed;
 use App\Mistakes\MistakeAnalysisResult;
 use App\Mistakes\MistakeAnalyzer;
@@ -376,5 +378,262 @@ class AnalyzeVoiceSessionMistakesTest extends TestCase
 
         $job = new AnalyzeVoiceSessionMistakes($session);
         $job->handle($analyzer, $broadcasts);
+    }
+
+    public function test_a_scenario_session_without_a_lesson_card_is_still_analysed(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $presentSimple = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->firstOrFail();
+
+        // A scenario session: `lesson_card_id` is null and only the code names
+        // what was practised. Analysis reads the transcript and the learner, not
+        // the card, so it must run exactly as it does for a lesson.
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'He go to the airport yesterday.'],
+            ],
+        ]);
+
+        $this->assertNull($session->lesson_card_id);
+        $this->assertSame('airport_checkin', $session->scenario_code);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')
+            ->once()
+            ->with('He go to the airport yesterday.', Mockery::on(static fn ($u): bool => $u->is($user)))
+            ->andReturn(new MistakeAnalysisResult([
+                new AnalyzedMistake(
+                    grammarPoint: $presentSimple,
+                    userUtterance: 'He go to the airport',
+                    correction: 'He went to the airport',
+                    explanation: 'Past simple is required for a finished past event.',
+                ),
+            ]));
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        // The session is a scenario, so the job also runs the communication
+        // review. It is mocked here to keep this test about grammar analysis.
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldReceive('review')
+            ->once()
+            ->andReturn(new GoalReviewResult(true, ['Could I have a window seat?']));
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertDatabaseCount('mistakes', 1);
+        $this->assertDatabaseHas('mistakes', [
+            'session_id' => $session->id,
+            'user_id' => $user->id,
+            'grammar_point_id' => $presentSimple->id,
+            'user_utterance' => 'He go to the airport',
+            'correction' => 'He went to the airport',
+        ]);
+        $this->assertDatabaseCount('review_items', 1);
+        $this->assertTrue($session->fresh()->analyzed);
+        $this->assertSame(
+            ['goal_achieved' => true, 'missed_expressions' => ['Could I have a window seat?']],
+            $session->fresh()->goal_review,
+        );
+    }
+
+    public function test_a_scenario_session_stores_the_goal_review_and_broadcasts_it_once(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $grammarPoint = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->firstOrFail();
+
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'Good evening. Here is my passport.'],
+                ['turn_id' => 't2', 'transcript' => 'I have a connecting flight to Seoul.'],
+            ],
+        ]);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')->once()->andReturn(new MistakeAnalysisResult([
+            new AnalyzedMistake(
+                grammarPoint: $grammarPoint,
+                userUtterance: 'I have a connecting flight',
+                correction: 'I have a connecting flight',
+                explanation: 'No mistake, kept to prove grammar analysis still ran.',
+            ),
+        ]));
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldReceive('review')
+            ->once()
+            ->with(Mockery::on(static fn ($reviewed): bool => $reviewed instanceof VoiceSession && $reviewed->id === $session->id))
+            ->andReturn(new GoalReviewResult(true, ['Will my bag go all the way through?']));
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertSame(
+            ['goal_achieved' => true, 'missed_expressions' => ['Will my bag go all the way through?']],
+            $session->fresh()->goal_review,
+        );
+
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(SessionFeedbackReady::class),
+                'sessionFeedbackReady',
+                Mockery::on(static fn ($root): bool => $root instanceof VoiceSession
+                    && $root->id === $session->id
+                    && $root->goal_review === [
+                        'goal_achieved' => true,
+                        'missed_expressions' => ['Will my bag go all the way through?'],
+                    ]),
+            );
+    }
+
+    public function test_a_lesson_session_never_runs_the_goal_review(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'Everything I said was grammatically correct.'],
+            ],
+        ]);
+
+        $this->assertNull($session->scenario_code);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')->once()->andReturn(new MistakeAnalysisResult([]));
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldNotReceive('review');
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertNull($session->fresh()->goal_review);
+        $this->assertTrue($session->fresh()->analyzed);
+    }
+
+    public function test_a_failing_goal_review_keeps_the_mistakes_the_marker_and_the_broadcast(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $grammarPoint = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->firstOrFail();
+
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'He go to the airport.'],
+            ],
+        ]);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')->once()->andReturn(new MistakeAnalysisResult([
+            new AnalyzedMistake(
+                grammarPoint: $grammarPoint,
+                userUtterance: 'He go to the airport',
+                correction: 'He goes to the airport',
+                explanation: 'Subject-verb agreement.',
+            ),
+        ]));
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldReceive('review')
+            ->once()
+            ->andThrow(new \RuntimeException('The goal review model timed out.'));
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertDatabaseCount('mistakes', 1);
+        $this->assertTrue($session->fresh()->analyzed);
+        $this->assertNull($session->fresh()->goal_review);
+
+        $broadcasts->shouldHaveReceived('broadcast')
+            ->once()
+            ->with(
+                Mockery::type(SessionFeedbackReady::class),
+                'sessionFeedbackReady',
+                Mockery::on(static fn ($root): bool => $root instanceof VoiceSession && $root->id === $session->id),
+            );
+    }
+
+    public function test_a_rerun_does_not_run_the_goal_review_again(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $grammarPoint = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->firstOrFail();
+
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'He go to the airport.'],
+            ],
+        ]);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')->once()->andReturn(new MistakeAnalysisResult([
+            new AnalyzedMistake(
+                grammarPoint: $grammarPoint,
+                userUtterance: 'He go to the airport',
+                correction: 'He goes to the airport',
+                explanation: 'Subject-verb agreement.',
+            ),
+        ]));
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldReceive('review')->once()->andReturn(new GoalReviewResult(true, []));
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertDatabaseCount('mistakes', 1);
+        $this->assertNotNull($session->fresh()->goal_review);
+
+        // Second run: neither the analyzer nor the reviewer may run again, and
+        // no second broadcast is sent.
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertDatabaseCount('mistakes', 1);
+        $this->assertDatabaseCount('review_items', 1);
+        $this->assertSame(
+            ['goal_achieved' => true, 'missed_expressions' => []],
+            $session->fresh()->goal_review,
+        );
+
+        $broadcasts->shouldHaveReceived('broadcast')->once();
+    }
+
+    public function test_a_scenario_session_without_learner_utterances_skips_the_goal_review(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Abandoned,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => '   '],
+            ],
+        ]);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldNotReceive('analyze');
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldNotReceive('review');
+
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertNull($session->fresh()->goal_review);
+        $this->assertTrue($session->fresh()->analyzed);
+        $broadcasts->shouldHaveReceived('broadcast')->once();
     }
 }

@@ -46,7 +46,7 @@ const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
 
         <nav class="flex items-center gap-1 text-[0.9375rem]">
           <NavLink to="/" :label="nav.today" exact />
-          <NavLink to="/roadmap" :label="nav.roadmap" />
+          <NavLink to="/roadmap" :label="nav.roadmap" :also="['/lesson']" />
           <NavLink to="/talk" :label="nav.talk" />
           <NavLink to="/review" :label="nav.review" :badge="dueCount" />
         </nav>

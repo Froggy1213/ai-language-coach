@@ -24,6 +24,11 @@ use Throwable;
  * to the canonical grammar catalogue, writes `mistakes` rows, lazily creates
  * `review_items` rows with SM-2 defaults, and fires the `sessionFeedbackReady` subscription.
  *
+ * For a scenario session it then asks a second, separate model to judge whether
+ * the learner achieved the scenario's goal (plan §9) and stores that verdict in
+ * `goal_review`. A failed review is reported and skipped: the grammar mistakes
+ * and the broadcast do not depend on it.
+ *
  * Idempotent: a re-run of the job for an already analysed session skips processing
  * to avoid duplicate mistakes or overwriting SM-2 schedules.
  */
@@ -47,6 +52,7 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
     public function handle(
         MistakeAnalyzer $analyzer,
         BroadcastsSubscriptions $broadcasts,
+        ?GoalReviewer $goalReviewer = null,
     ): void {
         $session = $this->session->fresh();
 
@@ -110,7 +116,12 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
         $transcriptText = implode("\n", $utterances);
         $result = $analyzer->analyze($transcriptText, $session->user);
 
-        DB::transaction(function () use ($session, $result): void {
+        // Whether *this* run committed the analysis. A concurrent duplicate can
+        // pass the pre-transaction guard and still lose the race under the row
+        // lock; it must not run the goal review or broadcast a second time.
+        $analysedNow = false;
+
+        DB::transaction(function () use ($session, $result, &$analysedNow): void {
             $lockedSession = VoiceSession::query()
                 ->whereKey($session->getKey())
                 ->lockForUpdate()
@@ -150,10 +161,53 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
             }
 
             $lockedSession->markAnalyzed(count($result->mistakes));
+            $analysedNow = true;
         });
+
+        if (! $analysedNow) {
+            return;
+        }
+
+        $this->storeGoalReview($session, $goalReviewer);
 
         try {
             $broadcasts->broadcast(new SessionFeedbackReady, 'sessionFeedbackReady', $session->fresh());
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    /**
+     * Store the communication review of a scenario session (plan §9).
+     *
+     * Only scenario sessions are reviewed, and only once: a session that
+     * already carries a review is left alone. The review is best-effort — a
+     * failing model or an unknown scenario is reported and skipped, because
+     * losing the grammar mistakes and the completion broadcast over a second
+     * opinion would be worse than a null `goal_review`.
+     */
+    private function storeGoalReview(VoiceSession $session, ?GoalReviewer $goalReviewer): void
+    {
+        if ($session->scenario_code === null || $session->goal_review !== null) {
+            return;
+        }
+
+        try {
+            $goalReviewer ??= app(GoalReviewer::class);
+
+            $reviewableSession = $session->fresh();
+
+            if (! $reviewableSession instanceof VoiceSession || $reviewableSession->goal_review !== null) {
+                return;
+            }
+
+            $review = $goalReviewer->review($reviewableSession);
+
+            $reviewableSession->goal_review = [
+                'goal_achieved' => $review->goalAchieved,
+                'missed_expressions' => $review->missedExpressions,
+            ];
+            $reviewableSession->save();
         } catch (Throwable $exception) {
             report($exception);
         }

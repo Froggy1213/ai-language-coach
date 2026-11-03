@@ -1,6 +1,6 @@
 import { Track, type LocalAudioTrack, type RemoteAudioTrack, type RemoteTrack } from 'livekit-client'
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
-import { useVoiceSession } from '~/composables/useVoiceSession'
+import { useVoiceSession, type VoicePracticeSubject } from '~/composables/useVoiceSession'
 
 /**
  * What the conversation surface should be showing right now.
@@ -215,14 +215,14 @@ export function useConversation(options: UseConversationOptions = {}) {
    * Opens the room. Call this directly from a click handler: it arms the
    * `AudioContext` synchronously before any awaited work.
    */
-  async function start(lessonCardId: string): Promise<void> {
+  async function start(subject: VoicePracticeSubject): Promise<void> {
     arm()
 
     if (context) {
       await context.resume().catch(() => {})
     }
 
-    await voice.start(lessonCardId)
+    await voice.start(subject)
 
     if (!disposed && voice.status.value === 'connected') {
       startAnalysis()

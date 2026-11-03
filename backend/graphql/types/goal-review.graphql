@@ -1,0 +1,12 @@
+"""
+Communication review of a scenario session, produced by the after-conversation
+analysis (M6). It judges whether the learner achieved the scenario's goal, not
+the grammar of individual utterances, so it is kept apart from `Mistake`.
+"""
+type GoalReview {
+    "Whether the learner achieved the scenario's learner goal."
+    goalAchieved: Boolean! @rename(attribute: "goal_achieved")
+
+    "Expressions from the scenario the learner could have used but did not."
+    missedExpressions: [String!]! @rename(attribute: "missed_expressions")
+}

@@ -7,7 +7,9 @@ use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
 use App\Models\User;
 use App\Models\VoiceSession;
+use App\Scenarios\ScenarioContent;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +24,10 @@ use Illuminate\Support\Str;
  * quota is applied, and the session row is written. Only once that commits is
  * the LiveKit side touched, and a failure there is written back to the row so
  * the idempotency guard never hands out a room nobody will enter.
+ *
+ * Everything subject-scoped — the stale cleanup and the idempotency re-check —
+ * is scoped to the `PracticeSubject`, because a lesson and a scenario are
+ * different conversations even though the daily quota is shared between them.
  *
  * Failures leave as domain exceptions, never as GraphQL errors: translating
  * them into the typed error contract is the resolver's job.
@@ -38,19 +44,18 @@ final class VoiceSessionStarter
      * @throws VoiceFleetBusy when no agent takes the room
      * @throws VoiceStartFailed when room creation, dispatch or the agent wait fails
      */
-    public function start(User $user, LessonCard $card): VoiceSession
+    public function start(User $user, PracticeSubject $subject): VoiceSession
     {
-        $session = DB::transaction(function () use ($user, $card): VoiceSession {
+        $session = DB::transaction(function () use ($user, $subject): VoiceSession {
             // Locking the user's row serialises concurrent start attempts for
             // one learner so that concurrent requests cannot race past the daily
-            // session limit or open duplicate rooms for the same card.
+            // session limit or open duplicate rooms for the same subject.
             User::query()->whereKey($user->getKey())->lockForUpdate()->first();
 
             $staleThreshold = (float) config('voice.agent.join_timeout_seconds') + 30.0;
             $staleBefore = Date::now()->subSeconds($staleThreshold);
 
-            $user->voiceSessions()
-                ->where('lesson_card_id', $card->getKey())
+            $this->sessionsFor($user, $subject)
                 ->where('status', VoiceSessionStatus::Pending)
                 ->where('created_at', '<', $staleBefore)
                 ->update([
@@ -59,7 +64,7 @@ final class VoiceSessionStarter
                 ]);
 
             // Re-check idempotency under lock in case a concurrent request won the race.
-            if ($existing = $this->currentSession($user, $card)) {
+            if ($existing = $this->currentSession($user, $subject)) {
                 return $existing;
             }
 
@@ -67,13 +72,16 @@ final class VoiceSessionStarter
 
             // The room name is derivable from a primary key on purpose: it is not a
             // secret, it is an address. What protects the room is the signed token.
+            // Exactly one subject column is filled, so the "one subject" invariant
+            // is written down rather than implied.
             $session = $user->voiceSessions()->create([
-                'lesson_card_id' => $card->getKey(),
+                'lesson_card_id' => $subject->lessonCard?->getKey(),
+                'scenario_code' => $subject->scenario?->code,
                 'status' => VoiceSessionStatus::Pending,
                 'room_name' => 'pending-'.Str::ulid(),
             ]);
 
-            $session->room_name = 'lesson-'.$session->getKey();
+            $session->room_name = 'practice-'.$session->getKey();
             $session->save();
 
             $lockedUser = User::query()->whereKey($user->getKey())->first();
@@ -90,7 +98,7 @@ final class VoiceSessionStarter
         }
 
         try {
-            $this->dispatcher->dispatch($session, $card, $user);
+            $this->dispatcher->dispatch($session, $subject, $user);
         } catch (VoiceFleetBusy $exception) {
             // The room exists and the learner was never told about it. It is not
             // closed here: LiveKit's own empty timeout (VOICE_ROOM_EMPTY_TIMEOUT)
@@ -105,6 +113,7 @@ final class VoiceSessionStarter
             Log::warning('Voice session start failed: fleet busy.', [
                 'session_id' => $session->getKey(),
                 'room_name' => $session->room_name,
+                'subject' => $subject->label(),
             ]);
 
             throw $exception;
@@ -130,7 +139,7 @@ final class VoiceSessionStarter
     }
 
     /**
-     * The session the learner is already in, if any.
+     * The session the learner is already in for this subject, if any.
      *
      * Both the pre-lock guard in the resolver and the re-check under the lock
      * in `start()` ask this question, so it is defined once here. A session
@@ -138,13 +147,12 @@ final class VoiceSessionStarter
      * join timeout plus a grace period — older pending rows are attempts that
      * never got an agent and must not block a fresh one.
      */
-    public function currentSession(User $user, LessonCard $card): ?VoiceSession
+    public function currentSession(User $user, PracticeSubject $subject): ?VoiceSession
     {
         $staleThreshold = (float) config('voice.agent.join_timeout_seconds') + 30.0;
         $staleBefore = Date::now()->subSeconds($staleThreshold);
 
-        return $user->voiceSessions()
-            ->where('lesson_card_id', $card->getKey())
+        return $this->sessionsFor($user, $subject)
             ->where(function (Builder $query) use ($staleBefore): void {
                 $query->where('status', VoiceSessionStatus::Active)
                     ->orWhere(function (Builder $query) use ($staleBefore): void {
@@ -154,5 +162,35 @@ final class VoiceSessionStarter
             })
             ->latest('id')
             ->first();
+    }
+
+    /**
+     * The learner's sessions that practise this subject.
+     *
+     * Idempotency is per subject: an active lesson must not be handed back for
+     * a scenario start, and the other way round. The daily quota is deliberately
+     * *not* scoped here — it stays shared between both modes (plan §4.3).
+     *
+     * Scenario rows are matched with an explicit `whereNull('lesson_card_id')`
+     * plus the code. `where('lesson_card_id', null)` would compile to `= NULL`
+     * and never match anything, which is the trap this helper exists to avoid.
+     *
+     * @return HasMany<VoiceSession, User>
+     */
+    private function sessionsFor(User $user, PracticeSubject $subject): HasMany
+    {
+        $sessions = $user->voiceSessions();
+
+        $card = $subject->lessonCard;
+        if ($card instanceof LessonCard) {
+            return $sessions->where('lesson_card_id', $card->getKey());
+        }
+
+        $scenario = $subject->scenario;
+        assert($scenario instanceof ScenarioContent);
+
+        return $sessions
+            ->whereNull('lesson_card_id')
+            ->where('scenario_code', $scenario->code);
     }
 }

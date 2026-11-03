@@ -54,6 +54,19 @@ export type CheatSheet = {
   rule: Scalars['String']['output'];
 };
 
+/**
+ * Communication review of a scenario session, produced by the after-conversation
+ * analysis (M6). It judges whether the learner achieved the scenario's goal, not
+ * the grammar of individual utterances, so it is kept apart from `Mistake`.
+ */
+export type GoalReview = {
+  __typename?: 'GoalReview';
+  /** Whether the learner achieved the scenario's learner goal. */
+  goalAchieved: Scalars['Boolean']['output'];
+  /** Expressions from the scenario the learner could have used but did not. */
+  missedExpressions: Array<Scalars['String']['output']>;
+};
+
 /** Canonical grammar topic mistakes are classified against (plan §5). */
 export type GrammarPoint = {
   __typename?: 'GrammarPoint';
@@ -125,6 +138,13 @@ export type Mutation = {
    */
   deleteAccount: Scalars['Boolean']['output'];
   /**
+   * End the conversation the learner just finished. Moves the session to
+   * `completed`, records its duration, deletes the LiveKit room so `room_finished`
+   * cannot arrive minutes later, and queues the mistake analysis. Idempotent: a
+   * session that is already terminal is returned unchanged.
+   */
+  finishVoiceSession: VoiceSession;
+  /**
    * Build the roadmap for the authenticated user's current CEFR band, or return
    * the one they already have. Idempotent, so a retry after a timeout is safe.
    */
@@ -136,10 +156,13 @@ export type Mutation = {
   /** Create an account and sign in. */
   register: User;
   /**
-   * Open a spoken practice session for a lesson card and return the room and its
-   * access token. Idempotent: while a session is pending or active, calling this
-   * again returns that same session instead of opening a second room. Fails with
-   * the `VOICE_FLEET_BUSY` error code when no agent worker is free.
+   * Open a spoken practice session for a lesson card or a scenario and return the
+   * room and its access token. Exactly one of `lessonCardId` or `scenarioCode`
+   * must be given: a lesson card exercises a grammar point, a scenario is a
+   * role-play from the catalogue. Idempotent: while a session is pending or
+   * active, calling this again with the same subject returns that same session
+   * instead of opening a second room. Fails with the `VOICE_FLEET_BUSY` error
+   * code when no agent worker is free.
    */
   requestVoiceToken: VoiceSession;
   /**
@@ -171,6 +194,11 @@ export type MutationDeleteAccountArgs = {
 };
 
 
+export type MutationFinishVoiceSessionArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
 export type MutationLoginArgs = {
   email: Scalars['String']['input'];
   password: Scalars['String']['input'];
@@ -186,7 +214,8 @@ export type MutationRegisterArgs = {
 
 
 export type MutationRequestVoiceTokenArgs = {
-  lessonCardId: Scalars['ID']['input'];
+  lessonCardId?: InputMaybe<Scalars['ID']['input']>;
+  scenarioCode?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -261,6 +290,8 @@ export type Query = {
   recurringMistakes: Array<RecurringMistake>;
   /** The roadmap the authenticated user is working through, if one has been generated yet. */
   roadmap?: Maybe<Roadmap>;
+  /** Scenarios the learner can practise, for their target language. */
+  scenarios: Array<Scenario>;
   /** A voice session belonging to the authenticated user, if it exists. */
   voiceSession?: Maybe<VoiceSession>;
 };
@@ -318,6 +349,21 @@ export type RoadmapStatus =
   | 'active'
   | 'archived'
   | 'completed';
+
+/** One role-play scenario the learner can practise. */
+export type Scenario = {
+  __typename?: 'Scenario';
+  aiRole: Scalars['String']['output'];
+  code: Scalars['String']['output'];
+  learnerGoal: Scalars['String']['output'];
+  learnerRole: Scalars['String']['output'];
+  level: CefrLevel;
+  register: Scalars['String']['output'];
+  setting: Scalars['String']['output'];
+  summary: Scalars['String']['output'];
+  title: Scalars['String']['output'];
+  usefulPhrases: Array<Scalars['String']['output']>;
+};
 
 export type Subscription = {
   __typename?: 'Subscription';
@@ -387,10 +433,12 @@ export type VoiceSession = {
   durationSec?: Maybe<Scalars['Int']['output']>;
   /** Why the session failed, when it did. */
   failReason?: Maybe<Scalars['String']['output']>;
+  /** Communication review of a scenario session; null until M6 analysis finishes and always null for lessons. */
+  goalReview?: Maybe<GoalReview>;
   /** Unique primary key. */
   id: Scalars['ID']['output'];
-  /** The lesson this session practises. */
-  lessonCard: LessonCard;
+  /** The lesson this session practises; null for a scenario session. */
+  lessonCard?: Maybe<LessonCard>;
   /**
    * Short-lived access token scoped to this session's room. Minted when the
    * field is read, never stored: a token saved at session creation would already
@@ -405,6 +453,8 @@ export type VoiceSession = {
   livekitUrl: Scalars['String']['output'];
   /** Mistakes the async analysis found in this session. */
   mistakes: Array<Mistake>;
+  /** Scenario this session practises, if it is a scenario session. */
+  scenario?: Maybe<Scenario>;
   /** Lifecycle of the session. */
   status: VoiceSessionStatus;
 };

@@ -83,4 +83,22 @@ return [
         'timeout_seconds' => (int) env('MISTAKE_ANALYSIS_TIMEOUT', 120),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Scenario Goal Review
+    |--------------------------------------------------------------------------
+    |
+    | The communication half of the after-conversation analysis (plan §9). A
+    | separate prompt from mistake analysis: it judges whether the learner
+    | achieved the scenario's goal, not grammar. Async, so price beats latency
+    | exactly like the other DeepSeek roles.
+    |
+    */
+
+    'goal_review' => [
+        'provider' => env('GOAL_REVIEW_PROVIDER', 'deepseek'),
+        'model' => env('GOAL_REVIEW_MODEL', 'deepseek-chat'),
+        'timeout_seconds' => (int) env('GOAL_REVIEW_TIMEOUT', 120),
+    ],
+
 ];

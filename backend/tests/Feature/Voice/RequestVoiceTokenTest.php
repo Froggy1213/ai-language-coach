@@ -87,7 +87,7 @@ class RequestVoiceTokenTest extends TestCase
 
         // The room is named after the session, which is how the webhook finds
         // its way back to the row.
-        $this->assertSame('lesson-'.$session->getKey(), $session->room_name);
+        $this->assertSame('practice-'.$session->getKey(), $session->room_name);
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/twirp/livekit.RoomService/CreateRoom')
             && $request['name'] === $session->room_name
@@ -200,7 +200,7 @@ class RequestVoiceTokenTest extends TestCase
         $new = VoiceSession::query()->latest('id')->firstOrFail();
         $this->assertSame(VoiceSessionStatus::Active, $new->status);
         $this->assertSame((string) $new->getKey(), $response->json('data.requestVoiceToken.id'));
-        $this->assertSame('lesson-'.$new->getKey(), $new->room_name);
+        $this->assertSame('practice-'.$new->getKey(), $new->room_name);
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/twirp/livekit.RoomService/CreateRoom')
             && $request['name'] === $new->room_name);

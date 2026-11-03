@@ -28,8 +28,14 @@ type VoiceSession {
 
     "Length of the conversation in seconds, once it finished."
     durationSec: Int @rename(attribute: "duration_sec")
-    "The lesson this session practises."
-    lessonCard: LessonCard! @belongsTo
+    "The lesson this session practises; null for a scenario session."
+    lessonCard: LessonCard @belongsTo
+
+    "Scenario this session practises, if it is a scenario session."
+    scenario: Scenario @field(resolver: "App\\GraphQL\\Resolvers\\SessionScenario")
+
+    "Communication review of a scenario session; null until M6 analysis finishes and always null for lessons."
+    goalReview: GoalReview @rename(attribute: "goal_review")
 
     "Mistakes the async analysis found in this session."
     mistakes: [Mistake!]! @hasMany

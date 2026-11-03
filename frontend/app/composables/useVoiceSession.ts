@@ -21,6 +21,16 @@ export type { AgentVoiceState } from '~/composables/voice/useAgentPresence'
 export type VoiceSessionUiStatus = 'idle' | 'requesting' | 'connecting' | 'connected' | 'ended' | 'error'
 
 /**
+ * What the learner is practising. Exactly one of the two, mirrored by the XOR
+ * the backend enforces on `requestVoiceToken`: a lesson card is grammar practice,
+ * a scenario code is a role-play. The union makes "both" and "neither"
+ * unrepresentable on the client as well.
+ */
+export type VoicePracticeSubject =
+  | { lessonCardId: string }
+  | { scenarioCode: string }
+
+/**
  * Set and cleared by the room's Reconnecting/Reconnected events. Kept as a
  * constant because the reconnect handler compares against the exact text it
  * wrote — an inline literal is one careless edit away from never clearing.
@@ -131,7 +141,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     }
   }
 
-  async function start(lessonCardId: string): Promise<void> {
+  async function start(subject: VoicePracticeSubject): Promise<void> {
     if (disposed || status.value === 'requesting' || status.value === 'connecting' || status.value === 'connected') {
       return
     }
@@ -145,8 +155,14 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
       await leave()
     }
 
+    // Exactly one variable: the backend treats the pair as XOR and uses the
+    // presence of a key, not its value, to choose the practice subject.
+    const variables = 'lessonCardId' in subject
+      ? { lessonCardId: subject.lessonCardId }
+      : { scenarioCode: subject.scenarioCode }
+
     const { data, error: failure } = await $urql
-      .mutation<{ requestVoiceToken: VoiceSession }>(REQUEST_VOICE_TOKEN_MUTATION, { lessonCardId })
+      .mutation<{ requestVoiceToken: VoiceSession }>(REQUEST_VOICE_TOKEN_MUTATION, variables)
       .toPromise()
 
     if (disposed) {

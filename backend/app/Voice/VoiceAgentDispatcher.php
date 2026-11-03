@@ -5,6 +5,7 @@ namespace App\Voice;
 use App\Models\LessonCard;
 use App\Models\User;
 use App\Models\VoiceSession;
+use App\Scenarios\ScenarioContent;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Sleep;
@@ -30,10 +31,10 @@ final class VoiceAgentDispatcher
      * @throws ConnectionException when LiveKit cannot be reached while creating the room or dispatching
      * @throws \RuntimeException when LiveKit answers a call with an error
      */
-    public function dispatch(VoiceSession $session, LessonCard $card, User $user): void
+    public function dispatch(VoiceSession $session, PracticeSubject $subject, User $user): void
     {
         $this->api->createRoom($session->room_name);
-        $this->api->dispatchAgent($session->room_name, $this->jobMetadata($session, $card, $user));
+        $this->api->dispatchAgent($session->room_name, $this->jobMetadata($session, $subject, $user));
         $this->waitForAgent($session->room_name);
     }
 
@@ -71,20 +72,59 @@ final class VoiceAgentDispatcher
     /**
      * 3. What the Python worker is told about the job.
      *
-     * Everything the agent needs to run the sprint without a second round trip:
-     * which session to report against, what to teach and how to push back when
-     * the learner makes the mistake the card is about.
+     * Everything the agent needs to run the session without a second round trip,
+     * gathered per subject kind:
+     *
+     * - a lesson gets the grammar point and the practice prompt, unchanged from
+     *   before the scenario mode existed (plus `kind`);
+     * - a scenario gets the role-play card — setting, both roles and goals, the
+     *   register, the complications it may introduce, and the opening line.
+     *
+     * `useful_phrases` is deliberately absent: it is screen-only copy for the
+     * learner's hint panel, and sending it would both pad the payload and invite
+     * the model to read it out. The whole metadata blob must stay under 2 KB,
+     * which is why nothing here is duplicated or pre-formatted.
+     *
+     * `target_language` and `level` describe the learner in both modes, so the
+     * worker grades its language the same way for a lesson and a scenario.
      *
      * @return array<string, mixed>
      */
-    private function jobMetadata(VoiceSession $session, LessonCard $card, User $user): array
+    private function jobMetadata(VoiceSession $session, PracticeSubject $subject, User $user): array
     {
-        return [
+        $common = [
             'session_id' => $session->getKey(),
             'room_name' => $session->room_name,
-            'grammar_point' => $card->grammarPoint->code,
-            'grammar_point_id' => $card->grammar_point_id,
-            'practice_prompt' => $card->practice_prompt,
+        ];
+
+        $card = $subject->lessonCard;
+        if ($card instanceof LessonCard) {
+            return [
+                ...$common,
+                'grammar_point' => $card->grammarPoint->code,
+                'grammar_point_id' => $card->grammar_point_id,
+                'practice_prompt' => $card->practice_prompt,
+                'target_language' => $user->target_language,
+                'level' => $user->current_level->value,
+                'kind' => 'lesson',
+            ];
+        }
+
+        $scenario = $subject->scenario;
+        assert($scenario instanceof ScenarioContent);
+
+        return [
+            ...$common,
+            'kind' => 'scenario',
+            'scenario_code' => $scenario->code,
+            'setting' => $scenario->setting,
+            'ai_role' => $scenario->aiRole,
+            'ai_goal' => $scenario->aiGoal,
+            'learner_role' => $scenario->learnerRole,
+            'learner_goal' => $scenario->learnerGoal,
+            'register' => $scenario->register->value,
+            'complications' => $scenario->complications,
+            'opening_line' => $scenario->openingLine,
             'target_language' => $user->target_language,
             'level' => $user->current_level->value,
         ];

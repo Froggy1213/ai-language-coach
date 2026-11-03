@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Log;
 /**
  * Receives LiveKit room events (plan §5).
  *
- * Reports which session a room belongs to by its name — `lesson-{id}`, minted in
- * StartVoiceSession — so no separate room registry is needed.
+ * Reports which session a room belongs to by its name — `practice-{id}`, minted
+ * in StartVoiceSession — so no separate room registry is needed.
  *
  * Nothing here trusts the payload: the signature is verified against the raw
  * body first, and only then is the event read, because a webhook endpoint that

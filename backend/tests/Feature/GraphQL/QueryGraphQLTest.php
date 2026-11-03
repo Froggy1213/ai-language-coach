@@ -11,6 +11,7 @@ use App\Models\Mistake;
 use App\Models\ReviewItem;
 use App\Models\Roadmap;
 use App\Models\User;
+use App\Models\VoiceSession;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
@@ -232,5 +233,168 @@ class QueryGraphQLTest extends TestCase
             $this->assertSame('ENUM', $type['kind'] ?? null, "{$typeName} is not exposed as an enum");
             $this->assertSame($values, array_column($type['enumValues'], 'name'));
         }
+    }
+
+    public function test_scenarios_returns_the_catalogue_for_the_users_target_language(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query {
+                scenarios {
+                    code
+                    title
+                    summary
+                    level
+                    register
+                    setting
+                    aiRole
+                    learnerRole
+                    learnerGoal
+                    usefulPhrases
+                }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonCount(6, 'data.scenarios');
+
+        /** @var array<string, array<string, mixed>> $scenarios */
+        $scenarios = array_column($response->json('data.scenarios'), null, 'code');
+
+        $this->assertArrayHasKey('airport_checkin', $scenarios);
+
+        $airport = $scenarios['airport_checkin'];
+
+        $this->assertSame('Airport check-in', $airport['title']);
+        $this->assertContains($airport['level'], ['A1', 'A2', 'B1', 'B2', 'C1']);
+
+        foreach (['code', 'title', 'summary', 'register', 'setting', 'aiRole', 'learnerRole', 'learnerGoal'] as $field) {
+            $this->assertNotEmpty($airport[$field], "Scenario.{$field} must be exposed.");
+        }
+
+        $this->assertNotEmpty($airport['usefulPhrases']);
+    }
+
+    public function test_scenario_type_hides_the_agents_goal_and_complications(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+
+        Sanctum::actingAs($user);
+
+        foreach (['aiGoal', 'complications'] as $field) {
+            $response = $this->graphQL(/** @lang GraphQL */ "
+                query {
+                    scenarios { code {$field} }
+                }
+            ");
+
+            // Knowing the AI's goal and its planned complications turns the
+            // role-play into reading a script, so these fields are not in the SDL.
+            $this->assertNotEmpty($response->json('errors'), "Scenario.{$field} must not be selectable.");
+            $this->assertNull($response->json('data'));
+        }
+    }
+
+    public function test_scenarios_are_empty_for_a_language_without_a_catalogue(): void
+    {
+        $user = User::factory()->create(['target_language' => 'xx']);
+
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                scenarios { code }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonCount(0, 'data.scenarios');
+    }
+
+    public function test_scenarios_require_authentication(): void
+    {
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                scenarios { code }
+            }
+        ')
+            ->assertGraphQLErrorMessage('Unauthenticated.');
+    }
+
+    public function test_a_scenario_session_exposes_the_scenario_and_no_lesson_card(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create();
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query ($id: ID!) {
+                voiceSession(id: $id) {
+                    lessonCard { id }
+                    scenario { code title }
+                    goalReview { goalAchieved missedExpressions }
+                }
+            }
+        ', ['id' => (string) $session->id])
+            ->assertGraphQLErrorFree();
+
+        $this->assertNull($response->json('data.voiceSession.lessonCard'));
+        $this->assertSame('airport_checkin', $response->json('data.voiceSession.scenario.code'));
+        $this->assertSame('Airport check-in', $response->json('data.voiceSession.scenario.title'));
+        $this->assertNull($response->json('data.voiceSession.goalReview'));
+    }
+
+    public function test_a_scenario_session_exposes_its_goal_review(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'goal_review' => [
+                'goal_achieved' => true,
+                'missed_expressions' => [
+                    'Will my bag go all the way through?',
+                    'Could I have a window seat?',
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query ($id: ID!) {
+                voiceSession(id: $id) {
+                    goalReview { goalAchieved missedExpressions }
+                }
+            }
+        ', ['id' => (string) $session->id])
+            ->assertGraphQLErrorFree();
+
+        $this->assertTrue($response->json('data.voiceSession.goalReview.goalAchieved'));
+        $this->assertSame(
+            ['Will my bag go all the way through?', 'Could I have a window seat?'],
+            $response->json('data.voiceSession.goalReview.missedExpressions'),
+        );
+    }
+
+    public function test_a_lesson_session_has_no_goal_review(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $session = VoiceSession::factory()->for($user)->create();
+
+        $this->assertNull($session->scenario_code);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            query ($id: ID!) {
+                voiceSession(id: $id) {
+                    goalReview { goalAchieved missedExpressions }
+                }
+            }
+        ', ['id' => (string) $session->id])
+            ->assertGraphQLErrorFree();
+
+        $this->assertNull($response->json('data.voiceSession.goalReview'));
     }
 }

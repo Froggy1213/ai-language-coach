@@ -83,6 +83,43 @@ const groups = computed(() => {
 })
 
 const durationLabel = computed(() => formatDuration(session.value?.durationSec ?? 0))
+
+/**
+ * Where "もう一度話す" goes.
+ *
+ * A lesson session returns to its card; a scenario session has no card, so it
+ * returns to the topic picker rather than deep-linking a scenario the learner
+ * may not want to repeat.
+ */
+const retryTo = computed(() =>
+  session.value?.lessonCard ? `/lesson/${session.value.lessonCard.id}` : '/talk',
+)
+
+const goalReview = computed(() => session.value?.goalReview ?? null)
+
+const missedExpressions = computed(
+  () => goalReview.value?.missedExpressions.filter(Boolean) ?? [],
+)
+
+/**
+ * Tones for the goal block. It judges communication, so it must not reuse the
+ * grammar-mistake palette: sage reads "you did it", amber reads "you got close",
+ * and neither reads as an error to fix.
+ */
+const GOAL_TONES = {
+  achieved: {
+    panel: 'border-[color-mix(in_oklab,var(--color-sage-400)_34%,transparent)] bg-[color-mix(in_oklab,var(--color-sage-500)_9%,transparent)]',
+    mark: 'border-[color-mix(in_oklab,var(--color-sage-400)_45%,transparent)] text-[var(--color-sage-400)]',
+    text: 'text-[var(--color-sage-400)]',
+  },
+  missed: {
+    panel: 'border-[color-mix(in_oklab,var(--color-amber-bright)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-amber-bright)_8%,transparent)]',
+    mark: 'border-[color-mix(in_oklab,var(--color-amber-bright)_38%,transparent)] text-[var(--color-amber-bright)]',
+    text: 'text-[var(--color-amber-bright)]',
+  },
+} as const
+
+const goalTone = computed(() => (goalReview.value?.goalAchieved ? GOAL_TONES.achieved : GOAL_TONES.missed))
 </script>
 
 <template>
@@ -100,7 +137,7 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
     <template v-else>
       <header class="space-y-3">
         <NuxtLink
-          to="/talk"
+          :to="retryTo"
           class="inline-flex items-center gap-1.5 text-[0.8125rem] text-[var(--ink-faint)] transition-colors hover:text-[var(--ink)]"
         >
           <span aria-hidden="true">←</span>
@@ -108,11 +145,15 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
         </NuxtLink>
 
         <div class="space-y-1">
+          <!-- A scenario session is named by its scene; a lesson by its grammar
+               point. The label carries the same distinction. -->
           <p class="label">
-            {{ session.lessonCard?.grammarPoint?.category ?? reflect.general }}
+            {{ session.scenario
+              ? reflect.scenarioLabel
+              : (session.lessonCard?.grammarPoint?.category ?? reflect.general) }}
           </p>
           <h1 class="display text-[1.5rem] leading-snug tracking-[0.01em] sm:text-[1.75rem]">
-            {{ session.lessonCard?.grammarPoint?.title ?? reflect.title }}
+            {{ session.scenario?.title ?? session.lessonCard?.grammarPoint?.title ?? reflect.title }}
           </h1>
         </div>
 
@@ -151,6 +192,55 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
       </div>
 
       <template v-else>
+        <!-- Goal review (M6). This judges whether the scenario's task was
+             completed, not the grammar of individual utterances, so it is its
+             own block with its own vocabulary and never uses MistakeItem: an
+             expression the learner did not reach for is not an error. It is null
+             for lessons and until analysis finishes, so nothing renders then.
+             Gated on the stored verdict rather than on a live catalogue lookup:
+             a scenario edited out of the catalogue must not hide a review the
+             learner already earned. Abandoned conversations are excluded — an
+             unfinished scene is not a verdict on the learner's goal. -->
+        <section
+          v-if="goalReview && session.status === 'completed'"
+          class="rounded-3xl border p-5 sm:p-6"
+          :class="goalTone.panel"
+          :aria-label="reflect.goalTitle"
+        >
+          <div class="flex items-start gap-4">
+            <span
+              class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border text-[0.875rem]"
+              :class="goalTone.mark"
+              aria-hidden="true"
+            >
+              {{ goalReview.goalAchieved ? '✓' : '→' }}
+            </span>
+
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <p class="label">{{ reflect.goalTitle }}</p>
+              <p class="text-[1.0625rem] leading-snug font-medium" :class="goalTone.text">
+                {{ goalReview.goalAchieved ? reflect.goalAchieved : reflect.goalMissed }}
+              </p>
+              <p v-if="!goalReview.goalAchieved" class="text-[0.875rem] leading-relaxed text-[var(--ink-muted)]">
+                {{ reflect.goalMissedBody }}
+              </p>
+            </div>
+          </div>
+
+          <div v-if="missedExpressions.length" class="mt-5 space-y-2.5 border-t border-[var(--line)] pt-4">
+            <p class="label">{{ reflect.goalMissedExpressions }}</p>
+            <ul class="space-y-2">
+              <li
+                v-for="expression in missedExpressions"
+                :key="expression"
+                class="rounded-xl bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]"
+              >
+                {{ expression }}
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <!-- An empty mistake list is only good news once the analysis has
              actually run. Without the `analyzed` guard a session whose analysis
              never completed — or whose completion push never arrived — was
@@ -187,7 +277,7 @@ const durationLabel = computed(() => formatDuration(session.value?.durationSec ?
       </template>
 
       <footer class="flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-6">
-        <UiButtonLink to="/talk" variant="primary">
+        <UiButtonLink :to="retryTo" variant="primary">
           {{ reflect.backToTalk }}
         </UiButtonLink>
         <UiButtonLink to="/review" variant="quiet">

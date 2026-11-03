@@ -47,10 +47,18 @@ test.describe('Roadmap screen @smoke', () => {
     expect(await lessons.count()).toBe(json.data.roadmap.lessonCards.length);
     await expect(page.getByText(`${json.data.roadmap.lessonCards.length}レッスン`)).toBeVisible();
 
-    // Verify first lesson content: the rail node is numbered by the API's
-    // orderIndex, and the row is headed by the grammar point it names.
+    // Verify first lesson content: a completed node shows a check mark, every
+    // other node is numbered by the API's orderIndex, and the row is headed by
+    // the grammar point it names. The status is read from the payload rather
+    // than assumed: a seeded learner who has already finished the first lesson
+    // is still a valid roadmap.
     const firstLesson = lessons.first();
-    await expect(firstLesson.locator('span.tnum')).toHaveText(String(firstCard.orderIndex));
+    if (firstCard.status === 'completed') {
+      await expect(firstLesson.locator('svg')).toBeVisible();
+      await expect(firstLesson.locator('span.tnum')).toHaveCount(0);
+    } else {
+      await expect(firstLesson.locator('span.tnum')).toHaveText(String(firstCard.orderIndex));
+    }
     await expect(firstLesson.getByRole('heading', { level: 2 })).toHaveText(firstCard.grammarPoint.title);
   });
 });
