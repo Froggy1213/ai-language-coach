@@ -105,7 +105,7 @@ harness — not linked from the app, but kept because tuning the orb blind is gu
 | `/talk` | `pages/talk/index.vue` | **会話** The topic picker: 自由に話す first, then the scenario catalogue (title, summary, level, register). The centre tab and `/talk` links land here. |
 | `/talk/:code` | `pages/talk/[code].vue` | **会話** One role-play session: setting, your role, your goal, and the scenario's useful phrases. No correction during the conversation; it is reviewed afterwards. |
 | `/reflect/:id` | `pages/reflect/[[id]].vue` | **振り返り** Mistakes as corrections, grouped by grammar point; for a scenario, also the goal review (goal achieved, and what was missed). |
-| `/review` | `pages/review.vue` | **復習** Spaced repetition; one 0–5 decision per item. |
+| `/review` | `pages/review.vue` | **復習** Spaced repetition as recall: the learner's own sentence from the conversation, the correction behind the reveal, four grades. |
 | `/level` | `pages/level.vue` | **レベル判定** CEFR placement recording: consent → record → result. |
 | `/settings` | `pages/settings.vue` | **設定** Account, theme, session, data deletion. |
 | `/login`, `/register` | `pages/login.vue`, `pages/register.vue` | Auth. |

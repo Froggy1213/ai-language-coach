@@ -89,10 +89,17 @@ export function useReviews() {
     }
   }
 
-  async function submitReview(grammarPointId: string, quality: number): Promise<boolean> {
+  /**
+   * Submits one SM-2 grade and returns the recomputed item.
+   *
+   * The caller needs the new interval to tell the learner when the item comes
+   * back, so the mutation's payload is returned rather than a bare boolean. A
+   * failure leaves the queue untouched and returns null.
+   */
+  async function submitReview(grammarPointId: string, quality: number): Promise<ReviewItem | null> {
     if (quality < 0 || quality > 5) {
       itemErrors.value[grammarPointId] = '評価は0から5の範囲で指定してください。'
-      return false
+      return null
     }
 
     submittingId.value = grammarPointId
@@ -108,7 +115,14 @@ export function useReviews() {
 
       if (result.error) {
         itemErrors.value[grammarPointId] = mapReviewError(result.error)
-        return false
+        return null
+      }
+
+      const updated = result.data?.submitReviewResult ?? null
+
+      if (!updated) {
+        itemErrors.value[grammarPointId] = mapReviewError(null)
+        return null
       }
 
       // Remove from active due queue immediately for snappy UI feedback
@@ -116,10 +130,10 @@ export function useReviews() {
         (item) => item.grammarPoint.id !== grammarPointId,
       )
 
-      return true
+      return updated
     } catch {
       itemErrors.value[grammarPointId] = '復習の結果を送信できませんでした。'
-      return false
+      return null
     } finally {
       submittingId.value = null
     }

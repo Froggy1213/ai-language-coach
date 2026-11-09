@@ -321,10 +321,24 @@ export const REVIEW_ITEM_FIELDS = /* GraphQL */ `
   nextReviewAt
 `
 
+/**
+ * The queue's view of an item: the SM-2 state plus the mistake it was born
+ * from, which is the recall prompt. The submit mutation deliberately does not
+ * request this — it would cost the resolver one extra lookup per grading.
+ */
+export const REVIEW_PROMPT_FIELDS = /* GraphQL */ `
+  ${REVIEW_ITEM_FIELDS}
+  latestMistake {
+    userUtterance
+    correction
+    explanation
+  }
+`
+
 export const DUE_REVIEWS_QUERY = /* GraphQL */ `
   query DueReviews {
     dueReviews {
-      ${REVIEW_ITEM_FIELDS}
+      ${REVIEW_PROMPT_FIELDS}
     }
   }
 `

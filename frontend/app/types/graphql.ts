@@ -383,6 +383,12 @@ export type ReviewItem = {
   id: Scalars['ID']['output'];
   /** Current interval between repetitions, in days. */
   intervalDays: Scalars['Int']['output'];
+  /**
+   * The newest mistake behind this item: the learner's own sentence, its
+   * correction and the explanation, used as the recall prompt. Null when the
+   * mistake history is gone.
+   */
+  latestMistake?: Maybe<Mistake>;
   /** When the item is due next. */
   nextReviewAt: Scalars['String']['output'];
   /** Number of consecutive successful reviews. */

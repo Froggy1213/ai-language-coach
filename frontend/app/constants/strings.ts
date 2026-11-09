@@ -296,14 +296,31 @@ export const review = {
   empty: '今日の復習はありません',
   emptyBody: '間隔反復のスケジュールに沿って、必要になるとここに現れます。',
   emptyCta: '会話をしに行く',
-  prompt: 'このルールをどれくらい覚えていましたか？',
-  scaleLow: 'まったく思い出せない',
-  scaleMid: '時間をかければ',
-  scaleHigh: '完璧',
-  interval: '間隔',
-  ease: '難易度係数',
-  repetitions: '復習回数',
-  nextAt: '次回',
+  /** The learner's own sentence from the conversation that produced this item. */
+  yourUtterance: 'あなたの発話',
+  recallPrompt: '正しく言うと？',
+  reveal: '答えを見る',
+  correction: '正しい形',
+  explanation: '解説',
+  /** Fallback when the mistake history behind an item is gone. */
+  noMistakePrompt: 'このルールを使って、例文を一つ言ってみましょう。',
+  scheduledPrefix: '次は',
+  scheduledSuffix: '後にまた出ます。',
+  doneTitle: '今日の復習は完了',
+  doneBody: 'おつかれさまでした。次の復習はスケジュールに沿ってここに現れます。',
+  doneCountSuffix: 'を復習しました。',
+  nextAt: '次の復習',
+  /**
+   * Four grades, not SM-2's six explicit qualities: a learner grades how the
+   * recall felt, not a number on a scale they have to learn. The mapping keeps
+   * the algorithm's meaning — a fail resets the interval, a pass advances it.
+   */
+  grades: [
+    { quality: 0, label: 'もう一度', desc: '思い出せなかった' },
+    { quality: 3, label: '難しい', desc: '時間をかけて' },
+    { quality: 4, label: 'できた', desc: 'すぐ出た' },
+    { quality: 5, label: '完璧', desc: '迷わず言えた' },
+  ],
   recurring: '繰り返している間違い',
   recurringBody: '会話でとくに多く間違えているルールです。',
   recurringIn: '直近のセッションで',
@@ -311,14 +328,6 @@ export const review = {
   lastAt: '最後',
   loadError: '復習キューを読み込めませんでした。',
   submitError: '復習の結果を保存できませんでした。',
-  grades: [
-    { quality: 0, desc: 'まったく思い出せない' },
-    { quality: 1, desc: 'ほとんど出てこない' },
-    { quality: 2, desc: '時間をかければ' },
-    { quality: 3, desc: '少し迷った' },
-    { quality: 4, desc: 'すぐ出た' },
-    { quality: 5, desc: '完璧' },
-  ],
 } as const
 
 export const level = {

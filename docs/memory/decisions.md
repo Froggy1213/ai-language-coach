@@ -73,3 +73,15 @@ README после этого — компактная справка; возвр
 **Отвергнуто:** передавать `ai_goal` и `complications` клиенту и обратно в мутацию сохранения; одноразовые сценарии без сохранения в список `/talk`.
 **Файлы:** `backend/database/migrations/2026_11_09_000001_create_custom_scenarios_table.php`, `backend/app/Models/CustomScenario.php`, `backend/app/Scenarios/{ScenarioDrafter,DeepSeekScenarioDrafter,ScenarioDraft,ScenarioCatalogue}.php`, `backend/app/GraphQL/Mutations/{DraftCustomScenario,ConfirmCustomScenario,DeleteCustomScenario}.php`, `frontend/app/components/CustomScenarioBuilder.vue`, `frontend/app/pages/talk/*`
 **Статус:** active
+
+## 2026-11-09 — 復習: recall-first по собственной ошибке, четыре оценки вместо 0–5
+
+**Решение:**
+1. Карточка 復習 показывает `mistakes.user_utterance` последней ошибки по правилу как prompt; исправление и объяснение открываются кнопкой «答えを見る»
+2. Оценка — четыре подписанные кнопки (`もう一度 / 難しい / できた / 完璧`), отображаемые на SM-2 `0 / 3 / 4 / 5`; сырые `easeFactor`/`intervalDays` из UI убраны.
+3. `dueReviews` резолвится `App\GraphQL\Queries\DueReviews`: очередь и последняя ошибка на каждый grammar point — двумя batch-запросами без N+1; `ReviewItem.latestMistake` отдаёт её, fallback-резолвер покрывает одиночный item из мутации.
+4. Поток — по одной карточке, прогресс `n / total`, после оценки «次は6日後», в конце — экран завершения с датой следующего повторения.
+**Почему:** страница просила оценить память, не давая ничего вспомнить; при этом каждый `review_item` рождён из `mistake` с фразой ученика, исправлением и объяснением, а design-док говорит, что review хочет «the mistakes and nothing else».
+**Отвергнуто:** cheat sheet правила как prompt (менее лично); оставить 0–5 (без легенды непонятно, особенно на телефоне); дублировать SM-2 на клиенте для превью интервалов до сохранения.
+**Файлы:** `backend/graphql/schema.graphql`, `backend/graphql/types/review-item.graphql`, `backend/app/GraphQL/Queries/DueReviews.php`, `backend/app/GraphQL/Resolvers/ReviewItemLatestMistake.php`, `backend/tests/Feature/GraphQL/QueryGraphQLTest.php`, `frontend/app/pages/review.vue`, `frontend/app/composables/useReviews.ts`, `frontend/app/graphql/documents.ts`, `frontend/app/constants/strings.ts`, `frontend/app/types/graphql.ts`, `e2e/review.spec.ts`, `frontend/README.md`
+**Статус:** active

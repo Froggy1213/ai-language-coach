@@ -18,7 +18,7 @@ type Query {
     scenarios: [Scenario!]! @guard @field(resolver: "App\\GraphQL\\Queries\\Scenarios")
 
     "Review items whose review date has arrived, soonest first."
-    dueReviews: [ReviewItem!]! @guard @whereAuth(relation: "user") @all(scopes: ["due"])
+    dueReviews: [ReviewItem!]! @guard @field(resolver: "App\\GraphQL\\Queries\\DueReviews")
 
     "The authenticated user's mistakes, newest first."
     mistakes(

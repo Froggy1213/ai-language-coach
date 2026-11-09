@@ -17,4 +17,11 @@ type ReviewItem {
 
     "When the item is due next."
     nextReviewAt: String! @rename(attribute: "next_review_at")
+
+    """
+    The newest mistake behind this item: the learner's own sentence, its
+    correction and the explanation, used as the recall prompt. Null when the
+    mistake history is gone.
+    """
+    latestMistake: Mistake @field(resolver: "App\\GraphQL\\Resolvers\\ReviewItemLatestMistake")
 }

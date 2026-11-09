@@ -1,14 +1,16 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 import { common, review as copy } from '~/constants/strings'
 import { countWithUnit, formatReviewDate, COUNTER } from '~/utils/format'
 
 /**
- * 復習 — spaced repetition.
+ * 復習 — spaced repetition as recall, not self-report.
  *
- * A **Operate** surface: the learner is working through a queue and answering one
- * question per item. So each item is a single decision, the grading scale is
- * always in the same place, and there is no summary chrome competing with the
- * queue itself.
+ * One card at a time. The learner's own sentence from the conversation that
+ * produced the item is the prompt; the correction stays hidden until they have
+ * tried to produce it, and only then do they grade how the recall felt. The
+ * queue shrinks in `useReviews`, so the current item is always its first row and
+ * `reviewedCount` keeps the progress denominator stable while it does.
  */
 const {
   dueReviews,
@@ -22,40 +24,70 @@ const {
 } = useReviews()
 
 const refreshing = ref(false)
-const graded = ref<Record<string, number>>({})
+const revealed = ref(false)
+const pendingQuality = ref<number | null>(null)
+const reviewedCount = ref(0)
+const lastIntervalDays = ref<number | null>(null)
+const lastNextReviewAt = ref<string | null>(null)
+
+const currentItem = computed(() => dueReviews.value[0] ?? null)
+const totalCount = computed(() => reviewedCount.value + dueReviews.value.length)
+const completed = computed(() => reviewedCount.value > 0 && dueReviews.value.length === 0)
+const isSubmitting = computed(() => submittingId.value === currentItem.value?.grammarPoint.id)
+
+// A new card means a new question: never carry the previous answer into it.
+watch(
+  () => currentItem.value?.id,
+  () => {
+    revealed.value = false
+  },
+)
+
+/**
+ * Yet another tint per grade, but this time the colour reinforces the label
+ * rather than replacing it: a fail is clay, a shaky pass amber, a clean pass
+ * sage. Four wide targets beat six bare digits on a phone.
+ */
+const GRADE_TINTS: Record<number, string> = {
+  0: 'border-[color-mix(in_oklab,var(--color-clay-400)_40%,transparent)] hover:bg-[color-mix(in_oklab,var(--color-clay-500)_12%,transparent)]',
+  3: 'border-[color-mix(in_oklab,var(--color-amber-bright)_36%,transparent)] hover:bg-[color-mix(in_oklab,var(--color-amber-bright)_10%,transparent)]',
+  4: 'border-[color-mix(in_oklab,var(--color-sage-400)_32%,transparent)] hover:bg-[color-mix(in_oklab,var(--color-sage-500)_9%,transparent)]',
+  5: 'border-[color-mix(in_oklab,var(--color-sage-400)_50%,transparent)] hover:bg-[color-mix(in_oklab,var(--color-sage-500)_16%,transparent)]',
+}
 
 async function handleRefresh(): Promise<void> {
   refreshing.value = true
 
   try {
+    reviewedCount.value = 0
+    lastIntervalDays.value = null
+    lastNextReviewAt.value = null
+    revealed.value = false
     await refresh()
   } finally {
     refreshing.value = false
   }
 }
 
-/**
- * Slider tint per grade: clay at "no idea", sage at "perfect".
- *
- * Six equal-weight buttons would read as a row of identical choices. The tint is
- * what carries "this is a scale", so the learner can answer without reading.
- */
-const GRADE_TINTS = [
-  'border-[color-mix(in_oklab,var(--color-clay-400)_40%,transparent)] text-[var(--color-clay-400)] hover:bg-[color-mix(in_oklab,var(--color-clay-500)_14%,transparent)]',
-  'border-[color-mix(in_oklab,var(--color-clay-400)_32%,transparent)] text-[color-mix(in_oklab,var(--color-clay-400)_88%,var(--ink))] hover:bg-[color-mix(in_oklab,var(--color-clay-500)_11%,transparent)]',
-  'border-[color-mix(in_oklab,var(--color-amber-bright)_34%,transparent)] text-[var(--color-amber-bright)] hover:bg-[color-mix(in_oklab,var(--color-amber-bright)_12%,transparent)]',
-  'border-[var(--line-strong)] text-[var(--ink-muted)] hover:bg-[var(--surface)]',
-  'border-[color-mix(in_oklab,var(--color-sage-400)_30%,transparent)] text-[color-mix(in_oklab,var(--color-sage-400)_90%,var(--ink))] hover:bg-[color-mix(in_oklab,var(--color-sage-500)_11%,transparent)]',
-  'border-[color-mix(in_oklab,var(--color-sage-400)_46%,transparent)] text-[var(--color-sage-400)] hover:bg-[color-mix(in_oklab,var(--color-sage-500)_16%,transparent)]',
-] as const
+async function grade(quality: number): Promise<void> {
+  const item = currentItem.value
 
-async function grade(grammarPointId: string, quality: number): Promise<void> {
-  graded.value[grammarPointId] = quality
-  const saved = await submitReview(grammarPointId, quality)
-
-  if (!saved) {
-    delete graded.value[grammarPointId]
+  if (!item || isSubmitting.value) {
+    return
   }
+
+  pendingQuality.value = quality
+  const updated = await submitReview(item.grammarPoint.id, quality)
+  pendingQuality.value = null
+
+  if (!updated) {
+    return
+  }
+
+  reviewedCount.value += 1
+  lastIntervalDays.value = updated.intervalDays
+  lastNextReviewAt.value = updated.nextReviewAt
+  revealed.value = false
 }
 </script>
 
@@ -86,8 +118,28 @@ async function grade(grammarPointId: string, quality: number): Promise<void> {
       {{ copy.due }}…
     </p>
 
-    <!-- Nothing due: an honest empty state with somewhere to go next, never a
-         disabled nav item. -->
+    <!-- The learner finished today's queue: say so, and when the next item is
+         due, instead of silently swapping back to the "nothing due" panel. -->
+    <div
+      v-else-if="completed"
+      class="space-y-5 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-6 sm:p-7"
+    >
+      <div class="space-y-2">
+        <h2 class="display text-[1.25rem] leading-snug">{{ copy.doneTitle }}</h2>
+        <p class="max-w-[44ch] text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">
+          {{ copy.doneBody }}
+        </p>
+        <p class="tnum text-[0.875rem] text-[var(--ink-faint)]">
+          {{ countWithUnit(reviewedCount, COUNTER.items) }}{{ copy.doneCountSuffix }}
+        </p>
+      </div>
+      <p v-if="lastNextReviewAt" class="tnum text-[0.875rem] text-[var(--ink-muted)]">
+        {{ copy.nextAt }}: {{ formatReviewDate(lastNextReviewAt) }}
+      </p>
+      <UiButtonLink to="/talk" variant="primary" size="lg">{{ copy.emptyCta }}</UiButtonLink>
+    </div>
+
+    <!-- Nothing due at all: an honest empty state with somewhere to go next. -->
     <div
       v-else-if="dueReviews.length === 0"
       class="space-y-5 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-6 sm:p-7"
@@ -101,55 +153,89 @@ async function grade(grammarPointId: string, quality: number): Promise<void> {
       <UiButtonLink to="/talk" variant="primary" size="lg">{{ copy.emptyCta }}</UiButtonLink>
     </div>
 
-    <div v-else class="space-y-4">
-      <p class="tnum label">{{ dueReviews.length }} {{ COUNTER.items }}</p>
+    <div v-else-if="currentItem" class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p class="label">{{ copy.due }}</p>
+        <p class="tnum label">
+          {{ countWithUnit(totalCount, COUNTER.items) }} · {{ reviewedCount + 1 }} / {{ totalCount }}
+        </p>
+      </div>
 
-      <article
-        v-for="item in dueReviews"
-        :key="item.id"
-        class="space-y-5 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-5 sm:p-6"
-      >
+      <p v-if="lastIntervalDays !== null" class="text-[0.8125rem] text-[var(--ink-faint)]">
+        {{ copy.scheduledPrefix }}{{ countWithUnit(lastIntervalDays, COUNTER.days) }}{{ copy.scheduledSuffix }}
+      </p>
+
+      <article class="space-y-5 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-5 sm:p-6">
         <header class="space-y-1">
-          <p class="label">{{ item.grammarPoint.category }}</p>
-          <h2 class="text-[1.0625rem] leading-snug font-medium">{{ item.grammarPoint.title }}</h2>
+          <p class="label">{{ currentItem.grammarPoint.category }}</p>
+          <h2 class="text-[1.0625rem] leading-snug font-medium">{{ currentItem.grammarPoint.title }}</h2>
         </header>
 
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.8125rem] text-[var(--ink-faint)]">
-          <span class="tnum">{{ copy.interval }} {{ countWithUnit(item.intervalDays, COUNTER.days) }}</span>
-          <span class="tnum">{{ copy.repetitions }} {{ countWithUnit(item.repetitionNumber, COUNTER.times) }}</span>
-          <span class="tnum">Ease {{ item.easeFactor.toFixed(2) }}</span>
-          <span class="tnum">{{ formatReviewDate(item.nextReviewAt) }}</span>
-        </div>
+        <div class="space-y-5 border-t border-[var(--line)] pt-4">
+          <template v-if="currentItem.latestMistake">
+            <div class="space-y-2">
+              <p class="label">{{ copy.yourUtterance }}</p>
+              <p class="text-[1.0625rem] leading-[1.7] text-[var(--ink)]">
+                「{{ currentItem.latestMistake.userUtterance }}」
+              </p>
+            </div>
 
-        <div class="space-y-2.5 border-t border-[var(--line)] pt-4">
-          <p class="text-[0.875rem] text-[var(--ink-muted)]">{{ copy.prompt }}</p>
+            <div v-if="!revealed" class="space-y-3">
+              <p class="text-[0.9375rem] text-[var(--ink-muted)]">{{ copy.recallPrompt }}</p>
+              <UiButton variant="primary" size="lg" @click="revealed = true">
+                {{ copy.reveal }}
+              </UiButton>
+            </div>
 
-          <div class="grid grid-cols-6 gap-1.5 sm:gap-2">
-            <button
-              v-for="entry in copy.grades"
-              :key="entry.quality"
-              type="button"
-              :disabled="submittingId === item.grammarPoint.id"
-              class="tnum flex min-h-12 items-center justify-center rounded-xl border text-[1rem] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
-              :class="GRADE_TINTS[entry.quality]"
-              :aria-label="entry.desc"
-              :title="entry.desc"
-              @click="grade(item.grammarPoint.id, entry.quality)"
+            <div v-else class="space-y-4">
+              <div class="space-y-1">
+                <p class="label">{{ copy.correction }}</p>
+                <p class="text-[1.0625rem] leading-[1.7] font-medium text-[var(--color-sage-400)]">
+                  {{ currentItem.latestMistake.correction }}
+                </p>
+              </div>
+              <div class="space-y-1">
+                <p class="label">{{ copy.explanation }}</p>
+                <p class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">
+                  {{ currentItem.latestMistake.explanation }}
+                </p>
+              </div>
+            </div>
+          </template>
+
+          <p v-else class="text-[0.9375rem] text-[var(--ink-muted)]">{{ copy.noMistakePrompt }}</p>
+
+          <div v-if="!currentItem.latestMistake || revealed" class="space-y-2.5">
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <button
+                v-for="entry in copy.grades"
+                :key="entry.quality"
+                type="button"
+                :disabled="isSubmitting"
+                class="flex min-h-14 flex-col items-start justify-center gap-0.5 rounded-xl border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-40"
+                :class="GRADE_TINTS[entry.quality]"
+                @click="grade(entry.quality)"
+              >
+                <UiSpinner
+                  v-if="isSubmitting && pendingQuality === entry.quality"
+                  class="size-3.5"
+                />
+                <template v-else>
+                  <span class="text-[0.9375rem] leading-tight font-semibold text-[var(--ink)]">
+                    {{ entry.label }}
+                  </span>
+                  <span class="text-[0.75rem] leading-snug text-[var(--ink-faint)]">{{ entry.desc }}</span>
+                </template>
+              </button>
+            </div>
+
+            <p
+              v-if="itemErrors[currentItem.grammarPoint.id]"
+              class="text-[0.8125rem] text-[var(--color-clay-400)]"
             >
-              <UiSpinner v-if="submittingId === item.grammarPoint.id && graded[item.grammarPoint.id] === entry.quality" class="size-3.5" />
-              <template v-else>{{ entry.quality }}</template>
-            </button>
+              {{ itemErrors[currentItem.grammarPoint.id] }}
+            </p>
           </div>
-
-          <div class="flex justify-between text-[0.75rem] text-[var(--ink-faint)]">
-            <span>{{ copy.scaleLow }}</span>
-            <span class="hidden sm:inline">{{ copy.scaleMid }}</span>
-            <span>{{ copy.scaleHigh }}</span>
-          </div>
-
-          <p v-if="itemErrors[item.grammarPoint.id]" class="text-[0.8125rem] text-[var(--color-clay-400)]">
-            {{ itemErrors[item.grammarPoint.id] }}
-          </p>
         </div>
       </article>
     </div>

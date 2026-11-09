@@ -153,6 +153,77 @@ class QueryGraphQLTest extends TestCase
             ->assertJsonPath('data.dueReviews.0.easeFactor', 2.5);
     }
 
+    public function test_due_reviews_carry_the_latest_mistake_for_each_grammar_point(): void
+    {
+        $user = User::factory()->create();
+        $point = GrammarPoint::factory()->create();
+
+        ReviewItem::factory()->for($user)->create([
+            'grammar_point_id' => $point->id,
+            'next_review_at' => now()->subDay(),
+        ]);
+
+        $older = Mistake::factory()->for($user)->create([
+            'grammar_point_id' => $point->id,
+            'correction' => 'five kilos of rice',
+        ]);
+        $older->forceFill(['created_at' => now()->subDays(3)])->save();
+
+        $newer = Mistake::factory()->for($user)->create([
+            'grammar_point_id' => $point->id,
+            'correction' => 'a bottle of water',
+        ]);
+        $newer->forceFill(['created_at' => now()->subHour()])->save();
+
+        // A newer mistake by another learner on the same point must never become
+        // this learner's recall prompt.
+        Mistake::factory()->create([
+            'grammar_point_id' => $point->id,
+            'correction' => 'someone elses correction',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                dueReviews {
+                    id
+                    grammarPoint { id }
+                    latestMistake {
+                        userUtterance
+                        correction
+                        explanation
+                    }
+                }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonCount(1, 'data.dueReviews')
+            ->assertJsonPath('data.dueReviews.0.latestMistake.correction', 'a bottle of water')
+            ->assertJsonPath('data.dueReviews.0.latestMistake.userUtterance', $newer->user_utterance)
+            ->assertJsonPath('data.dueReviews.0.latestMistake.explanation', $newer->explanation);
+    }
+
+    public function test_due_reviews_expose_a_null_prompt_when_no_mistake_is_left(): void
+    {
+        $user = User::factory()->create();
+        ReviewItem::factory()->for($user)->create(['next_review_at' => now()->subDay()]);
+
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                dueReviews {
+                    id
+                    latestMistake { id }
+                }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonCount(1, 'data.dueReviews')
+            ->assertJsonPath('data.dueReviews.0.latestMistake', null);
+    }
+
     public function test_mistakes_cover_only_the_users_own(): void
     {
         $user = User::factory()->create();
