@@ -80,7 +80,7 @@ class RetentionPurgeTest extends TestCase
 
         // Run command
         $this->artisan('privacy:purge-transcripts')
-            ->expectsOutputToContain('Purged transcripts from 1 voice session(s) older than 90 days.')
+            ->expectsOutputToContain('Purged transcripts from 1 voice session(s) and 0 assessment(s) older than 90 days.')
             ->assertSuccessful();
 
         $oldSession->refresh();
@@ -101,7 +101,7 @@ class RetentionPurgeTest extends TestCase
 
         // Idempotency check: running again purges 0 and succeeds
         $this->artisan('privacy:purge-transcripts')
-            ->expectsOutputToContain('Purged transcripts from 0 voice session(s) older than 90 days.')
+            ->expectsOutputToContain('Purged transcripts from 0 voice session(s) and 0 assessment(s) older than 90 days.')
             ->assertSuccessful();
     }
 
@@ -117,12 +117,43 @@ class RetentionPurgeTest extends TestCase
         ]);
 
         $this->artisan('privacy:purge-transcripts', ['--dry-run' => true])
-            ->expectsOutputToContain('[Dry Run] Would purge transcripts from 1 voice session(s) older than 90 days.')
+            ->expectsOutputToContain('[Dry Run] Would purge transcripts from 1 voice session(s) and 0 assessment(s) older than 90 days.')
             ->assertSuccessful();
 
         $session->refresh();
         $this->assertNotNull($session->transcript);
         $this->assertSame('Will survive dry run', $session->transcript[0]['text']);
+    }
+
+    public function test_purge_transcripts_clears_old_assessment_transcripts_but_keeps_the_analysis(): void
+    {
+        $user = User::factory()->create();
+
+        $oldAssessment = Assessment::factory()->for($user)->done()->create([
+            'raw_data' => [
+                'transcript' => 'Old onboarding speech',
+                'duration_seconds' => 42,
+                'analysis' => ['summary' => 'Kept'],
+            ],
+        ]);
+        $oldAssessment->forceFill(['created_at' => Date::now()->subDays(100)])->save();
+
+        $recentAssessment = Assessment::factory()->for($user)->done()->create([
+            'raw_data' => ['transcript' => 'Recent onboarding speech'],
+        ]);
+        $recentAssessment->forceFill(['created_at' => Date::now()->subDays(10)])->save();
+
+        $this->artisan('privacy:purge-transcripts')
+            ->expectsOutputToContain('Purged transcripts from 0 voice session(s) and 1 assessment(s) older than 90 days.')
+            ->assertSuccessful();
+
+        $oldAssessment->refresh();
+        $this->assertArrayNotHasKey('transcript', $oldAssessment->raw_data);
+        $this->assertSame(42, $oldAssessment->raw_data['duration_seconds']);
+        $this->assertSame(['summary' => 'Kept'], $oldAssessment->raw_data['analysis']);
+
+        $recentAssessment->refresh();
+        $this->assertSame('Recent onboarding speech', $recentAssessment->raw_data['transcript']);
     }
 
     public function test_purge_orphan_audio_deletes_old_orphaned_s3_recordings(): void

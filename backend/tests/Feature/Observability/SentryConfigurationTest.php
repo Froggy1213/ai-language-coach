@@ -7,6 +7,7 @@ use RuntimeException;
 use Sentry\Breadcrumb;
 use Sentry\ClientBuilder;
 use Sentry\Event;
+use Sentry\ExceptionDataBag;
 use Sentry\Laravel\ServiceProvider;
 use Sentry\SentrySdk;
 use Sentry\State\HubInterface;
@@ -167,5 +168,30 @@ class SentryConfigurationTest extends TestCase
         $this->assertCount(1, $breadcrumbs);
         $this->assertSame('sp-101', $breadcrumbs[0]->getMetadata()['turn_id']);
         $this->assertSame(SentryEventScrubber::REDACTED, $breadcrumbs[0]->getMetadata()['transcript']);
+    }
+
+    public function test_exception_messages_are_scrubbed_because_the_thrower_formats_them(): void
+    {
+        $event = Event::createEvent();
+        $event->setMessage('Model payload: {"user_utterance":"five kilo of rice"}');
+        $event->setExceptions([
+            new ExceptionDataBag(new RuntimeException(
+                'The mistake analysis model returned an unusable response: {"mistakes":[{"transcript":"private spoken words","correction":"private correction"}]}',
+            )),
+        ]);
+
+        $scrubbed = SentryEventScrubber::scrubEvent($event);
+
+        $this->assertNotNull($scrubbed);
+        $this->assertSame(
+            'Model payload: {"user_utterance":"[REDACTED]"}',
+            $scrubbed->getMessage(),
+        );
+
+        $exceptionMessage = $scrubbed->getExceptions()[0]->getValue();
+        $this->assertStringNotContainsString('private spoken words', $exceptionMessage);
+        $this->assertStringNotContainsString('private correction', $exceptionMessage);
+        $this->assertStringContainsString('"transcript":"[REDACTED]"', $exceptionMessage);
+        $this->assertStringContainsString('"correction":"[REDACTED]"', $exceptionMessage);
     }
 }

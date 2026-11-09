@@ -138,7 +138,7 @@ final class DeepSeekMistakeAnalyzer implements MistakeAnalyzer
             ])->validate();
         } catch (ValidationException $exception) {
             throw new MistakeAnalysisFailed(
-                'The mistake analysis model returned an unusable response: '.json_encode($structured),
+                'The mistake analysis model returned an unusable response.',
                 previous: $exception,
             );
         }

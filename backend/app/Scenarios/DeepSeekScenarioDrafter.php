@@ -124,7 +124,7 @@ final class DeepSeekScenarioDrafter implements ScenarioDrafter
             ])->validate();
         } catch (ValidationException $exception) {
             throw new ScenarioDraftFailed(
-                'The scenario draft model returned an unusable response: '.json_encode($structured),
+                'The scenario draft model returned an unusable response.',
                 previous: $exception,
             );
         }

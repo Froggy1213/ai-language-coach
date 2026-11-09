@@ -82,7 +82,46 @@ final class SentryEventScrubber
             $event->setBreadcrumb($scrubbedBreadcrumbs);
         }
 
+        // Exception messages are formatted by the application, not the SDK, and
+        // a previous version put the model payload (including user_utterance)
+        // straight into the message. Scrub the message and every exception value
+        // as well, so a future caller cannot reintroduce the same leak.
+        $message = $event->getMessage();
+        if (is_string($message) && $message !== '') {
+            $event->setMessage(self::scrubText($message));
+        }
+
+        $exceptions = $event->getExceptions();
+        if ($exceptions !== []) {
+            foreach ($exceptions as $exception) {
+                $exception->setValue(self::scrubText($exception->getValue()));
+            }
+
+            $event->setExceptions($exceptions);
+        }
+
         return $event;
+    }
+
+    /**
+     * Redacts values that appear as JSON fields inside free-form text.
+     *
+     * Exception messages are the one place a payload can reach Sentry without
+     * passing through `scrubValue()`: the thrower formats a string, so the key
+     * and its value are embedded in prose. The pattern handles the JSON-shaped
+     * message this application produced (`... response: {"mistakes":[{"user_utterance":"..."}]}`)
+     * while leaving ordinary diagnostics intact.
+     */
+    public static function scrubText(string $text): string
+    {
+        $keys = implode('|', array_map(
+            static fn (string $key): string => preg_quote($key, '/'),
+            self::SENSITIVE_KEYS,
+        ));
+
+        $pattern = '/(?i)("(?:'.$keys.')"\s*:\s*)(?:"(?:\\.|[^"\\\\])*"|[^,}\s]+)/';
+
+        return (string) preg_replace($pattern, '$1"[REDACTED]"', $text);
     }
 
     public static function scrubBreadcrumb(Breadcrumb $breadcrumb): ?Breadcrumb

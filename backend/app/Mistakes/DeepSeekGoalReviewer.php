@@ -138,7 +138,7 @@ final class DeepSeekGoalReviewer implements GoalReviewer
             ])->validate();
         } catch (ValidationException $exception) {
             throw new GoalReviewFailed(
-                'The goal review model returned an unusable response: '.json_encode($structured),
+                'The goal review model returned an unusable response.',
                 previous: $exception,
             );
         }

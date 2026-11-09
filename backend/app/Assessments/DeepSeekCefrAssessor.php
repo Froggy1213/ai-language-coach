@@ -297,7 +297,7 @@ final class DeepSeekCefrAssessor implements CefrAssessor
             ])->validate();
         } catch (ValidationException $exception) {
             throw new AssessmentAnalysisFailed(
-                'The analysis model returned an unusable judgement: '.json_encode($structured),
+                'The analysis model returned an unusable judgement.',
                 previous: $exception,
             );
         }

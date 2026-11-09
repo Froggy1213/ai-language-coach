@@ -6,8 +6,8 @@ return [
     | Privacy & Data Retention Configuration
     |--------------------------------------------------------------------------
     |
-    | Defines retention periods for voice session transcripts and orphan audio
-    | files stored in S3.
+    | Defines retention periods for voice-session and assessment transcripts and
+    | for orphan audio files stored in S3.
     |
     */
 
