@@ -35,6 +35,11 @@ use Throwable;
  * `goal_review`. A failed review is reported and skipped: the grammar mistakes
  * and the broadcast do not depend on it.
  *
+ * For a scenario session it then asks a second, separate model to judge whether
+ * the learner achieved the scenario's goal (plan §9) and stores that verdict in
+ * `goal_review`. A failed review is reported and skipped: the grammar mistakes
+ * and the broadcast do not depend on it.
+ *
  * Idempotent: a re-run of the job for an already analysed session skips processing
  * to avoid duplicate mistakes or overwriting SM-2 schedules.
  */
