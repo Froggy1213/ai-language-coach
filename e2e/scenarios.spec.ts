@@ -151,8 +151,18 @@ test.describe('Scenario practice screens @smoke', () => {
 
     let confirmedScenario: typeof draftedScenario | null = null;
 
-    await page.route('**/graphql', async (route) => {
-      const body = route.request().postData() ?? '';
+    // A glob of `**/graphql` would miss urql's GET queries: their document and
+    // operationName travel in the query string, so the URL is `/graphql?...`.
+    await page.route(/\/graphql(\?|$)/, async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? '';
+
+      // urql sends queries over GET (the document and operationName live in the
+      // query string), so `postData()` is empty for the catalogue read that the
+      // screen performs after saving.
+      const isScenariosQuery =
+        body.includes('query Scenarios') || request.url().includes('operationName=Scenarios');
+
       if (body.includes('DraftCustomScenario')) {
         await route.fulfill({
           status: 200,
@@ -177,7 +187,7 @@ test.describe('Scenario practice screens @smoke', () => {
         return;
       }
 
-      if (body.includes('query Scenarios') && confirmedScenario) {
+      if (isScenariosQuery && confirmedScenario) {
         const response = await route.fetch();
         const json = await response.json();
         const list = json?.data?.scenarios ?? [];
