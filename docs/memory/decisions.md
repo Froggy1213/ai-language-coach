@@ -85,3 +85,14 @@ README после этого — компактная справка; возвр
 **Отвергнуто:** cheat sheet правила как prompt (менее лично); оставить 0–5 (без легенды непонятно, особенно на телефоне); дублировать SM-2 на клиенте для превью интервалов до сохранения.
 **Файлы:** `backend/graphql/schema.graphql`, `backend/graphql/types/review-item.graphql`, `backend/app/GraphQL/Queries/DueReviews.php`, `backend/app/GraphQL/Resolvers/ReviewItemLatestMistake.php`, `backend/tests/Feature/GraphQL/QueryGraphQLTest.php`, `frontend/app/pages/review.vue`, `frontend/app/composables/useReviews.ts`, `frontend/app/graphql/documents.ts`, `frontend/app/constants/strings.ts`, `frontend/app/types/graphql.ts`, `e2e/review.spec.ts`, `frontend/README.md`
 **Статус:** active
+
+## 2026-11-09 — Явное согласие на голос, retention assessment-транскриптов и PII вне exception message
+
+**Решение:**
+1. Согласие на запись/обработку голоса фиксируется только мутацией `recordVoiceConsent`; UI показывает отдельный диалог перед первой сессией на `/lesson` и `/talk`, а `/level` записывает согласие по чекбоксу. `requestVoiceToken` и `submitAssessment` отказывают с `VOICE_CONSENT_REQUIRED`, если `voice_consent_at` пуст.
+2. `AnalyzeAssessment` продолжает хранить транскрипт в `assessments.raw_data`, но `privacy:purge-transcripts` теперь удаляет `raw_data.transcript` старше 90 дней (JSON_REMOVE), сохраняя уровень, pronunciation и summary.
+3. Сообщения исключений LLM-анализа больше не содержат сериализованный payload; `SentryEventScrubber` дополнительно чистит message события и значения исключений по JSON-ключам (`user_utterance`, `transcript`, `correction`, …).
+**Почему:** ревью показало, что `voice_consent_at` фиксировал первый вызов, а не решение ученика; транскрипт онбординга не попадал под retention; payload с речью ученика уходил в Sentry/CloudWatch через текст исключения.
+**Отвергнуто:** оставить неявную фиксацию согласия (нет доказательства действия); отдельная команда только для assessments (дублирование расписания); класть payload в лог с ручной фильтрацией.
+**Файлы:** `backend/app/GraphQL/Mutations/RecordVoiceConsent.php`, `backend/app/Voice/StartVoiceSession.php`, `backend/app/Voice/VoiceSessionStarter.php`, `backend/app/GraphQL/Mutations/SubmitAssessment.php`, `backend/app/Console/Commands/PurgeTranscripts.php`, `backend/app/Observability/SentryEventScrubber.php`, `backend/app/{Mistakes,Assessments,Scenarios}/DeepSeek*.php`, `frontend/app/components/VoiceConsentGate.vue`, `frontend/app/composables/useVoiceConsent.ts`, `frontend/app/pages/{lesson,talk}/**`, `frontend/app/pages/level.vue`, `PRIVACY.md`
+**Статус:** active

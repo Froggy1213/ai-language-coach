@@ -38,6 +38,12 @@ type Query {
 
 
 type Mutation {
+    "Record the learner's explicit consent to voice recording and processing."
+    recordVoiceConsent: User!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\RecordVoiceConsent")
+
+
     "Sign in and start a session (Sanctum SPA cookie)."
     login(email: String!, password: String!): User!
         @throttle(maxAttempts: 10, decayMinutes: 1)

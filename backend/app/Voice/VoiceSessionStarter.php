@@ -84,11 +84,6 @@ final class VoiceSessionStarter
             $session->room_name = 'practice-'.$session->getKey();
             $session->save();
 
-            $lockedUser = User::query()->whereKey($user->getKey())->first();
-            if ($lockedUser instanceof User) {
-                $lockedUser->recordVoiceConsent();
-            }
-
             return $session;
         });
 

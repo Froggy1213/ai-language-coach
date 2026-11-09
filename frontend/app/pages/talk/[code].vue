@@ -23,6 +23,9 @@ import { lesson, talk } from '~/constants/strings'
  */
 const route = useRoute()
 const router = useRouter()
+const { user } = useAuth()
+
+const consentOpen = ref(false)
 
 const code = computed(() => String(route.params.code ?? ''))
 
@@ -93,9 +96,21 @@ async function finish(): Promise<void> {
 }
 
 function begin(): void {
-  if (scenario.value) {
-    void start({ scenarioCode: scenario.value.code })
+  if (!scenario.value) {
+    return
   }
+
+  if (!user.value?.voiceConsentAt) {
+    consentOpen.value = true
+    return
+  }
+
+  void start({ scenarioCode: scenario.value.code })
+}
+
+function onConsentConfirmed(): void {
+  consentOpen.value = false
+  begin()
 }
 
 async function handleCustomSaved(_saved: unknown, startImmediately: boolean): Promise<void> {
@@ -298,6 +313,12 @@ const notFound = computed(() => !fetching.value && !queryError.value && !scenari
         </div>
       </template>
     </template>
+
+    <VoiceConsentGate
+      v-if="consentOpen"
+      @confirmed="onConsentConfirmed"
+      @cancelled="consentOpen = false"
+    />
 
     <!-- Remote audio is attached to this element by the LiveKit room. -->
     <audio ref="audioElement" class="sr-only" autoplay playsinline />

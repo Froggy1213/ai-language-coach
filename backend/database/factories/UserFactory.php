@@ -29,12 +29,25 @@ class UserFactory extends Factory
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
+            // Tests and seeders start from a learner who has already consented;
+            // scenarios that exercise the consent gate use withoutVoiceConsent().
+            'voice_consent_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'target_language' => 'en',
             'current_level' => CefrLevel::A1,
             'timezone' => 'UTC',
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * A learner who has not yet given the voice-recording consent.
+     */
+    public function withoutVoiceConsent(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'voice_consent_at' => null,
+        ]);
     }
 
     /**

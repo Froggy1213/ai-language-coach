@@ -45,6 +45,13 @@ final class StartVoiceSession
         $user = $context->user();
         assert($user instanceof User);
 
+        if (! $user->hasGivenVoiceConsent()) {
+            throw new Error(
+                'Voice consent is required before starting a session.',
+                extensions: ['code' => 'VOICE_CONSENT_REQUIRED'],
+            );
+        }
+
         $subject = $this->subject($user, $args);
 
         // 2. Idempotency guard. A session that is pending or active is still the

@@ -8,6 +8,7 @@ use App\Assessments\InvalidAssessmentAudio;
 use App\Enums\AssessmentStatus;
 use App\Models\Assessment;
 use App\Models\User;
+use GraphQL\Error\Error;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
@@ -24,6 +25,13 @@ final class SubmitAssessment
         $user = $context->user();
         assert($user instanceof User);
 
+        if (! $user->hasGivenVoiceConsent()) {
+            throw new Error(
+                'Voice consent is required before submitting a recording.',
+                extensions: ['code' => 'VOICE_CONSENT_REQUIRED'],
+            );
+        }
+
         try {
             // Checks the object the bucket really holds — its owner, size and
             // content type — before the pipeline spends anything on it.
@@ -33,7 +41,9 @@ final class SubmitAssessment
         }
 
         [$assessment, $shouldDispatch] = DB::transaction(function () use ($user, $upload): array {
-            $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->first();
+            // Serialises concurrent submissions for one learner; the daily
+            // quota and the one-processing-at-a-time check both rely on it.
+            User::query()->whereKey($user->getKey())->lockForUpdate()->first();
 
             $existing = $user->assessments()
                 ->where('audio_url', $upload->fileUrl)
@@ -46,10 +56,6 @@ final class SubmitAssessment
 
             if ($user->assessments()->where('status', AssessmentStatus::Processing)->exists()) {
                 throw ValidationException::withMessages(['audioUrl' => ['An assessment is already being processed.']]);
-            }
-
-            if ($lockedUser instanceof User) {
-                $lockedUser->recordVoiceConsent();
             }
 
             $assessment = $user->assessments()->create([

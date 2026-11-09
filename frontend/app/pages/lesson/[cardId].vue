@@ -21,6 +21,9 @@ import { common, lesson } from '~/constants/strings'
  * here directly. Scenarios live at `/talk` and do not complete a lesson card.
  */
 const route = useRoute()
+const { user } = useAuth()
+
+const consentOpen = ref(false)
 
 const { roadmap, fetching, error: queryError } = useRoadmap({
   requestPolicy: 'cache-and-network',
@@ -103,9 +106,23 @@ async function finish(): Promise<void> {
 }
 
 function begin(): void {
-  if (card.value) {
-    void start({ lessonCardId: card.value.id })
+  if (!card.value) {
+    return
   }
+
+  // The API refuses a session without recorded consent. Asking here is what
+  // makes that refusal reachable only by a client that bypasses the UI.
+  if (!user.value?.voiceConsentAt) {
+    consentOpen.value = true
+    return
+  }
+
+  void start({ lessonCardId: card.value.id })
+}
+
+function onConsentConfirmed(): void {
+  consentOpen.value = false
+  begin()
 }
 
 // Leaving the screen must not leave the microphone open.
@@ -201,6 +218,12 @@ const ended = computed(() => status.value === 'ended')
         </div>
       </template>
     </template>
+
+    <VoiceConsentGate
+      v-if="consentOpen"
+      @confirmed="onConsentConfirmed"
+      @cancelled="consentOpen = false"
+    />
 
     <!-- Remote audio is attached to this element by the LiveKit room. -->
     <audio ref="audioElement" class="sr-only" autoplay playsinline />

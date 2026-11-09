@@ -289,6 +289,26 @@ export const reflect = {
   goalMissedExpressions: '使えたはずの表現',
 } as const
 
+/**
+ * The gate shown before the first voice session. It is separate from the
+ * assessment consent copy: this one names the conversation use, not the level
+ * judgement, so the learner is not asked to agree to something they did not
+ * start.
+ */
+export const voiceConsent = {
+  title: '音声の録音と処理について',
+  intro: 'このレッスンでは音声を処理して、文字起こし・AI講師との会話・振り返りに使います。',
+  points: [
+    '音声は文字起こしとAI講師の応答のために処理されます。',
+    '文字起こしと見つかった間違いは、振り返りと復習のために保存されます。',
+    '会話はいつでも終了できます。',
+  ],
+  label: '音声の録音と処理に同意します。',
+  cta: '同意して始める',
+  cancel: 'キャンセル',
+  error: '同意を記録できませんでした。もう一度お試しください。',
+} as const
+
 export const review = {
   title: '復習',
   subtitle: '会話で間違えた文法を、間隔をあけて思い出します。',

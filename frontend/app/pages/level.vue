@@ -14,6 +14,11 @@ import type { LatestAssessment } from '~/types/view-models'
  */
 const { user, refresh } = useAuth()
 const { submit, onReady } = useAssessment()
+const {
+  giveConsent,
+  submitting: consentSubmitting,
+  error: consentError,
+} = useVoiceConsent()
 
 type Stage = 'consent' | 'ready' | 'recording' | 'uploading' | 'waiting' | 'done'
 
@@ -48,6 +53,17 @@ let chunks: Blob[] = []
 let stopListening: (() => void) | null = null
 
 const elapsedLabel = computed(() => formatClock(elapsed.value))
+
+/**
+ * The checkbox is the learner's decision; recording it server-side is what
+ * makes `voice_consent_at` evidence of that decision rather than of the first
+ * upload. `submitAssessment` refuses without it.
+ */
+async function acceptConsent(): Promise<void> {
+  if (await giveConsent()) {
+    stage.value = 'ready'
+  }
+}
 
 function startRecording(): void {
   if (starting.value || stage.value !== 'ready') {
@@ -332,7 +348,15 @@ const activeStep = computed(() => {
         <span>{{ copy.consentLabel }}</span>
       </label>
 
-      <UiButton variant="primary" size="lg" :disabled="!consented" @click="stage = 'ready'">
+      <UiNotice v-if="consentError" :message="consentError" />
+
+      <UiButton
+        variant="primary"
+        size="lg"
+        :disabled="!consented"
+        :loading="consentSubmitting"
+        @click="acceptConsent"
+      >
         {{ copy.consentCta }}
       </UiButton>
     </div>

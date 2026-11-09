@@ -46,6 +46,15 @@ export const ME_QUERY = /* GraphQL */ `
   }
 `
 
+export const RECORD_VOICE_CONSENT_MUTATION = /* GraphQL */ `
+  mutation RecordVoiceConsent {
+    recordVoiceConsent {
+      id
+      voiceConsentAt
+    }
+  }
+`
+
 export const LOGIN_MUTATION = /* GraphQL */ `
   mutation Login($email: String!, $password: String!) {
     login(email: $email, password: $password) {

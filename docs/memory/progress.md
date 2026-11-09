@@ -1,40 +1,43 @@
 # Progress
 
-Updated: 2026-11-09 · session: 復習 как recall-first карточка по своим ошибкам
+Updated: 2026-11-09 · session: приватность — PII в Sentry, retention транскриптов, явное согласие
 
 ## Сейчас
 
-Ветка `main`, редизайн 復習 выкачен в образы и закоммичен (`origin/main` синхронизирован).
+Ветка `main`, рабочее дерево содержит незакоммиченные исправления по privacy-ревью.
 
-**Что изменено:**
-
-- **Бэкенд**: `dueReviews` переведён с `@all(scopes: ["due"])` на резолвер `App\GraphQL\Queries\DueReviews` —
-  очередь и последняя ошибка на каждый grammar point за два batch-запроса. `ReviewItem.latestMistake`
-  (`App\GraphQL\Resolvers\ReviewItemLatestMistake`) отдаёт `userUtterance/correction/explanation`;
-  fallback-резолвер покрывает одиночный item из `submitReviewResult`.
-- **Фронтенд**: `review.vue` — одна карточка за раз. Prompt — собственная фраза ученика из разговора,
-  ответ за кнопкой «答えを見る», затем четыре оценки `もう一度/難しい/できた/完璧` → SM-2 `0/3/4/5`,
-  прогресс `n / total`, после оценки «次はN日後», финал — «今日の復習は完了» с датой следующего повторения.
-  Сырые `easeFactor/intervalDays` из UI убраны. `useReviews.submitReview` возвращает пересчитанный item.
-- **Тесты**: два backend-теста на latestMistake (включая защиту от чужой ошибки и null), новый E2E-сценарий
-  с замоканным `DueReviews` и `SubmitReviewResult`; обновлён первый review-спек под новую карточку.
+- **PII в ошибках**: четыре LLM-анализатора больше не кладут `json_encode($structured)` в message
+  исключения; `SentryEventScrubber` чистит message события и значения исключений по JSON-ключам
+  (`user_utterance`, `transcript`, `correction`, …) и покрыт тестом.
+- **Retention**: `privacy:purge-transcripts` теперь удаляет и `assessments.raw_data.transcript`
+  старше 90 дней (`JSON_REMOVE`), сохраняя уровень, pronunciation и summary; dry-run и тест на месте.
+- **Согласие**: новая мутация `recordVoiceConsent`; `requestVoiceToken`/`submitAssessment` отказывают
+  с `VOICE_CONSENT_REQUIRED` без неё; автоматическая фиксация при старте/загрузке удалена.
+  UI: диалог `VoiceConsentGate` на `/lesson/:cardId` и `/talk/:code`, запись согласия с чекбокса на `/level`.
 - **Образы**: `ai_language_coach-api` и `-web` пересобраны, контейнеры пересозданы, Lighthouse cache очищен.
 
 ## Проверено в этой сессии
 
-- `pint --test` — чисто (271 файл).
-- `php artisan test` — 558 passed / 2800 assertions.
-- `lighthouse:validate-schema` — схема валидна.
-- `npm run codegen` → `git diff` только ожидаемый `latestMistake`; `npm run typecheck` — чисто;
-  `npm run build` — чисто.
-- `E2E_CHANNEL=chrome npm run e2e:smoke` — 17/17 (включая оба review-теста).
+- `php artisan test` — 563 passed / 2820 assertions (включая `VoiceConsentTest`, `RetentionPurgeTest`,
+  `SentryConfigurationTest`).
+- `pint --test` — чисто (272 файла); `lighthouse:validate-schema` — валидна.
+- `npm run codegen && npm run typecheck && npm run build` — чисто.
+- E2E smoke — 17/17, уже **без** `E2E_CHANNEL=chrome`: Chrome на машине больше нет, используется
+  Playwright Chromium. Диалог согласия проверен вручную на пользователе с `voice_consent_at = NULL`.
 - Все 10 контейнеров healthy; `/up` 200.
 
 ## Дальше
 
-- Живую очередь на стеке не проверить: у `test@example.com` сейчас 0 due-элементов, карточка покрыта
-  E2E-моком и backend-тестами. Для ручной проверки можно сдвинуть `next_review_at` одного item в прошлое.
-- Следующий кандидат на работу — экран 振り返り (`/reflect/:id`): те же ошибки, но без recall-цикла.
+Приоритеты из полного ревью, ещё не сделаны:
+
+1. **P0-деплой**: ECR `IMMUTABLE` vs push `:latest`, `REVERB_HOST=127.0.0.1` в ECS, scheduler в ECS
+   (без него retention не работает в AWS), `MYSQL_ROOT_PASSWORD` в prod overlay, проверить RDS TLS.
+2. **Abuse**: вынести `draftCustomScenario` в Horizon (сейчас 60 с LLM в PHP-воркере), дневные лимиты
+   на assessments/drafts, throttle на `requestVoiceToken`, дедуп assessment по S3 key, throttle вебхука.
+3. **Edge**: закрыть `/api/internal/*` на ALB/Caddy, LiveKit-секрет из EC2 user_data в Secrets Manager,
+   Redis auth, CSP, запрет `TRUSTED_PROXIES=*` в `ProductionSanityCheck`.
+4. **Фронтенд-сессия**: проверять ошибку logout, не трактовать сбой `me` как «гость», глобальный 401.
+5. **Зависимости**: `composer update "symfony/*"` (8 advisories), `npm audit fix` для `undici`, Nuxt upgrade.
 
 ## Открытые вопросы
 
@@ -49,6 +52,6 @@ Updated: 2026-11-09 · session: 復習 как recall-first карточка по
 
 ## Прошлая сессия
 
+- 2026-11-09 — 復習 как recall-first карточка по своим ошибкам.
 - 2026-11-09 — кастомные сценарии: пересборка образов, миграция `custom_scenarios`, E2E-фикс GET-моков.
 - 2026-11-09 — граф знаний: пересборка образов, миграции, seeder, E2E.
-- 2026-11-04 — создан слой памяти проекта (`AGENTS.md`, `docs/memory/`, подсистемные `AGENTS.md`).

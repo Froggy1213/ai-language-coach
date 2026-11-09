@@ -22,15 +22,22 @@ The application collects and processes only the data strictly necessary for lang
 
 ## 2. Consent Recording & Evidencing
 
-Consent for recording and processing audio is captured and stamped server-side:
+Consent for recording and processing audio is recorded explicitly, never inferred from the first use:
 
 - **Database Representation**: Stored in `users.voice_consent_at` as a nullable `TIMESTAMP`.
-- **Immutability**: Stamped via `App\Privacy\VoiceConsent::record(User $user)`. If `users.voice_consent_at` is already populated, it is never overwritten or updated.
-- **Single Place of Truth**:
-  1. **Onboarding Assessment**: Stamped upon calling the `submitAssessment(audioUrl: String!)` GraphQL mutation when initial audio is submitted.
-  2. **Conversational Practice**: Stamped upon calling the `requestVoiceToken(lessonCardId: ID!)` GraphQL mutation when a voice session is actually created.
-- **Protection**: `voice_consent_at` is explicitly excluded from Eloquent mass-assignment (`#[Fillable]` on `User`), preventing clients from modifying or forging it via mutation inputs.
-- **GraphQL Exposure**: Exposed as `User.voiceConsentAt` (`DateTime`) in `types/user.graphql` and viewable on the `/settings` page.
+- **How It Is Recorded**: The learner confirms a dedicated consent statement and the client calls the
+  `recordVoiceConsent` GraphQL mutation. The gate exists on `/level` before recording, and on
+  `/lesson/:cardId` and `/talk/:code` before the first voice session.
+- **Enforcement**: `submitAssessment` and `requestVoiceToken` refuse with the typed
+  `VOICE_CONSENT_REQUIRED` error while `voice_consent_at` is null. A client that bypasses the UI
+  therefore cannot process audio, and the timestamp is evidence of an action rather than of a call.
+- **Immutability**: Recorded through `User::recordVoiceConsent()`. If `users.voice_consent_at` is
+  already populated, it is never overwritten or updated.
+- **Protection**: `voice_consent_at` is explicitly excluded from Eloquent mass-assignment
+  (`#[Fillable]` on `User`), preventing clients from modifying or forging it via mutation inputs.
+  The mutation takes no timestamp argument; the server stamps its own clock.
+- **GraphQL Exposure**: Exposed as `User.voiceConsentAt` (`DateTime`) in `types/user.graphql` and
+  viewable on the `/settings` page.
 
 ---
 
@@ -43,13 +50,15 @@ Data is retained only as long as pedagogically or operationally required:
 | **Assessment Audio** | N/A | N/A | Processing duration (< 5 min) | `AnalyzeAssessment` job | Deleted from S3 immediately upon successful transcription and assessment. |
 | **Orphan Assessment Audio** | `privacy.orphan_audio_retention_days` | `PRIVACY_ORPHAN_AUDIO_RETENTION_DAYS` | 7 days | `privacy:purge-orphan-audio` (daily) | Safety net for recordings whose analysis job died or was abandoned before deletion. Purges S3 files older than the threshold that have no matching assessment row in `processing`. |
 | **Session Transcripts** | `privacy.transcript_retention_days` | `PRIVACY_TRANSCRIPT_RETENTION_DAYS` | 90 days | `privacy:purge-transcripts` (daily) | Clears `voice_sessions.transcript` for sessions older than 90 days. Keeps the session row, duration, status, mistakes, and review items (the learner's pedagogical progress). |
+| **Onboarding Assessment Transcripts** | `privacy.transcript_retention_days` | `PRIVACY_TRANSCRIPT_RETENTION_DAYS` | 90 days | `privacy:purge-transcripts` (daily) | Removes `assessments.raw_data.transcript` for assessments older than 90 days while keeping the CEFR level, pronunciation evidence and analysis summary in the same JSON column. |
 | **Subscription Presence** | `lighthouse.subscriptions.storage_ttl` | `LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL` | 3600 seconds (1 hour) | Redis key TTL | Redis keys expire automatically to prevent unbounded subscriber accumulation. |
 
 ### Scheduled Purge Commands
 
 Scheduled in `backend/routes/console.php` to run on a daily basis:
 ```bash
-# 1. Clear session transcripts older than 90 days (keeps session records and mistakes)
+# 1. Clear voice-session and assessment transcripts older than 90 days
+#    (keeps session records, mistakes, CEFR levels and pronunciation evidence)
 php artisan privacy:purge-transcripts [--dry-run]
 
 # 2. Delete orphan S3 recordings older than 7 days

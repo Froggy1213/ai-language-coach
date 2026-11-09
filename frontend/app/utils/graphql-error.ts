@@ -87,6 +87,7 @@ export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
   GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
   CONFIRMATION_REQUIRED: '削除を確定するには DELETE と入力してください。',
   PASSWORD_MISMATCH: 'パスワードが正しくありません。',
+  VOICE_CONSENT_REQUIRED: '音声の録音と処理への同意が必要です。',
   SCENARIO_DRAFT_FAILED: 'AIがお題を組み立てられませんでした。もう一度お試しください。',
   SCENARIO_NOT_FOUND: '指定されたお題が見つかりません。',
 }

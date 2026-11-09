@@ -9,7 +9,6 @@ use App\Models\LessonCard;
 use App\Models\Roadmap;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -37,6 +36,15 @@ class VoiceConsentTest extends TestCase
             requestVoiceToken(lessonCardId: $lessonCardId) {
                 id
                 status
+            }
+        }
+    ';
+
+    private const RECORD_CONSENT = /** @lang GraphQL */ '
+        mutation {
+            recordVoiceConsent {
+                id
+                voiceConsentAt
             }
         }
     ';
@@ -69,43 +77,54 @@ class VoiceConsentTest extends TestCase
         Queue::fake();
     }
 
-    public function test_voice_consent_is_stamped_on_the_first_assessment_submit(): void
+    public function test_submitting_an_assessment_requires_explicit_consent(): void
     {
-        $user = User::factory()->create(['voice_consent_at' => null]);
+        $user = User::factory()->withoutVoiceConsent()->create();
         Sanctum::actingAs($user);
 
         $fileUrl = "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/recording.webm";
-        $storage = Mockery::mock(AssessmentAudioStorage::class);
-        $storage->shouldReceive('inspect')
-            ->once()
-            ->with(Mockery::on(static fn (User $caller): bool => $caller->is($user)), $fileUrl)
-            ->andReturn(new AudioUpload(
-                key: "assessments/{$user->id}/recording.webm",
-                fileUrl: $fileUrl,
-                sizeBytes: 2048,
-                contentType: 'audio/webm',
-            ));
-        $this->app->instance(AssessmentAudioStorage::class, $storage);
 
-        $this->assertNull($user->voice_consent_at);
-        $this->assertFalse($user->hasGivenVoiceConsent());
+        $response = $this->graphQL(self::SUBMIT_ASSESSMENT, ['audioUrl' => $fileUrl]);
 
-        $this->graphQL(self::SUBMIT_ASSESSMENT, ['audioUrl' => $fileUrl])
-            ->assertGraphQLErrorFree();
+        $this->assertSame('VOICE_CONSENT_REQUIRED', $response->json('errors.0.extensions.code'));
+        $this->assertNull($user->refresh()->voice_consent_at);
+    }
+
+    public function test_a_consented_learner_can_submit_an_assessment(): void
+    {
+        $user = User::factory()->withoutVoiceConsent()->create();
+        Sanctum::actingAs($user);
+
+        $this->graphQL(self::RECORD_CONSENT)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.recordVoiceConsent.id', (string) $user->id);
 
         $user->refresh();
         $this->assertNotNull($user->voice_consent_at);
         $this->assertTrue($user->hasGivenVoiceConsent());
-        $this->assertInstanceOf(Carbon::class, $user->voice_consent_at);
+
+        $fileUrl = "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/recording.webm";
+        $this->app->instance(AssessmentAudioStorage::class, $this->fakeStorage($user, $fileUrl));
+
+        $this->graphQL(self::SUBMIT_ASSESSMENT, ['audioUrl' => $fileUrl])
+            ->assertGraphQLErrorFree();
     }
 
-    public function test_voice_consent_is_stamped_on_the_first_voice_session(): void
+    public function test_starting_a_voice_session_requires_explicit_consent(): void
     {
-        $user = User::factory()->create(['voice_consent_at' => null]);
+        $user = User::factory()->withoutVoiceConsent()->create();
         $roadmap = Roadmap::factory()->for($user)->create();
         $card = LessonCard::factory()->for($roadmap)->create(['status' => LessonCardStatus::Ready]);
 
         Sanctum::actingAs($user);
+
+        $response = $this->graphQL(self::REQUEST_VOICE_TOKEN, ['lessonCardId' => (string) $card->id]);
+
+        $this->assertSame('VOICE_CONSENT_REQUIRED', $response->json('errors.0.extensions.code'));
+        $this->assertNull($user->refresh()->voice_consent_at);
+        Http::assertNothingSent();
+
+        $this->graphQL(self::RECORD_CONSENT)->assertGraphQLErrorFree();
 
         Http::fake([
             'https://livekit.test/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
@@ -117,14 +136,29 @@ class VoiceConsentTest extends TestCase
             ]),
         ]);
 
-        $this->assertNull($user->voice_consent_at);
-
         $this->graphQL(self::REQUEST_VOICE_TOKEN, ['lessonCardId' => (string) $card->id])
             ->assertGraphQLErrorFree();
 
         $user->refresh();
         $this->assertNotNull($user->voice_consent_at);
-        $this->assertTrue($user->hasGivenVoiceConsent());
+    }
+
+    public function test_recording_consent_is_idempotent_and_keeps_the_first_timestamp(): void
+    {
+        $originalConsent = Date::now()->subMonths(2);
+        $user = User::factory()->create(['voice_consent_at' => $originalConsent]);
+        Sanctum::actingAs($user);
+
+        $this->graphQL(self::RECORD_CONSENT)->assertGraphQLErrorFree();
+
+        $user->refresh();
+        $this->assertSame($originalConsent->toDateTimeString(), $user->voice_consent_at->toDateTimeString());
+    }
+
+    public function test_guests_cannot_record_voice_consent(): void
+    {
+        $this->graphQL(self::RECORD_CONSENT)
+            ->assertGraphQLErrorMessage('Unauthenticated.');
     }
 
     public function test_the_original_consent_timestamp_survives_a_later_submission(): void
@@ -134,17 +168,7 @@ class VoiceConsentTest extends TestCase
         Sanctum::actingAs($user);
 
         $fileUrl = "https://coach-audio.s3.amazonaws.com/assessments/{$user->id}/recording.webm";
-        $storage = Mockery::mock(AssessmentAudioStorage::class);
-        $storage->shouldReceive('inspect')
-            ->once()
-            ->with(Mockery::on(static fn (User $caller): bool => $caller->is($user)), $fileUrl)
-            ->andReturn(new AudioUpload(
-                key: "assessments/{$user->id}/recording.webm",
-                fileUrl: $fileUrl,
-                sizeBytes: 2048,
-                contentType: 'audio/webm',
-            ));
-        $this->app->instance(AssessmentAudioStorage::class, $storage);
+        $this->app->instance(AssessmentAudioStorage::class, $this->fakeStorage($user, $fileUrl));
 
         $this->graphQL(self::SUBMIT_ASSESSMENT, ['audioUrl' => $fileUrl])
             ->assertGraphQLErrorFree();
@@ -153,7 +177,7 @@ class VoiceConsentTest extends TestCase
         $this->assertSame($originalConsent->toDateTimeString(), $user->voice_consent_at->toDateTimeString());
     }
 
-    public function test_a_client_cannot_set_voice_consent_through_any_mutation_input(): void
+    public function test_a_client_cannot_forge_a_voice_consent_timestamp(): void
     {
         // 1. GraphQL schema rejects voiceConsentAt on register mutation input
         $query = /** @lang GraphQL */ '
@@ -185,22 +209,42 @@ class VoiceConsentTest extends TestCase
         $this->assertNull($user->voice_consent_at);
     }
 
-    public function test_voice_consent_at_is_exposed_on_me_query(): void
+    public function test_voice_consent_at_is_exposed_on_me_query_after_the_mutation(): void
     {
-        $user = User::factory()->create(['voice_consent_at' => null]);
+        $user = User::factory()->withoutVoiceConsent()->create();
         Sanctum::actingAs($user);
+
+        $this->graphQL(self::ME_QUERY)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.me.voiceConsentAt', null);
+
+        $timestamp = Date::parse('2026-09-15 14:30:00');
+        Date::setTestNow($timestamp);
+
+        $this->graphQL(self::RECORD_CONSENT)->assertGraphQLErrorFree();
+        Date::setTestNow();
 
         $response = $this->graphQL(self::ME_QUERY)
             ->assertGraphQLErrorFree();
 
-        $this->assertNull($response->json('data.me.voiceConsentAt'));
+        $this->assertSame(
+            $timestamp->format('Y-m-d H:i:s'),
+            $response->json('data.me.voiceConsentAt'),
+        );
+    }
 
-        $timestamp = Date::parse('2026-09-15 14:30:00');
-        $user->forceFill(['voice_consent_at' => $timestamp])->save();
+    private function fakeStorage(User $user, string $fileUrl): AssessmentAudioStorage
+    {
+        $storage = Mockery::mock(AssessmentAudioStorage::class);
+        $storage->shouldReceive('inspect')
+            ->once()
+            ->andReturn(new AudioUpload(
+                key: "assessments/{$user->id}/recording.webm",
+                fileUrl: $fileUrl,
+                sizeBytes: 2048,
+                contentType: 'audio/webm',
+            ));
 
-        $responseWithConsent = $this->graphQL(self::ME_QUERY)
-            ->assertGraphQLErrorFree();
-
-        $this->assertSame($timestamp->format('Y-m-d H:i:s'), $responseWithConsent->json('data.me.voiceConsentAt'));
+        return $storage;
     }
 }

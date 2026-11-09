@@ -192,6 +192,8 @@ export type Mutation = {
   login: User;
   /** End the current session. */
   logout: Scalars['Boolean']['output'];
+  /** Record the learner's explicit consent to voice recording and processing. */
+  recordVoiceConsent: User;
   /** Create an account and sign in. */
   register: User;
   /**
