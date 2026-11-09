@@ -87,13 +87,29 @@ const firstName = computed(() => user.value?.name?.split(/\s+/)[0] ?? '')
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
               <p class="label">{{ today.continueLabel }}</p>
               <span class="tnum text-[0.75rem] text-[var(--ink-faint)]">
-                #{{ readyCard.orderIndex }} · {{ readyCard.grammarPoint.category }}
+                #{{ readyCard.orderIndex }}<template v-if="readyCard.grammarPoint.level"> · {{ readyCard.grammarPoint.level }}</template> · {{ readyCard.grammarPoint.category }}
+              </span>
+              <span
+                v-if="readyCard.needsPractice"
+                class="rounded-full bg-[color-mix(in_oklab,var(--color-amber-bright)_18%,transparent)] px-2.5 py-0.5 text-[0.6875rem] font-semibold tracking-[0.06em] text-[var(--color-amber-bright)]"
+                data-testid="today-weak-spot-badge"
+              >
+                {{ today.weakSpotLabel }}
               </span>
             </div>
 
-            <h2 class="display text-[1.5rem] leading-snug tracking-[0.01em] sm:text-[1.75rem]">
-              {{ readyCard.grammarPoint.title }}
-            </h2>
+            <div class="space-y-1.5">
+              <h2 class="display text-[1.5rem] leading-snug tracking-[0.01em] sm:text-[1.75rem]">
+                {{ readyCard.grammarPoint.title }}
+              </h2>
+              <p
+                v-if="readyCard.needsPractice"
+                class="text-[0.8125rem] text-[var(--color-amber-bright)]"
+                data-testid="today-weak-spot-hint"
+              >
+                {{ today.weakSpotHint }}
+              </p>
+            </div>
 
             <p class="rounded-2xl bg-[var(--surface-sunken)] px-4 py-3.5 text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">
               {{ readyCard.practicePrompt }}

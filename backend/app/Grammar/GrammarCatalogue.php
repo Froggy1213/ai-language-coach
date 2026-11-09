@@ -40,6 +40,33 @@ final class GrammarCatalogue
     }
 
     /**
+     * Direct prerequisite codes for a single grammar point.
+     *
+     * @return list<string>
+     */
+    public function prerequisitesOf(string $language, string $code): array
+    {
+        return $this->find($language, $code)?->prerequisites ?? [];
+    }
+
+    /**
+     * Adjacency list mapping every grammar point code in the language to its
+     * direct prerequisite codes.
+     *
+     * @return array<string, list<string>>
+     */
+    public function prerequisiteMap(string $language): array
+    {
+        $map = [];
+
+        foreach ($this->entries($language) as $code => $entry) {
+            $map[$code] = $entry->prerequisites;
+        }
+
+        return $map;
+    }
+
+    /**
      * Everything a learner at the given band should work through: that band and
      * every weaker one, weakest first.
      *
@@ -94,6 +121,55 @@ final class GrammarCatalogue
             $entries[$code] = GrammarPointContent::fromArray($language, $code, $entry);
         }
 
+        $this->assertGraphInvariants($language, $entries);
+
         return $this->languages[$language] = $entries;
+    }
+
+    /**
+     * @param  array<string, GrammarPointContent>  $entries
+     */
+    private function assertGraphInvariants(string $language, array $entries): void
+    {
+        $positions = [];
+        $index = 0;
+        $previousLevelRank = 0;
+
+        foreach ($entries as $code => $entry) {
+            $rank = $entry->level->rank();
+
+            if ($rank < $previousLevelRank) {
+                throw new RuntimeException(
+                    "Grammar point `{$language}.{$code}` ({$entry->level->value}) appears after a higher CEFR band; catalogue entries must be ordered A1 -> C1."
+                );
+            }
+
+            $previousLevelRank = $rank;
+            $positions[$code] = $index++;
+        }
+
+        foreach ($entries as $code => $entry) {
+            foreach ($entry->prerequisites as $prereqCode) {
+                if (! isset($entries[$prereqCode])) {
+                    throw new RuntimeException(
+                        "Grammar point `{$language}.{$code}` depends on unknown prerequisite `{$prereqCode}`."
+                    );
+                }
+
+                $prereq = $entries[$prereqCode];
+
+                if ($prereq->level->rank() > $entry->level->rank()) {
+                    throw new RuntimeException(
+                        "Grammar point `{$language}.{$code}` ({$entry->level->value}) cannot depend on higher-level prerequisite `{$prereqCode}` ({$prereq->level->value})."
+                    );
+                }
+
+                if ($positions[$prereqCode] >= $positions[$code]) {
+                    throw new RuntimeException(
+                        "Prerequisite `{$prereqCode}` must appear earlier in the `{$language}` catalogue than `{$code}` (topological order violated)."
+                    );
+                }
+            }
+        }
     }
 }

@@ -2,9 +2,13 @@
 
 namespace App\Mistakes;
 
+use App\Enums\RoadmapStatus;
+use App\Grammar\LessonUnlocks;
 use App\GraphQL\Subscriptions\SessionFeedbackReady;
+use App\Models\GrammarPoint;
 use App\Models\Mistake;
 use App\Models\ReviewItem;
+use App\Models\Roadmap;
 use App\Models\VoiceSession;
 use App\Review\Sm2;
 use Illuminate\Bus\Queueable;
@@ -22,7 +26,9 @@ use Throwable;
  * Takes the session's accumulated turns, builds a transcript of the learner's
  * utterances, asks the LLM for a structured list of grammatical mistakes constrained
  * to the canonical grammar catalogue, writes `mistakes` rows, lazily creates
- * `review_items` rows with SM-2 defaults, and fires the `sessionFeedbackReady` subscription.
+ * `review_items` rows with SM-2 defaults, unlocks any locked lesson cards for
+ * the grammar points the learner struggled with, and fires the
+ * `sessionFeedbackReady` subscription.
  *
  * For a scenario session it then asks a second, separate model to judge whether
  * the learner achieved the scenario's goal (plan §9) and stores that verdict in
@@ -135,6 +141,8 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
                 return;
             }
 
+            $mistakeGrammarPointIds = [];
+
             foreach ($result->mistakes as $mistake) {
                 Mistake::create([
                     'session_id' => $lockedSession->id,
@@ -158,6 +166,25 @@ final class AnalyzeVoiceSessionMistakes implements ShouldQueue
                         'next_review_at' => Carbon::now()->addDays(Sm2::DEFAULT_INTERVAL_DAYS),
                     ],
                 );
+
+                if ($mistake->grammarPoint->code !== GrammarPoint::UNCATEGORIZED_CODE) {
+                    $mistakeGrammarPointIds[] = (int) $mistake->grammarPoint->id;
+                }
+            }
+
+            if ($mistakeGrammarPointIds !== []) {
+                $activeRoadmap = Roadmap::query()
+                    ->where('user_id', $lockedSession->user_id)
+                    ->where('status', RoadmapStatus::Active)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($activeRoadmap instanceof Roadmap) {
+                    app(LessonUnlocks::class)->syncRoadmap(
+                        $activeRoadmap,
+                        array_values(array_unique($mistakeGrammarPointIds)),
+                    );
+                }
             }
 
             $lockedSession->markAnalyzed(count($result->mistakes));

@@ -26,7 +26,7 @@ test.describe('Roadmap screen @smoke', () => {
     const json = await roadmapResponse.json();
     expect(json.errors).toBeUndefined();
     expect(json.data?.roadmap).toBeDefined();
-    expect(json.data.roadmap.title).toBe('English · A1–B1');
+    expect(json.data.roadmap.title).toMatch(/^English · [ABC][12](–[ABC][12])?$/);
     expect(Array.isArray(json.data.roadmap.lessonCards)).toBe(true);
     expect(json.data.roadmap.lessonCards.length).toBeGreaterThan(0);
 
@@ -40,12 +40,20 @@ test.describe('Roadmap screen @smoke', () => {
     // language and is deliberately not rendered (frontend/app/pages/roadmap.vue).
     await expect(page.getByRole('heading', { level: 1, name: 'ロードマップ' })).toBeVisible();
 
-    // Lesson cards render as the rail's <li> nodes (RoadmapLesson.vue), one per
-    // card in the payload.
+    // Default view is the interactive knowledge graph (RoadmapGraph.vue),
+    // rendering one [data-node-code] group per lesson card in the payload.
+    const graphNodes = page.locator('[data-node-code]');
+    await expect(graphNodes.first()).toBeVisible();
+    expect(await graphNodes.count()).toBe(json.data.roadmap.lessonCards.length);
+    await expect(page.getByText(`${json.data.roadmap.lessonCards.length}レッスン`)).toBeVisible();
+
+    // Switching to リスト renders the vertical rail's <li> nodes (RoadmapLesson.vue),
+    // one per card in the payload.
+    await page.getByTestId('roadmap-view-list').click();
+
     const lessons = page.locator('ol > li');
     await expect(lessons.first()).toBeVisible();
     expect(await lessons.count()).toBe(json.data.roadmap.lessonCards.length);
-    await expect(page.getByText(`${json.data.roadmap.lessonCards.length}レッスン`)).toBeVisible();
 
     // Verify first lesson content: a completed node shows a check mark, every
     // other node is numbered by the API's orderIndex, and the row is headed by

@@ -5,6 +5,24 @@
 - **Интерфейс:** японский (`frontend/app/constants/strings.ts`), учебный контент — английский (из API).
 - **Бренд:** **Kirie** (`APP_NAME=Kirie` в бэкенде и `app.name` во фронтенде).
 
+## Скриншоты интерфейса
+
+| 今日 (Сегодня) | 会話 (Голосовая практика) | 設定 (Настройки) |
+|:---:|:---:|:---:|
+| <img src="docs/design/today-mobile.jpg" width="260" alt="Экран Сегодня (今日)" /> | <img src="docs/design/conversation-mobile.jpg" width="260" alt="Экран разговора с голосовым орбом (会話)" /> | <img src="docs/design/settings-mobile.jpg" width="260" alt="Экран настроек (設定)" /> |
+
+| Состояния голосового орба (Dark) | Состояния голосового орба (Light) |
+|:---:|:---:|
+| <img src="docs/design/orb-states-dark.jpg" width="420" alt="Состояния орба — тёмная тема" /> | <img src="docs/design/orb-states-light.jpg" width="420" alt="Состояния орба — светлая тема" /> |
+
+<details>
+<summary><strong>ロードマップ (Грамматический роадмап — Desktop)</strong></summary>
+<br />
+<p align="center">
+  <img src="docs/design/roadmap-desktop.jpg" width="720" alt="Экран роадмапа (ロードマップ)" />
+</p>
+</details>
+
 ### Документация по модулям
 
 | Документ | Содержание |

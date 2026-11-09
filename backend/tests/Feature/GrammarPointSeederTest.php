@@ -22,11 +22,12 @@ class GrammarPointSeederTest extends TestCase
             $this->assertDatabaseHas('grammar_points', [
                 'language' => $language,
                 'code' => GrammarPoint::UNCATEGORIZED_CODE,
+                'level' => null,
             ]);
         }
     }
 
-    public function test_seeds_every_catalogue_entry_with_its_title_and_category(): void
+    public function test_seeds_every_catalogue_entry_with_its_title_category_level_and_prerequisites(): void
     {
         config(['languages.supported' => ['en']]);
 
@@ -40,7 +41,20 @@ class GrammarPointSeederTest extends TestCase
                 'code' => $content->code,
                 'title' => $content->title,
                 'category' => $content->category,
+                'level' => $content->level->value,
             ]);
+
+            $point = GrammarPoint::query()
+                ->where('language', 'en')
+                ->where('code', $content->code)
+                ->with('prerequisites')
+                ->sole();
+
+            $seededPrereqs = $point->prerequisites->pluck('code')->sort()->values()->all();
+            $expectedPrereqs = $content->prerequisites;
+            sort($expectedPrereqs);
+
+            $this->assertSame($expectedPrereqs, $seededPrereqs, "Prerequisites mismatch for `{$content->code}`.");
         }
 
         // Catalogue entries plus the one sentinel, and nothing else.
@@ -66,19 +80,27 @@ class GrammarPointSeederTest extends TestCase
         $this->assertSame(count($this->catalogue()->forLanguage('en')) + 1, GrammarPoint::query()->count());
     }
 
-    public function test_reseeding_refreshes_the_title_of_an_existing_point(): void
+    public function test_reseeding_refreshes_the_title_and_prerequisites_of_an_existing_point(): void
     {
         config(['languages.supported' => ['en']]);
 
         $this->seed(GrammarPointSeeder::class);
-        GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->update(['title' => 'Stale title']);
+        $presentSimple = GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->sole();
+        $articles = GrammarPoint::query()->where('language', 'en')->where('code', 'articles')->sole();
+
+        $presentSimple->update(['title' => 'Stale title']);
+        $presentSimple->prerequisites()->sync([$articles->id]);
 
         $this->seed(GrammarPointSeeder::class);
 
-        $this->assertSame(
-            'Present Simple',
-            GrammarPoint::query()->where('language', 'en')->where('code', 'present_simple')->sole()->title,
-        );
+        $refreshed = GrammarPoint::query()
+            ->where('language', 'en')
+            ->where('code', 'present_simple')
+            ->with('prerequisites')
+            ->sole();
+
+        $this->assertSame('Present Simple', $refreshed->title);
+        $this->assertCount(0, $refreshed->prerequisites);
     }
 
     private function catalogue(): GrammarCatalogue

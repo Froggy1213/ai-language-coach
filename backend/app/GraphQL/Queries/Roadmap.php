@@ -2,6 +2,7 @@
 
 namespace App\GraphQL\Queries;
 
+use App\Models\LessonCard;
 use App\Models\Roadmap as RoadmapModel;
 use App\Models\User;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
@@ -20,6 +21,14 @@ final class Roadmap
         $user = $context->user();
         assert($user instanceof User);
 
-        return $user->roadmap;
+        $roadmap = $user->roadmap()
+            ->with(['lessonCards.grammarPoint.prerequisites'])
+            ->first();
+
+        if ($roadmap instanceof RoadmapModel) {
+            LessonCard::hydrateMistakeSignals($roadmap->lessonCards, $user->getKey());
+        }
+
+        return $roadmap;
     }
 }

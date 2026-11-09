@@ -452,6 +452,7 @@ services:
   # ---------------------------------------------------------------------------
   api:
     profiles: ["full"]
+    image: ai_language_coach-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -476,6 +477,7 @@ services:
 
   horizon:
     profiles: ["full"]
+    image: ai_language_coach-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -501,6 +503,7 @@ services:
 
   scheduler:
     profiles: ["full"]
+    image: ai_language_coach-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -522,6 +525,7 @@ services:
 
   reverb:
     profiles: ["full"]
+    image: ai_language_coach-api
     build:
       context: ./backend
       dockerfile: Dockerfile

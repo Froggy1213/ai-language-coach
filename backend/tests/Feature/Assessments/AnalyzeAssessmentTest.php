@@ -14,6 +14,7 @@ use App\Assessments\PronunciationAssessment;
 use App\Assessments\Recording;
 use App\Enums\AssessmentStatus;
 use App\Enums\CefrLevel;
+use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
 use App\Grammar\RoadmapGenerator;
 use App\GraphQL\Subscriptions\AssessmentReady;
@@ -102,10 +103,10 @@ class AnalyzeAssessmentTest extends TestCase
         $this->assertSame(RoadmapStatus::Archived, $firstRoadmap->refresh()->status);
         $roadmap = $user->roadmap;
         $this->assertNotNull($roadmap);
-        $this->assertSame('English · A1–B1', $roadmap->title);
+        $this->assertSame('English · B1–C1', $roadmap->title);
         $this->assertGreaterThan(
-            $firstRoadmap->lessonCards->count(),
-            $roadmap->lessonCards->count(),
+            $firstRoadmap->lessonCards->where('status', LessonCardStatus::Completed)->count(),
+            $roadmap->lessonCards->where('status', LessonCardStatus::Completed)->count(),
             'The roadmap must follow the level the analysis settled on.',
         );
 
@@ -265,7 +266,7 @@ class AnalyzeAssessmentTest extends TestCase
 
         $this->assertSame(AssessmentStatus::Done, $assessment->refresh()->status);
         $this->assertSame(CefrLevel::B1, $user->refresh()->current_level);
-        $this->assertSame('English · A1–B1', $user->roadmap?->title);
+        $this->assertSame('English · B1–C1', $user->roadmap?->title);
     }
 
     public function test_it_marks_the_assessment_failed_once_the_attempts_run_out(): void

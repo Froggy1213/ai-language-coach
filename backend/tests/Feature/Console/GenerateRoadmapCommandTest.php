@@ -20,7 +20,7 @@ class GenerateRoadmapCommandTest extends TestCase
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
 
         $this->artisan('roadmap:generate', ['user' => $user->email])
-            ->expectsOutputToContain('English · A1')
+            ->expectsOutputToContain('English · A1–C1')
             ->assertSuccessful();
 
         $roadmap = Roadmap::query()->sole();
@@ -62,9 +62,9 @@ class GenerateRoadmapCommandTest extends TestCase
 
         $this->assertDatabaseCount('roadmaps', 2);
         $this->assertSame(
-            'English · A1',
+            'English · A1–C1',
             Roadmap::query()->whereBelongsTo($user)->where('status', RoadmapStatus::Archived)->sole()->title,
         );
-        $this->assertSame('English · A1–B1', $user->fresh()->roadmap->title);
+        $this->assertSame('English · B1–C1', $user->fresh()->roadmap->title);
     }
 }

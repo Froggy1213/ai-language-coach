@@ -4,6 +4,7 @@ namespace App\GraphQL\Mutations;
 
 use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
+use App\Grammar\LessonUnlocks;
 use App\Models\LessonCard;
 use App\Models\User;
 use GraphQL\Error\Error;
@@ -12,9 +13,11 @@ use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 
 final class CompleteLessonCard
 {
+    public function __construct(private readonly LessonUnlocks $unlocks) {}
+
     /**
-     * Complete a lesson card and unlock the next card in sequence (order_index + 1)
-     * inside a database transaction under pessimistic locking (plan §5).
+     * Complete a lesson card and unlock any cards whose prerequisites are now
+     * satisfied inside a database transaction under pessimistic locking (plan §5).
      *
      * @param  array{lessonCardId: string}  $args
      */
@@ -51,25 +54,18 @@ final class CompleteLessonCard
                 $card->update(['status' => LessonCardStatus::Completed]);
             }
 
-            // Unlock the next card in sequence (order_index + 1) if one exists and is locked.
-            $nextCard = LessonCard::query()
-                ->where('roadmap_id', $card->roadmap_id)
-                ->where('order_index', $card->order_index + 1)
-                ->lockForUpdate()
-                ->first();
+            $roadmap = $card->roadmap()->lockForUpdate()->first();
 
-            if ($nextCard instanceof LessonCard) {
-                if ($nextCard->status === LessonCardStatus::Locked) {
-                    $nextCard->update(['status' => LessonCardStatus::Ready]);
-                }
-            } else {
+            if ($roadmap !== null) {
+                $this->unlocks->syncRoadmap($roadmap, completedCard: $card);
+
                 $hasIncompleteCards = LessonCard::query()
                     ->where('roadmap_id', $card->roadmap_id)
                     ->whereIn('status', [LessonCardStatus::Locked, LessonCardStatus::Ready])
                     ->exists();
 
                 if (! $hasIncompleteCards) {
-                    $card->roadmap()->update(['status' => RoadmapStatus::Completed]);
+                    $roadmap->update(['status' => RoadmapStatus::Completed]);
                 }
             }
 

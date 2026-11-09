@@ -11,16 +11,22 @@ use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * Builds the roadmap a learner's current CEFR band calls for (plan §5, §6).
+ * Builds the full knowledge-graph roadmap for a learner's target language (plan §5, §6).
  *
- * The plan runs this right after the assessment resolves a level, and the
- * `generateRoadmap` mutation exposes it for a user who has no roadmap yet, so
- * both entry points retry: generation is idempotent and returns the existing
- * active roadmap instead of building a second one.
+ * Every catalogue point across A1–C1 is included so the learner sees the entire
+ * path ahead. Points below the learner's current CEFR band start `completed`;
+ * points at or above their band whose prerequisites are satisfied (or on which
+ * the learner has already made mistakes) start `ready`.
+ *
+ * Generation is idempotent and returns the existing active roadmap instead of
+ * building a second one unless regeneration is explicitly requested.
  */
 final class RoadmapGenerator
 {
-    public function __construct(private readonly GrammarCatalogue $catalogue) {}
+    public function __construct(
+        private readonly GrammarCatalogue $catalogue,
+        private readonly LessonUnlocks $unlocks,
+    ) {}
 
     /**
      * The user's active roadmap, generated from their current level if they do
@@ -44,7 +50,7 @@ final class RoadmapGenerator
 
     private function build(User $user, bool $regenerate): Roadmap
     {
-        $contents = $this->catalogue->upTo($user->target_language, $user->current_level);
+        $contents = $this->orderedContents($user->target_language);
 
         if ($contents === []) {
             throw new RuntimeException(
@@ -68,16 +74,42 @@ final class RoadmapGenerator
 
             $active?->update(['status' => RoadmapStatus::Archived]);
 
+            $mistakeCodes = $this->unlocks->mistakeCodesForUser($user->getKey(), $user->target_language);
+            $statuses = $this->unlocks->initialStatuses(
+                $user->target_language,
+                $contents,
+                $user->current_level,
+                $mistakeCodes,
+            );
+
             $roadmap = Roadmap::query()->create([
                 'user_id' => $user->getKey(),
                 'title' => $this->title($user, $contents),
                 'status' => RoadmapStatus::Active,
             ]);
 
-            $roadmap->lessonCards()->createMany($this->cards($contents, $grammarPointIds));
+            $roadmap->lessonCards()->createMany($this->cards($contents, $grammarPointIds, $statuses));
 
             return $roadmap;
         });
+    }
+
+    /**
+     * All catalogue entries for `$language`, ordered weakest CEFR band first
+     * while preserving topological order within each band.
+     *
+     * @return list<GrammarPointContent>
+     */
+    private function orderedContents(string $language): array
+    {
+        $contents = $this->catalogue->forLanguage($language);
+
+        usort(
+            $contents,
+            static fn (GrammarPointContent $a, GrammarPointContent $b): int => $a->level->rank() <=> $b->level->rank(),
+        );
+
+        return array_values($contents);
     }
 
     /**
@@ -109,14 +141,14 @@ final class RoadmapGenerator
     }
 
     /**
-     * The first card is the one to practise now; everything after it waits for
-     * `completeLessonCard` to unlock it (plan §5).
+     * Build the lesson card attributes with initial DAG statuses.
      *
      * @param  list<GrammarPointContent>  $contents
      * @param  array<string, int>  $grammarPointIds
+     * @param  array<string, LessonCardStatus>  $statuses
      * @return list<array<string, mixed>>
      */
-    private function cards(array $contents, array $grammarPointIds): array
+    private function cards(array $contents, array $grammarPointIds, array $statuses): array
     {
         $cards = [];
 
@@ -124,7 +156,7 @@ final class RoadmapGenerator
             $cards[] = [
                 'grammar_point_id' => $grammarPointIds[$content->code],
                 'order_index' => $index + 1,
-                'status' => $index === 0 ? LessonCardStatus::Ready : LessonCardStatus::Locked,
+                'status' => $statuses[$content->code] ?? LessonCardStatus::Locked,
                 'cheat_sheet' => $content->cheatSheet->toArray(),
                 'practice_prompt' => $content->practicePrompt,
             ];
@@ -139,15 +171,11 @@ final class RoadmapGenerator
     private function title(User $user, array $contents): string
     {
         $language = $user->targetLanguageName();
-
-        // Contents are ordered weakest first, so the last one is the strongest
-        // band the catalogue actually covers for this learner — which is not
-        // necessarily their own band.
-        $weakest = $contents[0]->level;
+        $start = $user->current_level;
         $strongest = $contents[array_key_last($contents)]->level;
 
-        return $weakest === $strongest
-            ? "{$language} · {$weakest->value}"
-            : "{$language} · {$weakest->value}–{$strongest->value}";
+        return $start === $strongest || $start->rank() > $strongest->rank()
+            ? "{$language} · {$strongest->value}"
+            : "{$language} · {$start->value}–{$strongest->value}";
     }
 }

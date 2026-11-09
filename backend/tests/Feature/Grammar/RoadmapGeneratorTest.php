@@ -8,6 +8,7 @@ use App\Enums\RoadmapStatus;
 use App\Grammar\GrammarCatalogue;
 use App\Grammar\RoadmapGenerator;
 use App\Models\GrammarPoint;
+use App\Models\Mistake;
 use App\Models\User;
 use Database\Seeders\GrammarPointSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -18,20 +19,20 @@ class RoadmapGeneratorTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_it_builds_a_roadmap_for_the_learners_current_band(): void
+    public function test_it_builds_the_full_catalogue_roadmap_anchored_at_the_learners_current_band(): void
     {
         $this->seed(GrammarPointSeeder::class);
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::B1]);
 
         $roadmap = $this->generator()->generate($user);
 
-        $this->assertSame('English · A1–B1', $roadmap->title);
+        $this->assertSame('English · B1–C1', $roadmap->title);
         $this->assertSame(RoadmapStatus::Active, $roadmap->status);
         $this->assertTrue($roadmap->user->is($user));
-        $this->assertNotSame(0, $roadmap->lessonCards->count());
+        $this->assertSame(count($this->catalogue()->forLanguage('en')), $roadmap->lessonCards->count());
         $this->assertSame('present_simple', $roadmap->lessonCards->first()->grammarPoint->code);
         $this->assertSame(
-            CefrLevel::B1,
+            CefrLevel::C1,
             $this->catalogue()->find('en', $roadmap->lessonCards->last()->grammarPoint->code)->level,
         );
         $this->assertDatabaseHas('roadmaps', ['user_id' => $user->id, 'status' => RoadmapStatus::Active->value]);
@@ -55,18 +56,75 @@ class RoadmapGeneratorTest extends TestCase
         $this->assertSame($weakestFirst, $ranks);
     }
 
-    public function test_only_the_first_card_can_be_practised(): void
+    public function test_an_a1_learner_starts_with_the_root_a1_nodes_ready_and_dependent_nodes_locked(): void
     {
         $this->seed(GrammarPointSeeder::class);
-        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A2]);
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+
+        $roadmap = $this->generator()->generate($user);
+        $this->assertSame('English · A1–C1', $roadmap->title);
+
+        $readyCodes = $roadmap->lessonCards
+            ->filter(static fn ($card): bool => $card->status === LessonCardStatus::Ready)
+            ->map(static fn ($card): string => $card->grammarPoint->code)
+            ->values()
+            ->all();
+
+        $this->assertSame(['present_simple', 'be_and_there', 'plurals_countability'], $readyCodes);
+
+        $completedCount = $roadmap->lessonCards
+            ->filter(static fn ($card): bool => $card->status === LessonCardStatus::Completed)
+            ->count();
+
+        $this->assertSame(0, $completedCount);
+    }
+
+    public function test_a_higher_band_learner_gets_weaker_bands_pre_completed_and_current_band_entry_nodes_ready(): void
+    {
+        $this->seed(GrammarPointSeeder::class);
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::B1]);
 
         $cards = $this->generator()->generate($user)->lessonCards;
 
-        $this->assertSame(LessonCardStatus::Ready, $cards->first()->status);
-        $this->assertSame(
-            ['locked'],
-            $cards->skip(1)->pluck('status')->map(static fn (LessonCardStatus $status): string => $status->value)->unique()->values()->all(),
-        );
+        foreach ($cards as $card) {
+            $content = $this->catalogue()->find('en', $card->grammarPoint->code);
+            $this->assertNotNull($content);
+
+            if ($content->level->rank() < CefrLevel::B1->rank()) {
+                $this->assertSame(
+                    LessonCardStatus::Completed,
+                    $card->status,
+                    "Expected `{$content->code}` ({$content->level->value}) to be pre-completed for B1 learner.",
+                );
+            }
+        }
+
+        $statusesByCode = $cards->mapWithKeys(static fn ($card): array => [
+            $card->grammarPoint->code => $card->status,
+        ]);
+
+        // B1 nodes whose prerequisites are all in A1/A2 start ready:
+        $this->assertSame(LessonCardStatus::Ready, $statusesByCode['first_conditional']);
+        $this->assertSame(LessonCardStatus::Ready, $statusesByCode['present_perfect_continuous']);
+
+        // `second_conditional` depends on `first_conditional` (also B1), so it stays locked:
+        $this->assertSame(LessonCardStatus::Locked, $statusesByCode['second_conditional']);
+    }
+
+    public function test_existing_mistakes_unlock_their_lesson_cards_on_generation(): void
+    {
+        $this->seed(GrammarPointSeeder::class);
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $articles = GrammarPoint::query()->where('language', 'en')->where('code', 'articles')->sole();
+
+        Mistake::factory()->for($user)->for($articles)->create();
+
+        $roadmap = $this->generator()->generate($user);
+        $articlesCard = $roadmap->lessonCards
+            ->first(static fn ($card): bool => $card->grammarPoint->code === 'articles');
+
+        $this->assertNotNull($articlesCard);
+        $this->assertSame(LessonCardStatus::Ready, $articlesCard->status);
     }
 
     public function test_every_card_carries_the_catalogue_content_of_its_grammar_point(): void
@@ -80,10 +138,6 @@ class RoadmapGeneratorTest extends TestCase
             $content = $this->catalogue()->find('en', $card->grammarPoint->code);
 
             $this->assertNotNull($content, "Card {$card->order_index} has a grammar point outside the catalogue.");
-            $this->assertTrue(
-                $content->level->isAtMost($user->current_level),
-                "Card {$card->order_index} teaches {$content->level->value}, above the learner's band.",
-            );
             $this->assertSame($content->cheatSheet->toArray(), $card->cheat_sheet);
             $this->assertSame($content->practicePrompt, $card->practice_prompt);
         }
@@ -114,7 +168,7 @@ class RoadmapGeneratorTest extends TestCase
         $this->assertDatabaseMissing('roadmaps', ['user_id' => $otherUser->id]);
     }
 
-    public function test_regenerating_archives_the_previous_roadmap_and_keeps_its_cards(): void
+    public function test_regenerating_archives_the_previous_roadmap_and_recalculates_completed_bands(): void
     {
         $this->seed(GrammarPointSeeder::class);
         $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
@@ -129,7 +183,10 @@ class RoadmapGeneratorTest extends TestCase
         $this->assertTrue($user->fresh()->roadmap->is($second), 'The user relation must point at the active roadmap.');
         $this->assertDatabaseCount('roadmaps', 2);
         $this->assertTrue($first->fresh()->lessonCards->isNotEmpty(), 'Archiving a roadmap must not delete its cards.');
-        $this->assertGreaterThan($first->lessonCards->count(), $second->lessonCards->count());
+
+        $firstCompleted = $first->lessonCards->where('status', LessonCardStatus::Completed)->count();
+        $secondCompleted = $second->lessonCards->where('status', LessonCardStatus::Completed)->count();
+        $this->assertGreaterThan($firstCompleted, $secondCompleted);
     }
 
     public function test_it_fails_when_a_catalogue_point_was_never_seeded(): void

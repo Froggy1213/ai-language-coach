@@ -54,12 +54,12 @@ class GenerateRoadmapMutationTest extends TestCase
         $response = $this->graphQL(self::GENERATE_ROADMAP)->assertGraphQLErrorFree();
 
         $response
-            ->assertJsonPath('data.generateRoadmap.title', 'English · A1–B1')
+            ->assertJsonPath('data.generateRoadmap.title', 'English · B1–C1')
             ->assertJsonPath('data.generateRoadmap.status', 'active')
             ->assertJsonPath('data.generateRoadmap.lessonCards.0.orderIndex', 1)
-            ->assertJsonPath('data.generateRoadmap.lessonCards.0.status', 'ready')
+            ->assertJsonPath('data.generateRoadmap.lessonCards.0.status', 'completed')
             ->assertJsonPath('data.generateRoadmap.lessonCards.0.grammarPoint.code', 'present_simple')
-            ->assertJsonPath('data.generateRoadmap.lessonCards.1.status', 'locked')
+            ->assertJsonPath('data.generateRoadmap.lessonCards.1.status', 'completed')
             ->assertJsonPath('data.generateRoadmap.lessonCards.1.orderIndex', 2);
 
         $this->assertNotSame('', $response->json('data.generateRoadmap.lessonCards.0.practicePrompt'));

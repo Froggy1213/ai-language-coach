@@ -12,10 +12,83 @@ class GrammarCatalogueTest extends TestCase
     public function test_the_english_catalogue_has_teachable_points(): void
     {
         $catalogue = $this->catalogue();
+        $entries = $catalogue->forLanguage('en');
 
-        $this->assertNotSame([], $catalogue->forLanguage('en'));
+        $this->assertCount(38, $entries);
+        $this->assertSame('present_simple', $entries[0]->code);
         $this->assertSame(CefrLevel::A1, $catalogue->find('en', 'present_simple')?->level);
         $this->assertNull($catalogue->find('en', 'not_a_grammar_point'));
+    }
+
+    public function test_the_english_catalogue_forms_a_valid_topologically_sorted_dag(): void
+    {
+        $catalogue = $this->catalogue();
+        $entries = $catalogue->forLanguage('en');
+
+        $byCode = [];
+        $positions = [];
+        $roots = [];
+
+        foreach ($entries as $index => $content) {
+            $byCode[$content->code] = $content;
+            $positions[$content->code] = $index;
+
+            if ($content->prerequisites === []) {
+                $roots[] = $content->code;
+                $this->assertSame(
+                    CefrLevel::A1,
+                    $content->level,
+                    "Root node `{$content->code}` must be at A1."
+                );
+            }
+        }
+
+        $this->assertSame(
+            ['present_simple', 'be_and_there', 'plurals_countability'],
+            $roots,
+            'Expected the three foundational A1 roots in teaching order.'
+        );
+
+        foreach ($entries as $content) {
+            foreach ($content->prerequisites as $prereqCode) {
+                $this->assertArrayHasKey(
+                    $prereqCode,
+                    $byCode,
+                    "`{$content->code}` references unknown prerequisite `{$prereqCode}`."
+                );
+
+                $prereq = $byCode[$prereqCode];
+
+                $this->assertLessThanOrEqual(
+                    $content->level->rank(),
+                    $prereq->level->rank(),
+                    "`{$content->code}` ({$content->level->value}) depends on higher-level `{$prereqCode}` ({$prereq->level->value})."
+                );
+
+                $this->assertLessThan(
+                    $positions[$content->code],
+                    $positions[$prereqCode],
+                    "Prerequisite `{$prereqCode}` must appear before `{$content->code}` in topological order."
+                );
+            }
+        }
+    }
+
+    public function test_it_exposes_prerequisites_for_a_point_and_as_a_full_map(): void
+    {
+        $catalogue = $this->catalogue();
+
+        $this->assertSame([], $catalogue->prerequisitesOf('en', 'present_simple'));
+        $this->assertSame(['present_simple', 'be_and_there'], $catalogue->prerequisitesOf('en', 'question_forms'));
+        $this->assertSame(['passive_present_past', 'gerunds_infinitives'], $catalogue->prerequisitesOf('en', 'causative_make_let'));
+        $this->assertSame([], $catalogue->prerequisitesOf('en', 'not_a_grammar_point'));
+
+        $map = $catalogue->prerequisiteMap('en');
+
+        $this->assertCount(38, $map);
+        $this->assertSame([], $map['present_simple']);
+        $this->assertSame(['third_conditional', 'wish_if_only'], $map['mixed_conditionals']);
+        $this->assertSame([], $catalogue->prerequisiteMap('xx'));
     }
 
     public function test_every_entry_has_the_content_a_lesson_card_needs(): void

@@ -30,6 +30,12 @@ class GrammarPointContentTest extends TestCase
                 'examples' => ['I work every day.'],
                 'pitfalls' => [''],
             ]])],
+            'prerequisites is not a list' => [self::entry(['prerequisites' => 'present_simple'])],
+            'prerequisites is an associative array' => [self::entry(['prerequisites' => ['first' => 'be_and_there']])],
+            'prerequisites with an empty string' => [self::entry(['prerequisites' => ['']])],
+            'prerequisites with an invalid code' => [self::entry(['prerequisites' => ['Present-Simple']])],
+            'prerequisites with a self-reference' => [self::entry(['prerequisites' => ['present_simple']])],
+            'prerequisites with duplicates' => [self::entry(['prerequisites' => ['be_and_there', 'be_and_there']])],
         ];
     }
 
@@ -53,6 +59,16 @@ class GrammarPointContentTest extends TestCase
         ], $content->cheatSheet->toArray());
         $this->assertSame('en', $content->language);
         $this->assertSame('present_simple', $content->code);
+        $this->assertSame([], $content->prerequisites);
+    }
+
+    public function test_it_parses_explicit_prerequisites(): void
+    {
+        $content = GrammarPointContent::fromArray('en', 'present_continuous', self::entry([
+            'prerequisites' => ['present_simple', 'be_and_there'],
+        ]));
+
+        $this->assertSame(['present_simple', 'be_and_there'], $content->prerequisites);
     }
 
     /**

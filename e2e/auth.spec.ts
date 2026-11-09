@@ -34,7 +34,9 @@ test.describe('Authentication flow @smoke', () => {
     await expect(nav.getByRole('link', { name: '今日', exact: true })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'ロードマップ', exact: true })).toBeVisible();
     await expect(nav.getByRole('link', { name: '会話', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: '復習', exact: true })).toBeVisible();
+    // The due-review badge appends its count to the link's accessible name
+    // ("復習 4"), so the exact match would only hold on an empty queue.
+    await expect(nav.getByRole('link', { name: /^復習( \d+)?$/ })).toBeVisible();
     await expect(signedInShell(page)).toBeVisible();
 
     // 4. The level-assessment affordance moved out of the old header link and now

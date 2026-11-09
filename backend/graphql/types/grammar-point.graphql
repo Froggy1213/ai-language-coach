@@ -14,4 +14,10 @@ type GrammarPoint {
 
     "Grouping used on the review screen."
     category: String!
+
+    "CEFR band this point is taught at; null for the uncategorized sentinel."
+    level: CefrLevel
+
+    "Every one of these must be completed before this point should be practised."
+    prerequisites: [GrammarPoint!]! @belongsToMany @orderBy(column: "code")
 }

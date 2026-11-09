@@ -6,15 +6,18 @@ import { count, COUNTER } from '~/utils/format'
 /**
  * ロードマップ — the learning path.
  *
- * A **Compare/Explore** surface: the learner is reading a sequence to understand
- * where they are in it. So it is one continuous vertical path with the current
- * stop marked, not a grid of equal-weight cards.
+ * A **Compare/Explore** surface: the learner is reading the full A1–C1 grammar
+ * graph or sequence to understand where they are, which topics are unlocked,
+ * and which topics need practice from recent conversations.
  */
 const {
   roadmap,
+  readyCard,
   completedCount,
   totalCount,
   allDone,
+  view,
+  setView,
   generating,
   generateError,
   generate,
@@ -40,12 +43,50 @@ const {
     />
 
     <template v-else-if="roadmap">
-      <div class="max-w-md">
-        <UiProgress
-          :value="completedCount"
-          :total="totalCount"
-          :label="copy.progress"
-        />
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div class="w-full max-w-md flex-1">
+          <UiProgress
+            :value="completedCount"
+            :total="totalCount"
+            :label="copy.progress"
+          />
+        </div>
+
+        <!-- View segmented control (マップ / リスト) -->
+        <div
+          class="inline-flex rounded-full border border-[var(--line-strong)] bg-[var(--surface)] p-0.5"
+          role="group"
+          :aria-label="copy.title"
+        >
+          <button
+            type="button"
+            class="rounded-full px-3.5 py-1 text-[0.8125rem] font-medium transition-colors"
+            :class="
+              view === 'graph'
+                ? 'bg-[var(--accent)] text-[var(--accent-ink)]'
+                : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
+            "
+            :aria-pressed="view === 'graph'"
+            data-testid="roadmap-view-graph"
+            @click="setView('graph')"
+          >
+            {{ copy.views.graph }}
+          </button>
+          <button
+            type="button"
+            class="rounded-full px-3.5 py-1 text-[0.8125rem] font-medium transition-colors"
+            :class="
+              view === 'list'
+                ? 'bg-[var(--accent)] text-[var(--accent-ink)]'
+                : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
+            "
+            :aria-pressed="view === 'list'"
+            data-testid="roadmap-view-list"
+            @click="setView('list')"
+          >
+            {{ copy.views.list }}
+          </button>
+        </div>
       </div>
 
       <p v-if="allDone" class="flex items-center gap-2 text-[0.9375rem] text-[var(--color-sage-400)]">
@@ -53,11 +94,18 @@ const {
         {{ copy.allDone }}
       </p>
 
-      <ol class="mt-2">
+      <RoadmapGraph
+        v-if="view === 'graph'"
+        :cards="roadmap.lessonCards"
+        :recommended-card-id="readyCard?.id ?? null"
+      />
+
+      <ol v-else class="mt-2">
         <RoadmapLesson
           v-for="(card, index) in roadmap.lessonCards"
           :key="card.id"
           :card="card"
+          :recommended="card.id === readyCard?.id"
           :last="index === roadmap.lessonCards.length - 1"
         />
       </ol>

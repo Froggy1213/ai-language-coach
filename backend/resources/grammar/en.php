@@ -5,10 +5,12 @@
 | English grammar catalogue (A1–C1)
 |--------------------------------------------------------------------------
 |
-| One entry per teachable grammar point, written in teaching order. Together
-| with the per-language `uncategorized` sentinel these entries are the
-| `grammar_points` table: GrammarPointSeeder upserts them, RoadmapGenerator
-| turns the ones at or below a learner's CEFR band into lesson cards.
+| One entry per teachable grammar point, written in topological teaching
+| order (A1 → C1, every prerequisite earlier than the point that depends on
+| it). Together with the per-language `uncategorized` sentinel these entries
+| are the `grammar_points` table: GrammarPointSeeder upserts them and syncs
+| their `prerequisites` edges, and RoadmapGenerator builds the learner's
+| knowledge graph from the full catalogue.
 |
 | `code` is matched against LLM output when a mistake is classified (plan §5),
 | so treat codes as stable — renaming one orphans the mistakes that point at
@@ -29,6 +31,7 @@ return [
         'title' => 'Present Simple',
         'category' => 'tenses',
         'level' => 'A1',
+        'prerequisites' => [],
         'cheat_sheet' => [
             'rule' => 'Use the present simple for habits, routines, permanent situations and general facts.',
             'formula' => 'I/you/we/they + base verb · he/she/it + base verb + -s · do/does for questions and negatives',
@@ -46,10 +49,55 @@ return [
         'practice_prompt' => 'Describe your usual weekday: what you always, usually and never do, and at what time.',
     ],
 
+    'be_and_there' => [
+        'title' => 'be, there is / there are',
+        'category' => 'verbs',
+        'level' => 'A1',
+        'prerequisites' => [],
+        'cheat_sheet' => [
+            'rule' => 'Use be to say what something is or where it is, and there is/there are to say that something exists.',
+            'formula' => 'am/is/are · was/were · there is + singular · there are + plural',
+            'examples' => [
+                'She is a nurse.',
+                'There is a park behind my house.',
+                'There were two messages for you.',
+            ],
+            'pitfalls' => [
+                "Match the verb to the real subject: 'There is two problems' → 'There are two problems'.",
+                "Japanese adjectives stand alone without a copula, so be gets dropped: say 'He is tired', not 'He tired'.",
+                "Use it is for weather, time and distance: 'It is cold', not 'There is cold'.",
+            ],
+        ],
+        'practice_prompt' => 'Describe your home room by room: what there is in each one and where the furniture is.',
+    ],
+
+    'question_forms' => [
+        'title' => 'Questions: word order & do/did',
+        'category' => 'clauses',
+        'level' => 'A1',
+        'prerequisites' => ['present_simple', 'be_and_there'],
+        'cheat_sheet' => [
+            'rule' => 'Form questions by placing be or an auxiliary (do/does/did) before the subject, with any question word at the very start.',
+            'formula' => 'Am/Is/Are/Was/Were + subject …? · (Wh-word +) do/does/did + subject + base verb …?',
+            'examples' => [
+                'Where do you live?',
+                'Did she call you last night?',
+                'Are you ready for the meeting?',
+            ],
+            'pitfalls' => [
+                "Do not keep statement order and rely only on rising intonation: ask 'Do you like coffee?', not 'You like coffee?' in neutral speech.",
+                "Never combine be with do/does/did: 'Are you agree?' and 'Do you are ready?' are both wrong.",
+                "After does and did, return the main verb to its base form: 'Where did you go?', not 'Where did you went?'.",
+            ],
+        ],
+        'practice_prompt' => 'Interview your partner as if you have just met: ask three yes/no questions and three wh-questions about their daily life and last weekend.',
+    ],
+
     'present_continuous' => [
         'title' => 'Present Continuous',
         'category' => 'tenses',
         'level' => 'A1',
+        'prerequisites' => ['present_simple', 'be_and_there'],
         'cheat_sheet' => [
             'rule' => 'Use the present continuous for actions happening now, around now, or already arranged for the near future.',
             'formula' => 'am/is/are + verb-ing',
@@ -70,6 +118,7 @@ return [
         'title' => 'Past Simple',
         'category' => 'tenses',
         'level' => 'A1',
+        'prerequisites' => ['present_simple'],
         'cheat_sheet' => [
             'rule' => 'Use the past simple for finished actions at a known or finished time in the past.',
             'formula' => 'regular: verb + -ed · irregular: second form (go → went) · questions and negatives: did + base verb',
@@ -87,52 +136,11 @@ return [
         'practice_prompt' => 'Tell the story of your last weekend in five sentences, with time markers: on Saturday morning, then, after that, in the evening.',
     ],
 
-    'be_and_there' => [
-        'title' => 'be, there is / there are',
-        'category' => 'verbs',
-        'level' => 'A1',
-        'cheat_sheet' => [
-            'rule' => 'Use be to say what something is or where it is, and there is/there are to say that something exists.',
-            'formula' => 'am/is/are · was/were · there is + singular · there are + plural',
-            'examples' => [
-                'She is a nurse.',
-                'There is a park behind my house.',
-                'There were two messages for you.',
-            ],
-            'pitfalls' => [
-                "Match the verb to the real subject: 'There is two problems' → 'There are two problems'.",
-                "Japanese adjectives stand alone without a copula, so be gets dropped: say 'He is tired', not 'He tired'.",
-                "Use it is for weather, time and distance: 'It is cold', not 'There is cold'.",
-            ],
-        ],
-        'practice_prompt' => 'Describe your home room by room: what there is in each one and where the furniture is.',
-    ],
-
-    'articles' => [
-        'title' => 'a / an / the',
-        'category' => 'nouns',
-        'level' => 'A1',
-        'cheat_sheet' => [
-            'rule' => 'Use a/an for one non-specific thing, the for something both speakers can identify, and no article for general plurals and abstract nouns.',
-            'formula' => 'a + consonant sound · an + vowel sound · the + specific or already mentioned · zero article for general statements',
-            'examples' => [
-                'I bought a laptop. The laptop is very light.',
-                'She is an engineer.',
-                'Cats sleep a lot.',
-            ],
-            'pitfalls' => [
-                "Choose a/an by sound, not spelling: 'an hour', 'a university'.",
-                "Do not use the for general statements: 'I like music', not 'I like the music'.",
-                'Japanese has no articles either, so they are the most frequently dropped words in A1 speech — check every noun.',
-            ],
-        ],
-        'practice_prompt' => 'Describe the things on your desk, then say which of them you use every day and why.',
-    ],
-
     'plurals_countability' => [
         'title' => 'Plurals & countable nouns',
         'category' => 'nouns',
         'level' => 'A1',
+        'prerequisites' => [],
         'cheat_sheet' => [
             'rule' => 'Countable nouns have a singular and a plural; uncountable nouns have no plural and take a singular verb.',
             'formula' => 'regular plural: + -s/-es · irregular: man → men, child → children · uncountable: money, water, advice, information, furniture',
@@ -150,12 +158,78 @@ return [
         'practice_prompt' => 'Say what you bought last week and how much of it: two apples, a bottle of water, some rice.',
     ],
 
+    'articles' => [
+        'title' => 'a / an / the',
+        'category' => 'nouns',
+        'level' => 'A1',
+        'prerequisites' => ['plurals_countability'],
+        'cheat_sheet' => [
+            'rule' => 'Use a/an for one non-specific thing, the for something both speakers can identify, and no article for general plurals and abstract nouns.',
+            'formula' => 'a + consonant sound · an + vowel sound · the + specific or already mentioned · zero article for general statements',
+            'examples' => [
+                'I bought a laptop. The laptop is very light.',
+                'She is an engineer.',
+                'Cats sleep a lot.',
+            ],
+            'pitfalls' => [
+                "Choose a/an by sound, not spelling: 'an hour', 'a university'.",
+                "Do not use the for general statements: 'I like music', not 'I like the music'.",
+                'Japanese has no articles either, so they are the most frequently dropped words in A1 speech — check every noun.',
+            ],
+        ],
+        'practice_prompt' => 'Describe the things on your desk, then say which of them you use every day and why.',
+    ],
+
+    'quantifiers' => [
+        'title' => 'some, any, much, many, a lot of',
+        'category' => 'nouns',
+        'level' => 'A1',
+        'prerequisites' => ['plurals_countability'],
+        'cheat_sheet' => [
+            'rule' => 'Match the quantifier to countability and sentence type: some in affirmatives and polite offers, any in negatives and open questions, many with plurals, and much with uncountables.',
+            'formula' => 'some + plural/uncountable (affirmative, offers) · any + plural/uncountable (negative, questions) · many + plural · much + uncountable · a lot of + either',
+            'examples' => [
+                'We have some fresh coffee, but we do not have any milk.',
+                'How much time do we have before the train leaves?',
+                'There are a lot of small cafés in this neighbourhood.',
+            ],
+            'pitfalls' => [
+                "Match how many / how much to countability: 'How many money?' is wrong — say 'How much money?'.",
+                "In casual affirmative sentences, 'much' sounds unnatural on its own: say 'I spent a lot of time', not 'I spent much time'.",
+                "Use some, not any, when offering or requesting: 'Would you like some tea?', 'Could I have some water?'.",
+            ],
+        ],
+        'practice_prompt' => 'Open your fridge in your mind and tell me what is inside, what is missing, and how much time and money you spend cooking each week.',
+    ],
+
     // ---------------------------------------------------------------- A2 --
+
+    'prepositions_time_place' => [
+        'title' => 'Prepositions of time & place',
+        'category' => 'prepositions',
+        'level' => 'A2',
+        'prerequisites' => ['be_and_there'],
+        'cheat_sheet' => [
+            'rule' => 'Use in for months, years, seasons and enclosed spaces; on for days, dates and surfaces; at for clock times, points and events.',
+            'formula' => 'in July / in 2026 / in the room · on Monday / on 5 May / on the wall · at 8 pm / at the door / at a party',
+            'examples' => [
+                'The lesson starts at seven on Tuesday.',
+                'I was born in 1998 in a small town.',
+                'The keys are on the table.',
+            ],
+            'pitfalls' => [
+                'Fixed phrases break the rule: at night, in the morning, on Friday night.',
+                'Japanese particles cover time, place and means with a single form, so one preposition gets overworked — decide whether it is a time, a surface or a place.',
+            ],
+        ],
+        'practice_prompt' => 'Describe your next week using in, on and at at least six times.',
+    ],
 
     'past_continuous' => [
         'title' => 'Past Continuous',
         'category' => 'tenses',
         'level' => 'A2',
+        'prerequisites' => ['past_simple', 'present_continuous'],
         'cheat_sheet' => [
             'rule' => 'Use the past continuous for an action in progress at a moment in the past, often interrupted by a shorter action.',
             'formula' => 'was/were + verb-ing · with the past simple for the interrupting action',
@@ -177,6 +251,7 @@ return [
         'title' => 'Present Perfect',
         'category' => 'tenses',
         'level' => 'A2',
+        'prerequisites' => ['past_simple'],
         'cheat_sheet' => [
             'rule' => 'Use the present perfect for past actions whose result or time frame reaches the present, and for experiences with no stated time.',
             'formula' => 'have/has + past participle · ever/never/just/already/yet · for + duration · since + starting point',
@@ -194,10 +269,33 @@ return [
         'practice_prompt' => 'Three things you have never done, two you have just done, and how long you have known your closest friend.',
     ],
 
+    'used_to' => [
+        'title' => 'used to & be/get used to',
+        'category' => 'verbs',
+        'level' => 'A2',
+        'prerequisites' => ['past_simple', 'present_continuous'],
+        'cheat_sheet' => [
+            'rule' => 'Use used to + base verb for past habits or states that are no longer true, and be/get used to + noun or -ing for being or becoming accustomed to something.',
+            'formula' => 'used to + base verb · did not use to + base verb · be/get used to + noun / verb-ing',
+            'examples' => [
+                'I used to play baseball in high school, but I do not have time now.',
+                'She was not used to speaking English on the phone at first.',
+                'You will soon get used to waking up early.',
+            ],
+            'pitfalls' => [
+                "Do not confuse the two patterns: 'I used to live alone' (past only) vs 'I am used to living alone' (it feels normal to me now).",
+                "There is no present form 'use to' for current habits — say 'I usually take the train', not 'I use to take the train'.",
+                "After be/get used to, the 'to' is a preposition, so a verb must end in -ing: 'used to working', not 'used to work'.",
+            ],
+        ],
+        'practice_prompt' => 'Talk about two habits you used to have as a child, and two things in your current life that took time to get used to.',
+    ],
+
     'future_going_to' => [
         'title' => 'be going to',
         'category' => 'tenses',
         'level' => 'A2',
+        'prerequisites' => ['be_and_there', 'present_continuous'],
         'cheat_sheet' => [
             'rule' => 'Use be going to for plans you have already decided and for predictions based on what you can see.',
             'formula' => 'am/is/are + going to + base verb',
@@ -218,6 +316,7 @@ return [
         'title' => 'will for the future',
         'category' => 'tenses',
         'level' => 'A2',
+        'prerequisites' => ['present_simple'],
         'cheat_sheet' => [
             'rule' => 'Use will for decisions made at the moment of speaking, offers, promises and neutral predictions.',
             'formula' => "will + base verb · won't + base verb · Shall I/we …?",
@@ -239,6 +338,7 @@ return [
         'title' => 'Comparatives & superlatives',
         'category' => 'adjectives',
         'level' => 'A2',
+        'prerequisites' => ['be_and_there'],
         'cheat_sheet' => [
             'rule' => 'Compare two things with the comparative and three or more with the superlative.',
             'formula' => 'short adjectives: -er/-est · longer ones: more/most + adjective · equality: as … as',
@@ -256,10 +356,33 @@ return [
         'practice_prompt' => 'Compare two cities you know well: transport, prices, weather and people.',
     ],
 
+    'ed_ing_adjectives' => [
+        'title' => '-ed and -ing adjectives',
+        'category' => 'adjectives',
+        'level' => 'A2',
+        'prerequisites' => ['be_and_there'],
+        'cheat_sheet' => [
+            'rule' => 'Use -ed adjectives to describe how a person feels, and -ing adjectives to describe the thing, situation or person that causes that feeling.',
+            'formula' => 'person + be/feel + -ed (bored, excited, interested, confused, tired) · thing/situation + be + -ing (boring, exciting, interesting, confusing, tiring)',
+            'examples' => [
+                'The lecture was boring, so half the audience was bored.',
+                'I am really excited about our trip to Hokkaido next month.',
+                'The instructions were confusing, and I got confused at step three.',
+            ],
+            'pitfalls' => [
+                "Saying 'I am boring' means you make other people feel bored — say 'I am bored' when you have nothing to do.",
+                "Do not use -ing for your own emotion: 'I am exciting about the trip' → 'I am excited about the trip'.",
+                'Match the preposition to the -ed adjective: interested in, excited about, surprised at/by, tired of.',
+            ],
+        ],
+        'practice_prompt' => 'Tell me about a film, a book or a meeting from this month: what made it interesting, boring or confusing, and how you felt during it.',
+    ],
+
     'modals_ability_permission' => [
         'title' => 'can / could / may',
         'category' => 'modals',
         'level' => 'A2',
+        'prerequisites' => ['present_simple', 'question_forms'],
         'cheat_sheet' => [
             'rule' => 'Use can and could for ability, and can/could/may for permission and polite requests.',
             'formula' => 'can/could + base verb · be able to for other tenses · May I …? · Could you …?',
@@ -277,32 +400,13 @@ return [
         'practice_prompt' => 'Say what you can do well, what you could not do five years ago, and make three polite requests.',
     ],
 
-    'prepositions_time_place' => [
-        'title' => 'Prepositions of time & place',
-        'category' => 'prepositions',
-        'level' => 'A2',
-        'cheat_sheet' => [
-            'rule' => 'Use in for months, years, seasons and enclosed spaces; on for days, dates and surfaces; at for clock times, points and events.',
-            'formula' => 'in July / in 2026 / in the room · on Monday / on 5 May / on the wall · at 8 pm / at the door / at a party',
-            'examples' => [
-                'The lesson starts at seven on Tuesday.',
-                'I was born in 1998 in a small town.',
-                'The keys are on the table.',
-            ],
-            'pitfalls' => [
-                'Fixed phrases break the rule: at night, in the morning, on Friday night.',
-                'Japanese particles cover time, place and means with a single form, so one preposition gets overworked — decide whether it is a time, a surface or a place.',
-            ],
-        ],
-        'practice_prompt' => 'Describe your next week using in, on and at at least six times.',
-    ],
-
     // ---------------------------------------------------------------- B1 --
 
     'present_perfect_continuous' => [
         'title' => 'Present Perfect Continuous',
         'category' => 'tenses',
         'level' => 'B1',
+        'prerequisites' => ['present_perfect', 'present_continuous'],
         'cheat_sheet' => [
             'rule' => 'Use it for an activity that started in the past and is still going on, or has just stopped with a visible result.',
             'formula' => 'have/has been + verb-ing · for + duration · since + starting point',
@@ -323,6 +427,7 @@ return [
         'title' => 'Past Perfect',
         'category' => 'tenses',
         'level' => 'B1',
+        'prerequisites' => ['past_simple', 'present_perfect'],
         'cheat_sheet' => [
             'rule' => 'Use it for the earlier of two past actions, and for a state that was already true before a past moment.',
             'formula' => 'had + past participle · with before/after/already/by the time',
@@ -343,6 +448,7 @@ return [
         'title' => 'First conditional',
         'category' => 'conditionals',
         'level' => 'B1',
+        'prerequisites' => ['present_simple', 'future_will'],
         'cheat_sheet' => [
             'rule' => 'Use it for a real, likely future condition and its result.',
             'formula' => "If + present simple, will/won't + base verb",
@@ -364,6 +470,7 @@ return [
         'title' => 'Second conditional',
         'category' => 'conditionals',
         'level' => 'B1',
+        'prerequisites' => ['first_conditional', 'past_simple'],
         'cheat_sheet' => [
             'rule' => 'Use it for an unreal or unlikely present or future situation, and for polite hypothetical advice.',
             'formula' => 'If + past simple, would + base verb',
@@ -384,6 +491,7 @@ return [
         'title' => 'Passive: present & past',
         'category' => 'passive',
         'level' => 'B1',
+        'prerequisites' => ['be_and_there', 'present_perfect'],
         'cheat_sheet' => [
             'rule' => 'Use the passive when the action matters more than the doer, or the doer is unknown or obvious.',
             'formula' => 'am/is/are + past participle · was/were + past participle · by + agent',
@@ -405,6 +513,7 @@ return [
         'title' => 'Defining relative clauses',
         'category' => 'clauses',
         'level' => 'B1',
+        'prerequisites' => ['articles', 'be_and_there'],
         'cheat_sheet' => [
             'rule' => 'Use a relative clause to say which person or thing you mean without starting a new sentence.',
             'formula' => 'who for people · which for things · that for both · whose for possession · where for places',
@@ -426,6 +535,7 @@ return [
         'title' => 'must / have to / should',
         'category' => 'modals',
         'level' => 'B1',
+        'prerequisites' => ['modals_ability_permission'],
         'cheat_sheet' => [
             'rule' => "Use must and have to for obligation, mustn't for prohibition, don't have to for no obligation, and should for advice.",
             'formula' => "must + base verb · have to + base verb · should + base verb · don't have to + base verb",
@@ -443,10 +553,33 @@ return [
         'practice_prompt' => 'List the rules of your workplace or your city, then give a friend three pieces of advice.',
     ],
 
+    'modals_deduction' => [
+        'title' => "Modals of deduction: must, might, can't",
+        'category' => 'modals',
+        'level' => 'B1',
+        'prerequisites' => ['modals_ability_permission', 'present_perfect'],
+        'cheat_sheet' => [
+            'rule' => "Use must when you are almost sure something is true, might/may/could when it is possible, and can't when you are sure it is impossible.",
+            'formula' => "present: must / might / could / can't + base verb (or be + verb-ing) · past: must / might / could / can't + have + past participle",
+            'examples' => [
+                'Her lights are off — she must be asleep.',
+                'He is not answering; he might have left his phone at the office.',
+                "That can't be Kenji at the door — he is in Osaka today.",
+            ],
+            'pitfalls' => [
+                "The opposite of 'must be' (logical certainty) is 'can't be', not 'mustn't be' ('mustn't' is for prohibition).",
+                "Japanese speakers often start every guess with 'Maybe …' — use might, could, must or can't inside the verb phrase instead.",
+                "For past deduction, keep 'have + past participle': 'He must forgot' → 'He must have forgotten'.",
+            ],
+        ],
+        'practice_prompt' => 'A colleague has not arrived at work and is not picking up the phone: make four guesses about what might be happening now and what must or cannot have happened this morning.',
+    ],
+
     'reported_speech' => [
         'title' => 'Reported speech',
         'category' => 'clauses',
         'level' => 'B1',
+        'prerequisites' => ['past_simple', 'present_perfect', 'question_forms'],
         'cheat_sheet' => [
             'rule' => 'When you report what someone said, move the tense one step back and adjust pronouns and time words.',
             'formula' => 'said (that) + shifted tense · told + person · asked if/whether · asked + wh-word',
@@ -470,6 +603,7 @@ return [
         'title' => 'Third conditional',
         'category' => 'conditionals',
         'level' => 'B2',
+        'prerequisites' => ['second_conditional', 'past_perfect'],
         'cheat_sheet' => [
             'rule' => 'Use it for an unreal past situation and its imaginary result — the condition can no longer be changed.',
             'formula' => 'If + had + past participle, would have + past participle',
@@ -491,6 +625,7 @@ return [
         'title' => 'Passive: perfect & modal',
         'category' => 'passive',
         'level' => 'B2',
+        'prerequisites' => ['passive_present_past', 'modals_obligation_advice'],
         'cheat_sheet' => [
             'rule' => 'Build more complex passives with perfect and modal auxiliaries when the focus stays on the action.',
             'formula' => 'have/has been + past participle · had been + past participle · modal + be + past participle',
@@ -511,6 +646,7 @@ return [
         'title' => 'Gerunds & infinitives',
         'category' => 'verbs',
         'level' => 'B2',
+        'prerequisites' => ['present_continuous', 'used_to'],
         'cheat_sheet' => [
             'rule' => 'Some verbs take a gerund, some take an infinitive, and a few take both with a change of meaning.',
             'formula' => 'enjoy/avoid/suggest/recommend + verb-ing · decide/offer/promise/refuse + to + verb · stop/remember/try + either',
@@ -528,10 +664,33 @@ return [
         'practice_prompt' => 'Describe what you enjoy doing, what you avoid, and what you have decided to change.',
     ],
 
+    'causative_make_let' => [
+        'title' => 'have/get something done, make & let',
+        'category' => 'verbs',
+        'level' => 'B2',
+        'prerequisites' => ['passive_present_past', 'gerunds_infinitives'],
+        'cheat_sheet' => [
+            'rule' => 'Use have/get + object + past participle when someone else performs a service for you, and make/let + object + base verb for forcing or allowing someone to act.',
+            'formula' => 'have/get + object + past participle · make + person + base verb · let + person + base verb · be made + to + base verb',
+            'examples' => [
+                'I had my hair cut yesterday before the interview.',
+                'My manager made me rewrite the proposal twice.',
+                'They let us work from home on Fridays.',
+            ],
+            'pitfalls' => [
+                "Saying 'I cut my hair' means you used the scissors yourself — say 'I had my hair cut' or 'I got my hair cut' when a hairdresser did it.",
+                "Never put 'to' after active make or let: 'He made me to wait' and 'She let me to go' are wrong.",
+                "let has no passive form — use 'be allowed to': 'We were allowed to leave early', not 'We were let leave'.",
+            ],
+        ],
+        'practice_prompt' => 'Talk about two services you recently had done, one thing a teacher or boss made you do, and one thing your parents let you do as a teenager.',
+    ],
+
     'future_perfect_continuous' => [
         'title' => 'Future perfect & future continuous',
         'category' => 'tenses',
         'level' => 'B2',
+        'prerequisites' => ['future_will', 'present_perfect_continuous', 'future_going_to'],
         'cheat_sheet' => [
             'rule' => 'Use the future continuous for an action in progress at a future moment, and the future perfect for something completed before it.',
             'formula' => 'will be + verb-ing · will have + past participle · by + time',
@@ -552,6 +711,7 @@ return [
         'title' => 'wish / if only',
         'category' => 'clauses',
         'level' => 'B2',
+        'prerequisites' => ['second_conditional', 'past_perfect'],
         'cheat_sheet' => [
             'rule' => "Use wish and if only for a regret or a desire that the present, the past or someone's behaviour were different.",
             'formula' => "wish + past simple (present) · wish + had + past participle (past) · wish + would (other people's habits)",
@@ -573,6 +733,7 @@ return [
         'title' => 'although / despite / however',
         'category' => 'discourse',
         'level' => 'B2',
+        'prerequisites' => ['relative_clauses', 'gerunds_infinitives'],
         'cheat_sheet' => [
             'rule' => 'Use concession linkers to set an unexpected fact against the main statement.',
             'formula' => 'although/even though + clause · despite/in spite of + noun or verb-ing · however + new sentence with a comma',
@@ -596,6 +757,7 @@ return [
         'title' => 'Mixed conditionals',
         'category' => 'conditionals',
         'level' => 'C1',
+        'prerequisites' => ['third_conditional', 'wish_if_only'],
         'cheat_sheet' => [
             'rule' => 'Mix the time frames of the two halves when the condition and its result belong to different times.',
             'formula' => 'If + had + past participle, would + base verb (past cause, present result) · If + past simple, would have + past participle (present trait, past result)',
@@ -616,6 +778,7 @@ return [
         'title' => 'Inversion after negative adverbials',
         'category' => 'advanced',
         'level' => 'C1',
+        'prerequisites' => ['present_perfect', 'third_conditional'],
         'cheat_sheet' => [
             'rule' => 'After a fronted negative or restrictive adverbial, invert the subject and the auxiliary for emphasis.',
             'formula' => 'Never/Rarely/Seldom/Little + auxiliary + subject · No sooner had … than · Not only … but also · Hardly had … when',
@@ -637,6 +800,7 @@ return [
         'title' => 'Cleft sentences',
         'category' => 'advanced',
         'level' => 'C1',
+        'prerequisites' => ['relative_clauses', 'passive_present_past'],
         'cheat_sheet' => [
             'rule' => 'Split a sentence into two clauses to focus attention on one piece of information.',
             'formula' => 'It is/was + focus + that/who … · What + clause + is/was … · The reason why … is that …',
@@ -658,8 +822,9 @@ return [
         'title' => 'Participle clauses',
         'category' => 'clauses',
         'level' => 'C1',
+        'prerequisites' => ['relative_clauses', 'passive_perfect_modal'],
         'cheat_sheet' => [
-            'rule' => 'Replace a full clause with a participle when its subject is the same as the main clause, to make writing tighter.',
+            'rule' => 'Replace a full clause with a participle when its subject is the same as the main clause, to make speech and writing tighter.',
             'formula' => 'Having + past participle (earlier action) · verb-ing (same time or reason) · past participle (passive meaning)',
             'examples' => [
                 'Having read the contract, she refused to sign.',
@@ -672,13 +837,14 @@ return [
                 'One participle clause per sentence is usually enough.',
             ],
         ],
-        'practice_prompt' => 'Summarise your last project in four sentences built on participle clauses.',
+        'practice_prompt' => 'Summarise your last project in four spoken sentences built on participle clauses.',
     ],
 
     'subjunctive_mandative' => [
         'title' => 'Mandative subjunctive',
         'category' => 'advanced',
         'level' => 'C1',
+        'prerequisites' => ['modals_obligation_advice', 'reported_speech'],
         'cheat_sheet' => [
             'rule' => 'After verbs and adjectives of demand, suggestion and importance, the that-clause takes the base form of the verb.',
             'formula' => 'suggest/insist/recommend/demand + that + subject + base verb · It is essential/vital that + subject + base verb',
@@ -693,7 +859,7 @@ return [
                 "Where the subjunctive feels stiff, the should-paraphrase is always safe: 'that he should resign'.",
             ],
         ],
-        'practice_prompt' => 'Write five formal recommendations for your company using insist, recommend, demand and It is vital that.',
+        'practice_prompt' => "Speak to your company's board and give five formal recommendations using insist, recommend, demand and It is vital that.",
     ],
 
 ];

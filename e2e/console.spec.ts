@@ -20,6 +20,10 @@ test.describe('Console and network error guards @smoke', () => {
     await appNav(page).getByRole('link', { name: 'ロードマップ', exact: true }).click();
     await expect(page).toHaveURL(/\/roadmap$/);
     await expect(page.getByRole('heading', { level: 1, name: 'ロードマップ' })).toBeVisible();
+
+    // The screen opens on the knowledge map; the lesson rail is the second view.
+    await expect(page.getByTestId('roadmap-view-list')).toBeVisible();
+    await page.getByTestId('roadmap-view-list').click();
     await expect(page.locator('ol > li').first()).toBeVisible();
 
     // 4. Navigate to the level assessment screen — the old /onboarding, which was

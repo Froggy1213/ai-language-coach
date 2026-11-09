@@ -32,6 +32,12 @@ type LessonCard {
 
     "Grammar point this card teaches."
     grammarPoint: GrammarPoint! @belongsTo
+
+    "Number of mistakes recorded on this grammar point in the recent window."
+    recentMistakeCount: Int! @rename(attribute: "recent_mistake_count")
+
+    "True when recent mistakes indicate this topic needs attention."
+    needsPractice: Boolean! @rename(attribute: "needs_practice")
 }
 
 "Reference material generated for a lesson card."

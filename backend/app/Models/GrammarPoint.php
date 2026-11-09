@@ -2,13 +2,15 @@
 
 namespace App\Models;
 
+use App\Enums\CefrLevel;
 use Database\Factories\GrammarPointFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['language', 'code', 'title', 'category'])]
+#[Fillable(['language', 'code', 'title', 'category', 'level'])]
 class GrammarPoint extends Model
 {
     /** @use HasFactory<GrammarPointFactory> */
@@ -26,6 +28,44 @@ class GrammarPoint extends Model
      * `mistakes.grammar_point_id` can stay NOT NULL (plan §5).
      */
     public const UNCATEGORIZED_CODE = 'uncategorized';
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'level' => CefrLevel::class,
+        ];
+    }
+
+    /**
+     * @return BelongsToMany<self, $this>
+     */
+    public function prerequisites(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            self::class,
+            'grammar_point_prerequisites',
+            'grammar_point_id',
+            'prerequisite_grammar_point_id',
+        );
+    }
+
+    /**
+     * @return BelongsToMany<self, $this>
+     */
+    public function unlocks(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            self::class,
+            'grammar_point_prerequisites',
+            'prerequisite_grammar_point_id',
+            'grammar_point_id',
+        );
+    }
 
     /**
      * @return HasMany<LessonCard, $this>

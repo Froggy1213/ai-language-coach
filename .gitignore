@@ -1,38 +1,47 @@
-# Настройки редакторов
+# Настройки редакторов и ОС
 .idea/
 .vscode/
-
-# macOS
+.fleet/
 .DS_Store
+Thumbs.db
+*.swp
 
 # Переменные окружения и ключи
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
+!.env.production.example
 
 # Зависимости
 node_modules/
 vendor/
 
-# Python (voice agent)
+# Python (voice agent, benchmarks, load)
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
-# Сборка и логи
+# Сборка, кэши и логи
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .nuxt/
 .output/
+.nitro/
+.data/
+dist/
 storage/*.key
 
-# Playwright
+# Playwright & E2E
 test-results/
 playwright-report/
-
-
-# Playwright saved session for the e2e smoke suite
+blob-report/
+playwright/.cache/
 e2e/.auth/
 .auth/
 
@@ -40,10 +49,21 @@ e2e/.auth/
 benchmarks/results/*.json
 load/results/*.json
 
-# Terraform: provider cache and local state are machine-specific and enormous
-# (the AWS provider alone is ~650 MB); `.terraform.lock.hcl` stays tracked
-# because it is the dependency lockfile a build must reproduce.
+# Terraform: provider cache, local state, and local variable files
+# (`.terraform.lock.hcl` and `*.tfvars.example` stay tracked)
 infra/terraform/.terraform/
+.terraform/
 *.tfstate
 *.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
 crash.log
+crash.*.log

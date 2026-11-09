@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Review;
 
+use App\Enums\CefrLevel;
 use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
+use App\Grammar\RoadmapGenerator;
 use App\Models\LessonCard;
 use App\Models\Roadmap;
 use App\Models\User;
+use Database\Seeders\GrammarPointSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
@@ -70,6 +73,45 @@ class CompleteLessonCardTest extends TestCase
         $this->assertSame(LessonCardStatus::Completed, $card1->status);
         $this->assertSame(LessonCardStatus::Ready, $card2->status);
         $this->assertSame(LessonCardStatus::Locked, $card3->status);
+    }
+
+    public function test_dag_unlocks_all_dependents_whose_prerequisites_are_satisfied(): void
+    {
+        $this->seed(GrammarPointSeeder::class);
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $roadmap = $this->app->make(RoadmapGenerator::class)->generate($user);
+
+        $cardsByCode = $roadmap->lessonCards
+            ->load('grammarPoint')
+            ->keyBy(static fn (LessonCard $card): string => $card->grammarPoint->code);
+
+        Sanctum::actingAs($user);
+
+        // `plurals_countability` is the sole prerequisite of both `articles` and `quantifiers`.
+        $this->assertSame(LessonCardStatus::Locked, $cardsByCode['articles']->status);
+        $this->assertSame(LessonCardStatus::Locked, $cardsByCode['quantifiers']->status);
+
+        $this->graphQL(self::COMPLETE_CARD, [
+            'lessonCardId' => $cardsByCode['plurals_countability']->getKey(),
+        ])->assertGraphQLErrorFree();
+
+        $this->assertSame(LessonCardStatus::Ready, $cardsByCode['articles']->fresh()->status);
+        $this->assertSame(LessonCardStatus::Ready, $cardsByCode['quantifiers']->fresh()->status);
+
+        // `question_forms` requires both `present_simple` AND `be_and_there`.
+        $this->graphQL(self::COMPLETE_CARD, [
+            'lessonCardId' => $cardsByCode['present_simple']->getKey(),
+        ])->assertGraphQLErrorFree();
+
+        $this->assertSame(LessonCardStatus::Locked, $cardsByCode['question_forms']->fresh()->status);
+        $this->assertSame(LessonCardStatus::Ready, $cardsByCode['past_simple']->fresh()->status);
+
+        $this->graphQL(self::COMPLETE_CARD, [
+            'lessonCardId' => $cardsByCode['be_and_there']->getKey(),
+        ])->assertGraphQLErrorFree();
+
+        $this->assertSame(LessonCardStatus::Ready, $cardsByCode['question_forms']->fresh()->status);
+        $this->assertSame(LessonCardStatus::Ready, $cardsByCode['present_continuous']->fresh()->status);
     }
 
     public function test_completing_the_last_card_of_a_roadmap_succeeds_without_a_next_card(): void

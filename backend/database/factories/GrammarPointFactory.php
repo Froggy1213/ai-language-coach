@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\CefrLevel;
 use App\Models\GrammarPoint;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -22,6 +23,7 @@ class GrammarPointFactory extends Factory
             'code' => fake()->unique()->slug(3),
             'title' => fake()->words(3, true),
             'category' => fake()->word(),
+            'level' => CefrLevel::A1,
         ];
     }
 
@@ -35,6 +37,7 @@ class GrammarPointFactory extends Factory
             'code' => GrammarPoint::UNCATEGORIZED_CODE,
             'title' => 'Uncategorized',
             'category' => 'uncategorized',
+            'level' => null,
         ]);
     }
 }

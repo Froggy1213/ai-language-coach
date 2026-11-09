@@ -14,6 +14,9 @@ use InvalidArgumentException;
  */
 final readonly class GrammarPointContent
 {
+    /**
+     * @param  list<string>  $prerequisites
+     */
     private function __construct(
         public string $language,
         public string $code,
@@ -22,6 +25,7 @@ final readonly class GrammarPointContent
         public CefrLevel $level,
         public CheatSheet $cheatSheet,
         public string $practicePrompt,
+        public array $prerequisites = [],
     ) {}
 
     /**
@@ -53,6 +57,10 @@ final readonly class GrammarPointContent
             throw new InvalidArgumentException("The `practice_prompt` of the {$context} must be a non-empty string.");
         }
 
+        $prerequisites = array_key_exists('prerequisites', $data)
+            ? self::prerequisites($data['prerequisites'], $code, $context)
+            : [];
+
         return new self(
             language: $language,
             code: $code,
@@ -61,6 +69,7 @@ final readonly class GrammarPointContent
             level: $level,
             cheatSheet: CheatSheet::fromArray($data['cheat_sheet'], $context),
             practicePrompt: $data['practice_prompt'],
+            prerequisites: $prerequisites,
         );
     }
 
@@ -71,5 +80,35 @@ final readonly class GrammarPointContent
         }
 
         return $value;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function prerequisites(mixed $value, string $code, string $context): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new InvalidArgumentException("The `prerequisites` of the {$context} must be a list of grammar point codes.");
+        }
+
+        $seen = [];
+
+        foreach ($value as $prerequisite) {
+            if (! is_string($prerequisite) || preg_match('/^[a-z][a-z0-9_]*$/', $prerequisite) !== 1) {
+                throw new InvalidArgumentException("Every entry in `prerequisites` of the {$context} must be a valid grammar point code.");
+            }
+
+            if ($prerequisite === $code) {
+                throw new InvalidArgumentException("The {$context} cannot list itself in `prerequisites`.");
+            }
+
+            if (isset($seen[$prerequisite])) {
+                throw new InvalidArgumentException("The {$context} lists duplicate prerequisite `{$prerequisite}`.");
+            }
+
+            $seen[$prerequisite] = true;
+        }
+
+        return array_values($value);
     }
 }

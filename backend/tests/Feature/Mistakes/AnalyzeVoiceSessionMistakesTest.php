@@ -2,7 +2,10 @@
 
 namespace Tests\Feature\Mistakes;
 
+use App\Enums\CefrLevel;
+use App\Enums\LessonCardStatus;
 use App\Enums\VoiceSessionStatus;
+use App\Grammar\RoadmapGenerator;
 use App\GraphQL\Subscriptions\SessionFeedbackReady;
 use App\Mistakes\AnalyzedMistake;
 use App\Mistakes\AnalyzeVoiceSessionMistakes;
@@ -635,5 +638,41 @@ class AnalyzeVoiceSessionMistakesTest extends TestCase
         $this->assertNull($session->fresh()->goal_review);
         $this->assertTrue($session->fresh()->analyzed);
         $broadcasts->shouldHaveReceived('broadcast')->once();
+    }
+
+    public function test_it_adaptively_unlocks_locked_lesson_cards_for_analysed_mistakes(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en', 'current_level' => CefrLevel::A1]);
+        $roadmap = $this->app->make(RoadmapGenerator::class)->generate($user);
+
+        $articles = GrammarPoint::query()->where('language', 'en')->where('code', 'articles')->firstOrFail();
+        $articlesCard = $roadmap->lessonCards()->where('grammar_point_id', $articles->id)->firstOrFail();
+        $this->assertSame(LessonCardStatus::Locked, $articlesCard->status);
+
+        $session = VoiceSession::factory()->for($user)->scenario('airport_checkin')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'transcript' => [
+                ['turn_id' => 't1', 'transcript' => 'I need window seat on flight.'],
+            ],
+        ]);
+
+        $analyzer = Mockery::mock(MistakeAnalyzer::class);
+        $analyzer->shouldReceive('analyze')->once()->andReturn(new MistakeAnalysisResult([
+            new AnalyzedMistake(
+                grammarPoint: $articles,
+                userUtterance: 'I need window seat',
+                correction: 'I need a window seat',
+                explanation: 'Countable singular nouns require an article.',
+            ),
+        ]));
+
+        $reviewer = Mockery::mock(GoalReviewer::class);
+        $reviewer->shouldReceive('review')->once()->andReturn(new GoalReviewResult(true, []));
+        $broadcasts = $this->spy(BroadcastsSubscriptions::class);
+
+        $job = new AnalyzeVoiceSessionMistakes($session);
+        $job->handle($analyzer, $broadcasts, $reviewer);
+
+        $this->assertSame(LessonCardStatus::Ready, $articlesCard->fresh()->status);
     }
 }

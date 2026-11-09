@@ -33,6 +33,8 @@ RUN npm ci --legacy-peer-deps
 # ---------------------------------------------------------------------------
 FROM deps AS build
 
+ENV NUXT_TELEMETRY_DISABLED=1
+
 COPY . .
 RUN npm run build
 
