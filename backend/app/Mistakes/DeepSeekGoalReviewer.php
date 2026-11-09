@@ -48,7 +48,7 @@ final class DeepSeekGoalReviewer implements GoalReviewer
             throw new GoalReviewFailed('The session has no learner to review.');
         }
 
-        $scenario = $this->catalogue->find($user->target_language, $session->scenario_code);
+        $scenario = $this->catalogue->findForUser($user, $session->scenario_code);
 
         if (! $scenario instanceof ScenarioContent) {
             throw new GoalReviewFailed("The scenario `{$session->scenario_code}` is not in the catalogue.");

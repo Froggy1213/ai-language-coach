@@ -101,4 +101,21 @@ return [
         'timeout_seconds' => (int) env('GOAL_REVIEW_TIMEOUT', 120),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Custom Scenario Drafting
+    |--------------------------------------------------------------------------
+    |
+    | Expands a learner's short situation prompt into a structured role-play
+    | scenario card awaiting confirmation. Runs on DeepSeek-V3 like the other
+    | structured authoring/review boundaries.
+    |
+    */
+
+    'scenario_draft' => [
+        'provider' => env('SCENARIO_DRAFT_PROVIDER', 'deepseek'),
+        'model' => env('SCENARIO_DRAFT_MODEL', 'deepseek-chat'),
+        'timeout_seconds' => (int) env('SCENARIO_DRAFT_TIMEOUT', 60),
+    ],
+
 ];

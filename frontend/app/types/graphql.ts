@@ -54,6 +54,20 @@ export type CheatSheet = {
   rule: Scalars['String']['output'];
 };
 
+/** Visible fields the learner confirms (and may edit) after the AI drafts a custom scenario. */
+export type ConfirmCustomScenarioInput = {
+  aiRole: Scalars['String']['input'];
+  code: Scalars['String']['input'];
+  learnerGoal: Scalars['String']['input'];
+  learnerRole: Scalars['String']['input'];
+  level: CefrLevel;
+  register: Scalars['String']['input'];
+  setting: Scalars['String']['input'];
+  summary: Scalars['String']['input'];
+  title: Scalars['String']['input'];
+  usefulPhrases: Array<Scalars['String']['input']>;
+};
+
 /**
  * Communication review of a scenario session, produced by the after-conversation
  * analysis (M6). It judges whether the learner achieved the scenario's goal, not
@@ -78,6 +92,10 @@ export type GrammarPoint = {
   id: Scalars['ID']['output'];
   /** Language this point belongs to. */
   language: Scalars['String']['output'];
+  /** CEFR band this point is taught at; null for the uncategorized sentinel. */
+  level?: Maybe<CefrLevel>;
+  /** Every one of these must be completed before this point should be practised. */
+  prerequisites: Array<GrammarPoint>;
   /** Human-readable title. */
   title: Scalars['String']['output'];
 };
@@ -91,10 +109,14 @@ export type LessonCard = {
   grammarPoint: GrammarPoint;
   /** Unique primary key. */
   id: Scalars['ID']['output'];
+  /** True when recent mistakes indicate this topic needs attention. */
+  needsPractice: Scalars['Boolean']['output'];
   /** Position within the roadmap. */
   orderIndex: Scalars['Int']['output'];
   /** What the voice agent asks the learner to talk about. */
   practicePrompt: Scalars['String']['output'];
+  /** Number of mistakes recorded on this grammar point in the recent window. */
+  recentMistakeCount: Scalars['Int']['output'];
   /** Whether the card can be practised yet. */
   status: LessonCardStatus;
 };
@@ -128,6 +150,12 @@ export type Mutation = {
    */
   completeLessonCard: LessonCard;
   /**
+   * Confirm and save an AI-drafted custom scenario (including any edits the
+   * learner made to its visible fields) so it appears in the topic list and can
+   * be practised.
+   */
+  confirmCustomScenario: Scenario;
+  /**
    * Presign one S3 POST for an onboarding recording. The signature carries the
    * size and content-type limits, so the bucket rejects a bad upload itself.
    */
@@ -137,6 +165,17 @@ export type Mutation = {
    * Requires password verification and exact confirmation string `DELETE`.
    */
   deleteAccount: Scalars['Boolean']['output'];
+  /**
+   * Delete one of the authenticated learner's custom scenarios. Past voice
+   * sessions that practised it keep their history.
+   */
+  deleteCustomScenario: Scalars['Boolean']['output'];
+  /**
+   * Ask the AI to expand a short learner prompt into a role-play scenario draft
+   * awaiting the learner's confirmation. Passing an existing custom `code`
+   * regenerates that scenario's draft in place.
+   */
+  draftCustomScenario: Scenario;
   /**
    * End the conversation the learner just finished. Moves the session to
    * `completed`, records its duration, deletes the LiveKit room so `room_finished`
@@ -183,6 +222,11 @@ export type MutationCompleteLessonCardArgs = {
 };
 
 
+export type MutationConfirmCustomScenarioArgs = {
+  input: ConfirmCustomScenarioInput;
+};
+
+
 export type MutationCreateAssessmentUploadUrlArgs = {
   contentType: Scalars['String']['input'];
 };
@@ -191,6 +235,19 @@ export type MutationCreateAssessmentUploadUrlArgs = {
 export type MutationDeleteAccountArgs = {
   confirmation: Scalars['String']['input'];
   password: Scalars['String']['input'];
+};
+
+
+export type MutationDeleteCustomScenarioArgs = {
+  code: Scalars['String']['input'];
+};
+
+
+export type MutationDraftCustomScenarioArgs = {
+  code?: InputMaybe<Scalars['String']['input']>;
+  level?: InputMaybe<CefrLevel>;
+  prompt: Scalars['String']['input'];
+  register?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -355,6 +412,8 @@ export type Scenario = {
   __typename?: 'Scenario';
   aiRole: Scalars['String']['output'];
   code: Scalars['String']['output'];
+  /** Whether this scenario was created by the learner rather than the built-in catalogue. */
+  isCustom: Scalars['Boolean']['output'];
   learnerGoal: Scalars['String']['output'];
   learnerRole: Scalars['String']['output'];
   level: CefrLevel;
@@ -363,6 +422,8 @@ export type Scenario = {
   summary: Scalars['String']['output'];
   title: Scalars['String']['output'];
   usefulPhrases: Array<Scalars['String']['output']>;
+  /** The learner's original description when this is a custom scenario. */
+  userPrompt?: Maybe<Scalars['String']['output']>;
 };
 
 export type Subscription = {

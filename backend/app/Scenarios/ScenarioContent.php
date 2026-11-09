@@ -51,13 +51,20 @@ final readonly class ScenarioContent
         public string $openingLine,
         public string $successCriteria,
         public array $usefulPhrases,
+        public bool $isCustom = false,
+        public ?string $userPrompt = null,
     ) {}
 
     /**
      * @param  array<string, mixed>  $data
      */
-    public static function fromArray(string $language, string $code, array $data): self
-    {
+    public static function fromArray(
+        string $language,
+        string $code,
+        array $data,
+        bool $isCustom = false,
+        ?string $userPrompt = null,
+    ): self {
         if (preg_match('/^[a-z][a-z0-9_]*$/', $code) !== 1) {
             throw new InvalidArgumentException("The scenario code `{$code}` for `{$language}` must match `^[a-z][a-z0-9_]*$`.");
         }
@@ -114,6 +121,8 @@ final readonly class ScenarioContent
             openingLine: self::text($data['opening_line'], $context, 'opening_line'),
             successCriteria: self::text($data['success_criteria'], $context, 'success_criteria'),
             usefulPhrases: $usefulPhrases,
+            isCustom: $isCustom,
+            userPrompt: $userPrompt,
         );
     }
 
@@ -156,6 +165,22 @@ final readonly class ScenarioContent
             'opening_line' => $this->openingLine,
             'success_criteria' => $this->successCriteria,
             'useful_phrases' => $this->usefulPhrases,
+        ];
+    }
+
+    /**
+     * The shape exposed to GraphQL resolvers, preserving the native enum case
+     * on `level` and carrying custom-scenario metadata.
+     *
+     * @return array<string, mixed>
+     */
+    public function toGraphQLArray(): array
+    {
+        return [
+            ...$this->toArray(),
+            'level' => $this->level,
+            'is_custom' => $this->isCustom,
+            'user_prompt' => $this->userPrompt,
         ];
     }
 

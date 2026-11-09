@@ -125,4 +125,98 @@ test.describe('Scenario practice screens @smoke', () => {
 
     tracker.assertClean();
   });
+
+  test('the learner can draft a custom scenario with AI, review and edit the refined prompt, and confirm it', async ({ page }) => {
+    const tracker = trackPageErrors(page);
+
+    const draftedScenario = {
+      __typename: 'Scenario',
+      code: 'custom_01je2etestscenario',
+      title: 'Returning a faulty laptop',
+      summary: 'Explain a hardware issue at the service counter and ask for a replacement.',
+      level: 'B1',
+      register: 'formal',
+      setting: 'The service desk of a Tokyo electronics store on Saturday afternoon.',
+      aiRole: 'Store service clerk checking return policy.',
+      learnerRole: 'Customer whose three-day-old laptop keeps shutting down.',
+      learnerGoal: 'Explain the issue clearly and get an immediate replacement.',
+      usefulPhrases: [
+        'I bought this laptop three days ago, and it keeps shutting down.',
+        'I need it for work this week, so a two-week repair will not work.',
+        'Could you replace it with the same model today?',
+      ],
+      isCustom: true,
+      userPrompt: '壊れたノートPCを返品・交換する練習',
+    };
+
+    let confirmedScenario: typeof draftedScenario | null = null;
+
+    await page.route('**/graphql', async (route) => {
+      const body = route.request().postData() ?? '';
+      if (body.includes('DraftCustomScenario')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { draftCustomScenario: draftedScenario } }),
+        });
+        return;
+      }
+
+      if (body.includes('ConfirmCustomScenario')) {
+        const parsed = JSON.parse(body);
+        const input = parsed.variables?.input ?? {};
+        confirmedScenario = {
+          ...draftedScenario,
+          ...input,
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { confirmCustomScenario: confirmedScenario } }),
+        });
+        return;
+      }
+
+      if (body.includes('query Scenarios') && confirmedScenario) {
+        const response = await route.fetch();
+        const json = await response.json();
+        const list = json?.data?.scenarios ?? [];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              scenarios: [...list, confirmedScenario],
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await gotoAsSeededUser(page, '/talk');
+
+    await page.getByTestId('open-custom-scenario-builder').click();
+    await expect(page.getByTestId('custom-scenario-builder')).toBeVisible();
+
+    await page.getByTestId('custom-scenario-prompt-input').fill('壊れたノートPCを返品・交換する練習');
+    await page.getByTestId('custom-scenario-register-select').selectOption('formal');
+    await page.getByTestId('custom-scenario-draft-submit').click();
+
+    // Step 2: AI-refined prompt is presented for user confirmation and editing.
+    await expect(page.getByTestId('custom-scenario-confirm-step')).toBeVisible();
+    await expect(page.getByTestId('confirm-title-input')).toHaveValue('Returning a faulty laptop');
+    await expect(page.getByTestId('confirm-setting-input')).toHaveValue(draftedScenario.setting);
+
+    // Edit title before confirming and saving to list.
+    await page.getByTestId('confirm-title-input').fill('Laptop exchange at Shinjuku Electronics');
+    await page.getByTestId('custom-scenario-confirm-save').click();
+
+    await expect(page.getByTestId('custom-scenarios-list')).toBeVisible();
+    await expect(page.getByRole('link', { name: /Laptop exchange at Shinjuku Electronics/ })).toBeVisible();
+
+    tracker.assertClean();
+  });
 });

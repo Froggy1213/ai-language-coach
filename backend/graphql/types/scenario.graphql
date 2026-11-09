@@ -10,4 +10,22 @@ type Scenario {
     learnerRole: String! @rename(attribute: "learner_role")
     learnerGoal: String! @rename(attribute: "learner_goal")
     usefulPhrases: [String!]! @rename(attribute: "useful_phrases")
+    "Whether this scenario was created by the learner rather than the built-in catalogue."
+    isCustom: Boolean! @rename(attribute: "is_custom")
+    "The learner's original description when this is a custom scenario."
+    userPrompt: String @rename(attribute: "user_prompt")
+}
+
+"Visible fields the learner confirms (and may edit) after the AI drafts a custom scenario."
+input ConfirmCustomScenarioInput {
+    code: String!
+    title: String!
+    summary: String!
+    level: CefrLevel!
+    register: String!
+    setting: String!
+    aiRole: String!
+    learnerRole: String!
+    learnerGoal: String!
+    usefulPhrases: [String!]!
 }

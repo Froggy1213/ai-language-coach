@@ -81,6 +81,8 @@ export const ROADMAP_QUERY = /* GraphQL */ `
         orderIndex
         status
         practicePrompt
+        recentMistakeCount
+        needsPractice
         cheatSheet {
           rule
           formula
@@ -92,6 +94,11 @@ export const ROADMAP_QUERY = /* GraphQL */ `
           code
           title
           category
+          level
+          prerequisites {
+            code
+            title
+          }
         }
       }
     }
@@ -153,20 +160,48 @@ export const ASSESSMENT_READY_SUBSCRIPTION = /* GraphQL */ `
  * agent's private side of the role-play, and sending them to the browser would
  * turn the scene into a script the learner reads instead of a conversation.
  */
+export const SCENARIO_FIELDS = /* GraphQL */ `
+  code
+  title
+  summary
+  level
+  register
+  setting
+  aiRole
+  learnerRole
+  learnerGoal
+  usefulPhrases
+  isCustom
+  userPrompt
+`
+
 export const SCENARIOS_QUERY = /* GraphQL */ `
   query Scenarios {
     scenarios {
-      code
-      title
-      summary
-      level
-      register
-      setting
-      aiRole
-      learnerRole
-      learnerGoal
-      usefulPhrases
+      ${SCENARIO_FIELDS}
     }
+  }
+`
+
+export const DRAFT_CUSTOM_SCENARIO_MUTATION = /* GraphQL */ `
+  mutation DraftCustomScenario($prompt: String!, $register: String, $level: CefrLevel, $code: String) {
+    draftCustomScenario(prompt: $prompt, register: $register, level: $level, code: $code) {
+      ${SCENARIO_FIELDS}
+    }
+  }
+`
+
+export const CONFIRM_CUSTOM_SCENARIO_MUTATION = /* GraphQL */ `
+  mutation ConfirmCustomScenario($input: ConfirmCustomScenarioInput!) {
+    confirmCustomScenario(input: $input) {
+      ${SCENARIO_FIELDS}
+    }
+  }
+`
+
+export const DELETE_CUSTOM_SCENARIO_MUTATION = /* GraphQL */ `
+  mutation DeleteCustomScenario($code: String!) {
+    deleteCustomScenario(code: $code)
   }
 `
 
@@ -236,16 +271,7 @@ export const VOICE_SESSION_FEEDBACK_FIELDS = /* GraphQL */ `
     }
   }
   scenario {
-    code
-    title
-    summary
-    level
-    register
-    setting
-    aiRole
-    learnerRole
-    learnerGoal
-    usefulPhrases
+    ${SCENARIO_FIELDS}
   }
   goalReview {
     goalAchieved

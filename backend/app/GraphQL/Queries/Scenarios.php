@@ -32,16 +32,8 @@ final class Scenarios
         assert($user instanceof User);
 
         return array_map(
-            static function (ScenarioContent $scenario): array {
-                $data = $scenario->toArray();
-                // `toArray()` is also the agent-metadata shape and keeps the
-                // level as its backed value; the native GraphQL enum is backed
-                // by the PHP case, so it is restored here.
-                $data['level'] = $scenario->level;
-
-                return $data;
-            },
-            $this->catalogue->forLanguage($user->target_language),
+            static fn (ScenarioContent $scenario): array => $scenario->toGraphQLArray(),
+            $this->catalogue->forUser($user),
         );
     }
 }

@@ -38,17 +38,12 @@ final class SessionScenario
             return null;
         }
 
-        $scenario = $this->catalogue->find($user->target_language, $session->scenario_code);
+        $scenario = $this->catalogue->findForUser($user, $session->scenario_code);
 
         if ($scenario === null) {
             return null;
         }
 
-        $data = $scenario->toArray();
-        // `toArray()` keeps `level` as its backed value; the native GraphQL
-        // enum is backed by the PHP case, so it is restored here.
-        $data['level'] = $scenario->level;
-
-        return $data;
+        return $scenario->toGraphQLArray();
     }
 }

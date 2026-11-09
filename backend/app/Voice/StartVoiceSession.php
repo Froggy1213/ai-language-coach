@@ -192,7 +192,7 @@ final class StartVoiceSession
      */
     private function practisableScenario(User $user, string $code): ScenarioContent
     {
-        $scenario = $this->scenarios->find((string) $user->target_language, $code);
+        $scenario = $this->scenarios->findForUser($user, $code);
 
         if (! $scenario instanceof ScenarioContent) {
             throw new Error(

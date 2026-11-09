@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useMutation } from '@urql/vue'
-import { FINISH_VOICE_SESSION_MUTATION } from '~/graphql/documents'
+import {
+  DELETE_CUSTOM_SCENARIO_MUTATION,
+  FINISH_VOICE_SESSION_MUTATION,
+} from '~/graphql/documents'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { scenarioRegisterLabel } from '~/utils/format'
 import { lesson, talk } from '~/constants/strings'
@@ -19,6 +22,7 @@ import { lesson, talk } from '~/constants/strings'
  *    振り返り like any conversation, but it did not practise a grammar point.
  */
 const route = useRoute()
+const router = useRouter()
 
 const code = computed(() => String(route.params.code ?? ''))
 
@@ -27,6 +31,11 @@ const { find, fetching, error: queryError, refresh } = useScenarios()
 const scenario = computed(() => (code.value ? find(code.value) : null))
 
 const retrying = ref(false)
+const editingCustom = ref(false)
+const deletingCustom = ref(false)
+const customError = ref<string | null>(null)
+
+const deleteCustomMutation = useMutation(DELETE_CUSTOM_SCENARIO_MUTATION)
 
 async function retry(): Promise<void> {
   retrying.value = true
@@ -89,6 +98,42 @@ function begin(): void {
   }
 }
 
+async function handleCustomSaved(_saved: unknown, startImmediately: boolean): Promise<void> {
+  editingCustom.value = false
+  await refresh()
+
+  if (startImmediately) {
+    begin()
+  }
+}
+
+async function removeCustom(): Promise<void> {
+  if (!scenario.value?.isCustom || deletingCustom.value) {
+    return
+  }
+
+  deletingCustom.value = true
+  customError.value = null
+
+  try {
+    const result = await deleteCustomMutation.executeMutation({
+      code: scenario.value.code,
+    })
+
+    if (result.error) {
+      customError.value = graphQLErrorMessageFor(result.error, {
+        fallback: talk.custom.deleteError,
+      })
+      return
+    }
+
+    await refresh()
+    await router.push('/talk')
+  } finally {
+    deletingCustom.value = false
+  }
+}
+
 // Leaving the screen must not leave the microphone open.
 onBeforeUnmount(() => {
   void leave()
@@ -128,51 +173,93 @@ const notFound = computed(() => !fetching.value && !queryError.value && !scenari
            plays. The mode hint names the one behavioural difference from a
            lesson (no correction during the conversation). -->
       <header class="mb-6 space-y-5">
-        <NuxtLink
-          to="/talk"
-          class="inline-flex items-center gap-1.5 text-[0.8125rem] text-[var(--ink-faint)] transition-colors hover:text-[var(--ink)]"
-        >
-          <span aria-hidden="true">←</span>
-          {{ talk.picker }}
-        </NuxtLink>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <NuxtLink
+            to="/talk"
+            class="inline-flex items-center gap-1.5 text-[0.8125rem] text-[var(--ink-faint)] transition-colors hover:text-[var(--ink)]"
+          >
+            <span aria-hidden="true">←</span>
+            {{ talk.picker }}
+          </NuxtLink>
 
-        <div class="space-y-2">
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <p class="label">{{ talk.title }}</p>
-            <span class="tnum rounded-full border border-[var(--line)] px-2 py-0.5 text-[0.6875rem] font-semibold tracking-[0.08em] text-[var(--ink-muted)]">
-              {{ scenario.level }}
-            </span>
-            <span class="text-[0.6875rem] font-semibold tracking-[0.08em] text-[var(--ink-faint)]">
-              {{ scenarioRegisterLabel(scenario.register) }}
-            </span>
+          <div
+            v-if="scenario.isCustom && status === 'idle' && !editingCustom"
+            class="flex items-center gap-2"
+          >
+            <UiButton
+              variant="quiet"
+              size="sm"
+              data-testid="edit-custom-scenario-button"
+              @click="editingCustom = true"
+            >
+              {{ talk.custom.editBuilder }}
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              :loading="deletingCustom"
+              data-testid="delete-custom-scenario-button"
+              @click="removeCustom"
+            >
+              {{ deletingCustom ? talk.custom.deleting : talk.custom.deleteCta }}
+            </UiButton>
           </div>
-
-          <h1 class="display text-[1.5rem] leading-snug tracking-[0.01em] sm:text-[1.75rem]">
-            {{ scenario.title }}
-          </h1>
-          <p class="max-w-[46ch] text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">
-            {{ scenario.summary }}
-          </p>
         </div>
 
-        <dl class="grid gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:grid-cols-2">
-          <div class="space-y-1 sm:col-span-2">
-            <dt class="label">{{ talk.setting }}</dt>
-            <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.setting }}</dd>
+        <UiNotice v-if="customError" :message="customError" />
+
+        <CustomScenarioBuilder
+          v-if="editingCustom && scenario.isCustom"
+          :initial-scenario="scenario"
+          @saved="handleCustomSaved"
+          @cancel="editingCustom = false"
+        />
+
+        <template v-else>
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p class="label">{{ talk.title }}</p>
+              <span
+                v-if="scenario.isCustom"
+                class="rounded-full border border-[var(--accent)] px-2 py-0.5 text-[0.6875rem] font-semibold tracking-[0.06em] text-[var(--accent)]"
+              >
+                {{ talk.custom.badge }}
+              </span>
+              <span class="tnum rounded-full border border-[var(--line)] px-2 py-0.5 text-[0.6875rem] font-semibold tracking-[0.08em] text-[var(--ink-muted)]">
+                {{ scenario.level }}
+              </span>
+              <span class="text-[0.6875rem] font-semibold tracking-[0.08em] text-[var(--ink-faint)]">
+                {{ scenarioRegisterLabel(scenario.register) }}
+              </span>
+            </div>
+
+            <h1 class="display text-[1.5rem] leading-snug tracking-[0.01em] sm:text-[1.75rem]">
+              {{ scenario.title }}
+            </h1>
+            <p class="max-w-[46ch] text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">
+              {{ scenario.summary }}
+            </p>
           </div>
 
-          <div class="space-y-1">
-            <dt class="label">{{ talk.yourRole }}</dt>
-            <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.learnerRole }}</dd>
-          </div>
+          <dl class="grid gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:grid-cols-2">
+            <div class="space-y-1 sm:col-span-2">
+              <dt class="label">{{ talk.setting }}</dt>
+              <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.setting }}</dd>
+            </div>
 
-          <div class="space-y-1">
-            <dt class="label">{{ talk.yourGoal }}</dt>
-            <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.learnerGoal }}</dd>
-          </div>
-        </dl>
+            <div class="space-y-1">
+              <dt class="label">{{ talk.yourRole }}</dt>
+              <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.learnerRole }}</dd>
+            </div>
 
-        <p class="text-[0.8125rem] text-[var(--ink-faint)]">{{ talk.modeHint }}</p>
+            <div class="space-y-1">
+              <dt class="label">{{ talk.yourGoal }}</dt>
+              <dd class="text-[0.9375rem] leading-[1.8] text-[var(--ink-muted)]">{{ scenario.learnerGoal }}</dd>
+            </div>
+          </dl>
+
+          <p class="text-[0.8125rem] text-[var(--ink-faint)]">{{ talk.modeHint }}</p>
+        </template>
       </header>
 
       <!-- Once the session ends the stage is replaced by the outcome: leaving a
@@ -192,7 +279,7 @@ const notFound = computed(() => !fetching.value && !queryError.value && !scenari
         <UsefulPhrasesPanel :phrases="scenario.usefulPhrases" open />
       </div>
 
-      <template v-else>
+      <template v-else-if="!editingCustom">
         <div class="py-2">
           <ConversationStage
             :state="orbState"

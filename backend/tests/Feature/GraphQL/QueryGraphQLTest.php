@@ -397,4 +397,65 @@ class QueryGraphQLTest extends TestCase
 
         $this->assertNull($response->json('data.voiceSession.goalReview'));
     }
+
+    public function test_roadmap_exposes_grammar_graph_prerequisites_levels_and_mistake_signals(): void
+    {
+        $user = User::factory()->create(['target_language' => 'en']);
+        $roadmap = Roadmap::factory()->for($user)->create(['title' => 'Graph plan']);
+
+        $rootPoint = GrammarPoint::factory()->create([
+            'language' => 'en',
+            'code' => 'present_simple',
+            'level' => CefrLevel::A1,
+        ]);
+        $dependentPoint = GrammarPoint::factory()->create([
+            'language' => 'en',
+            'code' => 'past_simple',
+            'level' => CefrLevel::A1,
+        ]);
+        $dependentPoint->prerequisites()->attach($rootPoint->id);
+
+        $card1 = LessonCard::factory()->for($roadmap)->for($rootPoint)->create([
+            'order_index' => 1,
+            'status' => LessonCardStatus::Completed,
+        ]);
+        $card2 = LessonCard::factory()->for($roadmap)->for($dependentPoint)->create([
+            'order_index' => 2,
+            'status' => LessonCardStatus::Ready,
+        ]);
+
+        // Recent mistake on card 1 (within 7-day window) + old mistake on card 2 (outside window)
+        Mistake::factory()->for($user)->for($rootPoint)->create(['created_at' => now()->subDays(2)]);
+        Mistake::factory()->for($user)->for($rootPoint)->create(['created_at' => now()->subDay()]);
+        Mistake::factory()->for($user)->for($dependentPoint)->create(['created_at' => now()->subDays(14)]);
+
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            query {
+                roadmap {
+                    lessonCards {
+                        id
+                        recentMistakeCount
+                        needsPractice
+                        grammarPoint {
+                            code
+                            level
+                            prerequisites { code level }
+                        }
+                    }
+                }
+            }
+        ')
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.roadmap.lessonCards.0.id', (string) $card1->id)
+            ->assertJsonPath('data.roadmap.lessonCards.0.recentMistakeCount', 2)
+            ->assertJsonPath('data.roadmap.lessonCards.0.needsPractice', true)
+            ->assertJsonPath('data.roadmap.lessonCards.0.grammarPoint.level', 'A1')
+            ->assertJsonCount(0, 'data.roadmap.lessonCards.0.grammarPoint.prerequisites')
+            ->assertJsonPath('data.roadmap.lessonCards.1.id', (string) $card2->id)
+            ->assertJsonPath('data.roadmap.lessonCards.1.recentMistakeCount', 0)
+            ->assertJsonPath('data.roadmap.lessonCards.1.needsPractice', false)
+            ->assertJsonPath('data.roadmap.lessonCards.1.grammarPoint.prerequisites.0.code', 'present_simple');
+    }
 }

@@ -86,6 +86,48 @@ type Mutation {
         @validator(class: "App\\GraphQL\\Validators\\SubmitAssessmentValidator")
 
     """
+    Ask the AI to expand a short learner prompt into a role-play scenario draft
+    awaiting the learner's confirmation. Passing an existing custom `code`
+    regenerates that scenario's draft in place.
+    """
+    draftCustomScenario(
+        "What situation the learner wants to practise (in Japanese or the target language)."
+        prompt: String!
+        "Desired tone (`formal`, `casual`, `neutral`). Defaults to `neutral`."
+        register: String
+        "Target CEFR band. Defaults to the learner's current level."
+        level: CefrLevel
+        "Optional code of an existing draft or custom scenario to regenerate."
+        code: String
+    ): Scenario!
+        @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\DraftCustomScenario")
+        @validator(class: "App\\GraphQL\\Validators\\DraftCustomScenarioValidator")
+
+    """
+    Confirm and save an AI-drafted custom scenario (including any edits the
+    learner made to its visible fields) so it appears in the topic list and can
+    be practised.
+    """
+    confirmCustomScenario(
+        input: ConfirmCustomScenarioInput!
+    ): Scenario!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\ConfirmCustomScenario")
+        @validator(class: "App\\GraphQL\\Validators\\ConfirmCustomScenarioValidator")
+
+    """
+    Delete one of the authenticated learner's custom scenarios. Past voice
+    sessions that practised it keep their history.
+    """
+    deleteCustomScenario(
+        code: String!
+    ): Boolean!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\DeleteCustomScenario")
+
+    """
     Open a spoken practice session for a lesson card or a scenario and return the
     room and its access token. Exactly one of `lessonCardId` or `scenarioCode`
     must be given: a lesson card exercises a grammar point, a scenario is a

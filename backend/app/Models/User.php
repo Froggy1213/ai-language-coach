@@ -128,4 +128,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(ReviewItem::class);
     }
+
+    /**
+     * @return HasMany<CustomScenario, $this>
+     */
+    public function customScenarios(): HasMany
+    {
+        return $this->hasMany(CustomScenario::class);
+    }
 }

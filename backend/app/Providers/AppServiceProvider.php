@@ -17,6 +17,8 @@ use App\Mistakes\DeepSeekGoalReviewer;
 use App\Mistakes\DeepSeekMistakeAnalyzer;
 use App\Mistakes\GoalReviewer;
 use App\Mistakes\MistakeAnalyzer;
+use App\Scenarios\DeepSeekScenarioDrafter;
+use App\Scenarios\ScenarioDrafter;
 use App\Support\ProductionSanityCheck;
 use App\Voice\LiveKitToken;
 use Aws\S3\S3Client;
@@ -67,6 +69,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(CefrAssessor::class, DeepSeekCefrAssessor::class);
         $this->app->bind(MistakeAnalyzer::class, DeepSeekMistakeAnalyzer::class);
         $this->app->bind(GoalReviewer::class, DeepSeekGoalReviewer::class);
+        $this->app->bind(ScenarioDrafter::class, DeepSeekScenarioDrafter::class);
 
         // LiveKit access tokens and the server API calls that dispatch the voice
         // agent (plan §5). A singleton because LiveKitApi wraps it and both read
