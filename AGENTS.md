@@ -22,8 +22,8 @@
 
 | Путь | Что это | Канон |
 |---|---|---|
-| `backend/` | Laravel 13 + Lighthouse GraphQL (`/graphql`), Sanctum (SPA-куки + CSRF), Reverb, Horizon. Домен — папка в `backend/app/`: `Voice`, `Grammar`, `Review`, `Scenarios`, `Assessments`, `Mistakes`, `Privacy`, `Observability`; рядом инфраструктурные `GraphQL`, `Console`, `Providers`, `Support`, `Enums`, `Rules`, `Models`, `Http`. Схема — `backend/graphql/schema.graphql` + доменные файлы в `backend/graphql/types/` | `backend/AGENTS.md` (Laravel Boost), `README.md` |
-| `frontend/` | Nuxt 4 SPA (`ssr: false`), Vue 3, Tailwind 4, `@urql/vue`, Echo + pusher-js. Маршруты: `/`, `/roadmap`, `/lesson/{cardId}`, `/talk`, `/talk/{code}`, `/reflect/{id}`, `/review`, `/level`, `/settings`, `/login`, `/register`, `/dev/*`. Старые `/onboarding`, `/practice/{cardId}`, `/session/{id}` — страницы-редиректы 301 | `frontend/README.md`, `docs/design/README.md` |
+| `backend/` | Laravel 13 + Lighthouse GraphQL (`/graphql`), Sanctum (SPA-куки + CSRF), Reverb, Horizon. Домен — папка в `backend/app/`: `Voice`, `Grammar`, `Review`, `Scenarios`, `Assessments`, `Mistakes`, `Privacy`, `Billing`, `Observability`; рядом инфраструктурные `GraphQL`, `Console`, `Providers`, `Support`, `Enums`, `Rules`, `Models`, `Http`. Схема — `backend/graphql/schema.graphql` + доменные файлы в `backend/graphql/types/` | `backend/AGENTS.md` (Laravel Boost), `README.md` |
+| `frontend/` | Nuxt 4 SPA (`ssr: false`), Vue 3, Tailwind 4, `@urql/vue`, Echo + pusher-js. Маршруты: `/`, `/roadmap`, `/lesson/{cardId}`, `/talk`, `/talk/{code}`, `/reflect/{id}`, `/review`, `/level`, `/pricing`, `/settings`, `/login`, `/register`, `/dev/*`. Старые `/onboarding`, `/practice/{cardId}`, `/session/{id}` — страницы-редиректы 301 | `frontend/README.md`, `docs/design/README.md` |
 | `agent/` | Python-воркер `livekit-agents`: STT Deepgram, TTS Cartesia, диалоговая LLM. Один модуль — один вопрос, таблица в README | `agent/README.md` |
 | `e2e/` | Playwright smoke против живого стека | `e2e/README.md` |
 | `infra/`, `docker/`, `docs/deployment.md` | Terraform (ECS/RDS/ElastiCache/LiveKit EC2), Caddy, однохостовый прод | `docs/deployment.md` |
@@ -82,6 +82,10 @@
 7. **Подписки — только через `useLighthouseSubscription`.** Он держит сокет-ID, авторизацию
    приватного канала, конверт `{more, result}` и teardown; транспорт — Pusher-протокол, не
    `graphql-ws`. Подписываемые поля объявляются nullable: при подписке они резолвятся в `null`.
+8. **Биллинг идемпотентен, минуты считаются по ledger.** `stripe_events` дедуплицирует
+   доставки в одной транзакции с эффектом; лимит минут читается из `voice_sessions.duration_sec`
+   за месячное окно от даты подписки, отдельного счётчика нет; `ProductionSanityCheck` не пускает
+   `sk_test_` в production; удаление аккаунта сначала отменяет подписку в Stripe.
 
 ## Память проекта
 

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Privacy;
 
+use App\Billing\StripeGateway;
 use App\Enums\AssessmentStatus;
 use App\Enums\LessonCardStatus;
 use App\Enums\VoiceSessionStatus;
@@ -11,6 +12,7 @@ use App\Models\LessonCard;
 use App\Models\Mistake;
 use App\Models\ReviewItem;
 use App\Models\Roadmap;
+use App\Models\Subscription;
 use App\Models\User;
 use App\Models\VoiceSession;
 use Aws\CommandInterface;
@@ -22,6 +24,7 @@ use Mockery;
 use Nuwave\Lighthouse\Subscriptions\Contracts\StoresSubscriptions;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
 use Tests\Support\ClearsSubscriptionStorage;
+use Tests\Support\FakeStripeGateway;
 use Tests\TestCase;
 
 class DeleteAccountTest extends TestCase
@@ -214,6 +217,44 @@ class DeleteAccountTest extends TestCase
 
         // User row is permanently deleted despite S3 exception
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
+    }
+
+    public function test_it_cancels_a_live_stripe_subscription_before_deleting_the_account(): void
+    {
+        $user = User::factory()->create(['password' => 'password123']);
+        $subscription = Subscription::factory()->for($user)->forPlan('entry')->create();
+
+        $stripe = new FakeStripeGateway;
+        $this->app->instance(StripeGateway::class, $stripe);
+        Sanctum::actingAs($user);
+
+        $this->graphQL(self::DELETE_ACCOUNT, [
+            'password' => 'password123',
+            'confirmation' => 'DELETE',
+        ])->assertGraphQLErrorFree();
+
+        $this->assertSame([$subscription->stripe_subscription_id], $stripe->cancellations);
+        $this->assertDatabaseMissing('users', ['id' => $user->getKey()]);
+    }
+
+    public function test_a_failed_cancellation_keeps_the_account_so_billing_can_be_stopped(): void
+    {
+        $user = User::factory()->create(['password' => 'password123']);
+        $subscription = Subscription::factory()->for($user)->forPlan('entry')->create();
+
+        $stripe = new FakeStripeGateway;
+        $stripe->cancelFailure = new \RuntimeException('Stripe is unreachable');
+        $this->app->instance(StripeGateway::class, $stripe);
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(self::DELETE_ACCOUNT, [
+            'password' => 'password123',
+            'confirmation' => 'DELETE',
+        ]);
+
+        $this->assertSame('BILLING_CANCEL_FAILED', $response->json('errors.0.extensions.code'));
+        $this->assertDatabaseHas('users', ['id' => $user->getKey()]);
+        $this->assertDatabaseHas('subscriptions', ['id' => $subscription->getKey()]);
     }
 
     public function test_operator_command_deletes_user_by_email(): void

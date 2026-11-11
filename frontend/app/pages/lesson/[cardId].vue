@@ -24,6 +24,7 @@ const route = useRoute()
 const { user } = useAuth()
 
 const consentOpen = ref(false)
+const limitOpen = ref(false)
 
 const { roadmap, fetching, error: queryError } = useRoadmap({
   requestPolicy: 'cache-and-network',
@@ -57,6 +58,7 @@ const audioElement = ref<HTMLAudioElement | null>(null)
 const {
   status,
   error,
+  limit,
   sessionId,
   agentPresent,
   elapsedSeconds,
@@ -65,6 +67,14 @@ const {
   start,
   leave,
 } = useConversation({ audioElement })
+
+// A refused start is not just an error string: the paywall needs the numbers
+// from the GraphQL extension, so the dialog opens on `limit`, not on `error`.
+watch(limit, (value) => {
+  if (value) {
+    limitOpen.value = true
+  }
+})
 
 const completeLessonMutation = useMutation(COMPLETE_LESSON_CARD_MUTATION)
 const finishVoiceMutation = useMutation(FINISH_VOICE_SESSION_MUTATION)
@@ -223,6 +233,12 @@ const ended = computed(() => status.value === 'ended')
       v-if="consentOpen"
       @confirmed="onConsentConfirmed"
       @cancelled="consentOpen = false"
+    />
+
+    <VoiceLimitGate
+      v-if="limitOpen && limit"
+      :limit="limit"
+      @close="limitOpen = false"
     />
 
     <!-- Remote audio is attached to this element by the LiveKit room. -->

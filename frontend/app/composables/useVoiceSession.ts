@@ -14,6 +14,7 @@ import { useAgentPresence, type AgentVoiceState } from '~/composables/voice/useA
 import { useAudioPlayback } from '~/composables/voice/useAudioPlayback'
 import { useAudioTracks } from '~/composables/voice/useAudioTracks'
 import { useClientErrorReporter } from '~/composables/voice/useClientErrorReporter'
+import { graphQLErrorCode, graphQLErrorExtensions } from '~/utils/graphql-error'
 import { mapVoiceError } from '~/utils/voice-errors'
 
 export type { AgentVoiceState } from '~/composables/voice/useAgentPresence'
@@ -31,11 +32,31 @@ export type VoicePracticeSubject =
   | { scenarioCode: string }
 
 /**
+ * Why the backend refused to start a session, when the reason is money rather
+ * than a dead fleet.
+ *
+ * The numbers travel in GraphQL extensions so the paywall can say "you used 140
+ * of 150 minutes", which it cannot reconstruct from the message.
+ */
+export interface VoiceLimit {
+  code: 'VOICE_MINUTES_EXHAUSTED' | 'VOICE_SUBSCRIPTION_INACTIVE'
+  usedSeconds: number | null
+  includedSeconds: number | null
+  resetsAt: string | null
+  status: string | null
+}
+
+/**
  * Set and cleared by the room's Reconnecting/Reconnected events. Kept as a
  * constant because the reconnect handler compares against the exact text it
  * wrote — an inline literal is one careless edit away from never clearing.
  */
 const RECONNECTING_MESSAGE = '接続が切れました。会話ルームに再接続しています…'
+
+/** Extension values arrive as GraphQL JSON scalars; only numbers are useful. */
+function numberFrom(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
 
 export interface UseVoiceSessionOptions {
   audioElement?: Ref<HTMLAudioElement | null | undefined>
@@ -56,6 +77,11 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   const status = ref<VoiceSessionUiStatus>('idle')
   const error = ref<string | null>(null)
   const sessionId = ref<string | null>(null)
+  /**
+   * Set when the refusal was a billing one, cleared on every new attempt. The
+   * screen watches it to open the paywall; `error` alone would lose the numbers.
+   */
+  const limit = ref<VoiceLimit | null>(null)
   const agentPresent = ref(false)
   /**
    * The agent's own voice state, mirrored from its `lk.agent.state` attribute.
@@ -147,6 +173,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     }
 
     error.value = null
+    limit.value = null
     sessionId.value = null
     agentPresent.value = false
     status.value = 'requesting'
@@ -170,6 +197,20 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     }
 
     if (failure) {
+      const code = graphQLErrorCode(failure)
+
+      if (code === 'VOICE_MINUTES_EXHAUSTED' || code === 'VOICE_SUBSCRIPTION_INACTIVE') {
+        const extensions = graphQLErrorExtensions(failure)
+
+        limit.value = {
+          code,
+          usedSeconds: numberFrom(extensions?.usedSeconds),
+          includedSeconds: numberFrom(extensions?.includedSeconds),
+          resetsAt: typeof extensions?.resetsAt === 'string' ? extensions.resetsAt : null,
+          status: typeof extensions?.status === 'string' ? extensions.status : null,
+        }
+      }
+
       error.value = mapVoiceError(failure as CombinedError)
       status.value = 'error'
       return
@@ -347,6 +388,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   return {
     status,
     error,
+    limit,
     sessionId,
     agentPresent,
     agentState,

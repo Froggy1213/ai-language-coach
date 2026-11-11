@@ -26,6 +26,7 @@ class ProductionSanityCheck
         self::assertCorsOriginsSecure($app);
         self::assertReverbOriginsSecure($app);
         self::assertSecureSessionCookies($app);
+        self::assertStripeKeysAreLive($app);
     }
 
     /**
@@ -43,6 +44,29 @@ class ProductionSanityCheck
                 "Production sanity check failed: APP_DEBUG (config('app.debug')) must be false in production. ".
                 'Debug mode exposes sensitive environment details, database credentials, and stack traces on error. '.
                 'Set APP_DEBUG=false in your production environment or secrets manager.'
+            );
+        }
+    }
+
+    /**
+     * Ensure a test-mode Stripe key never reaches production.
+     *
+     * A test key does not fail loudly at boot: checkout pages would look right
+     * and charge nobody, which is worse than a crash. Empty is allowed here
+     * because a deployment can legitimately run without billing; a key that is
+     * present must be live.
+     *
+     * @throws RuntimeException
+     */
+    public static function assertStripeKeysAreLive(?Application $app = null): void
+    {
+        $app = $app ?? app();
+        $secret = (string) $app['config']->get('billing.secret', '');
+
+        if ($secret !== '' && str_starts_with($secret, 'sk_test_')) {
+            throw new RuntimeException(
+                'Production sanity check failed: STRIPE_SECRET is a test-mode key (sk_test_). '.
+                'Checkout would accept no money while looking healthy. Use the live secret key in production.'
             );
         }
     }

@@ -107,7 +107,8 @@ harness — not linked from the app, but kept because tuning the orb blind is gu
 | `/reflect/:id` | `pages/reflect/[[id]].vue` | **振り返り** Mistakes as corrections, grouped by grammar point; for a scenario, also the goal review (goal achieved, and what was missed). |
 | `/review` | `pages/review.vue` | **復習** Spaced repetition as recall: the learner's own sentence from the conversation, the correction behind the reveal, four grades. |
 | `/level` | `pages/level.vue` | **レベル判定** CEFR placement recording: consent → record → result. |
-| `/settings` | `pages/settings.vue` | **設定** Account, theme, session, data deletion. |
+| `/settings` | `pages/settings.vue` | **設定** Account, plan and voice-minute usage, theme, session, data deletion. |
+| `/pricing` | `pages/pricing.vue` | **料金プラン** Monthly/yearly plans, minutes each includes, and the free allowance. Public: guests can read the price before signing up. |
 | `/login`, `/register` | `pages/login.vue`, `pages/register.vue` | Auth. |
 
 Legacy routes kept as 301 redirects: `/practice/:cardId` → `/lesson/:cardId`,

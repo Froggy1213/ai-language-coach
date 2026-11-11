@@ -73,6 +73,32 @@ backups.
 
 `.env.production` is git-ignored and holds every secret the deployment has.
 
+## 3.1 Billing (optional)
+
+Billing is optional: without any `STRIPE_*` value the application boots and the pricing screen
+still lists the plans, but checkout answers `BILLING_NOT_CONFIGURED` and the webhook endpoint
+answers 503. The amounts and included minutes live in `backend/config/billing.php`; Stripe owns
+only the price objects.
+
+1. Create six prices in the Stripe dashboard (JPY, tax-inclusive): Entry 799/7 990, Standard
+   1 480/14 800, Pro 2 980/29 800 — monthly and yearly each. Paste their ids into
+   `STRIPE_PRICE_*` in `.env.production`.
+2. Add the webhook endpoint `https://$APP_DOMAIN/api/webhooks/stripe` and subscribe it to
+   `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`
+   and `customer.subscription.deleted`. Put its signing secret in `STRIPE_WEBHOOK_SECRET`.
+3. Use a live key (`sk_live_...`) in production. `ProductionSanityCheck` refuses to boot on a
+   test key, because a test-mode checkout looks healthy and charges nobody.
+4. Locally, forward events with the Stripe CLI:
+
+   ```bash
+   stripe listen --forward-to localhost:8000/api/webhooks/stripe
+   ```
+
+   and use the `whsec_...` value the CLI prints as `STRIPE_WEBHOOK_SECRET`.
+
+`FRONTEND_URL` is the browser-facing origin used for the Checkout success/cancel and portal
+return URLs; on this path it is `https://$APP_DOMAIN`.
+
 ## 4. First deploy
 
 ```bash
@@ -229,6 +255,10 @@ on the machine it backs up is not a backup.
 | Certificate errors in the Caddy log | DNS for `APP_DOMAIN` does not point here yet, or port 80/443 is blocked. |
 | Subscriptions never arrive | `reverb` is down, or `/app/*` is not routed to it. The browser console shows the failed WebSocket. |
 | Retention purges never run | The `scheduler` service is not in the `up` list. |
+| Pricing is visible but checkout answers `BILLING_NOT_CONFIGURED` | `STRIPE_SECRET` or the chosen interval's `STRIPE_PRICE_*` is empty. |
+| Stripe webhook answers 400 | `STRIPE_WEBHOOK_SECRET` does not match the endpoint's signing secret. |
+| Stripe webhook answers 503 | `STRIPE_WEBHOOK_SECRET` is not set at all. |
+| A paid learner still sees the free allowance | The webhook has not been delivered (host unreachable, wrong URL, signature rejection); check the Stripe dashboard's event log. |
 
 ## 10. The AWS path
 

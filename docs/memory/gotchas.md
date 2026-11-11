@@ -66,3 +66,20 @@ test` (тесты идут на MySQL `language_coach_testing`), но тольк
 ## 2026-11-09 — Mockery не может мокать final `AudioUpload` как дефолтный возврат
 
 При тесте `SubmitAssessment` мок `AssessmentAudioStorage::inspect`, у которого не сработало ожидание, пытается сгенерировать дефолтный возврат для final-класса `AudioUpload` и падает с «marked final». Практический вывод: не перепривязывать storage между двумя GraphQL-запросами в одном тесте (Lighthouse держит резолвер) — success-путь выносить в отдельный тест, где мок привязан до первого запроса.
+
+## 2026-11-11 — `docker compose build` под sandbox молча не пересобирает образ
+
+В песочнице `workspace-write` buildx не может писать в `~/.docker/buildx` и падает с
+`failed to update builder last activity time: open .../activity/.tmp-...: operation not permitted`.
+Если команда запущена как `docker compose build ... | tail`, код возврата теряется (его подменяет
+`tail`), цепочка `&& docker compose up -d` проходит, и контейнеры перезапускаются со **старым**
+образом: приложение выглядит живым, а новой ручки в нём нет. Лечение — направить конфиг buildx в
+рабочее дерево и не прятать exit code:
+
+```bash
+mkdir -p .buildx
+BUILDX_CONFIG="$PWD/.buildx" docker compose --profile full build api web
+```
+
+Проверка, что образ действительно новый: `docker inspect <container> --format '{{.Created}}'`
+и `curl` по новой ручке (у нас — `POST /api/webhooks/stripe`, ожидается 503 без секрета).

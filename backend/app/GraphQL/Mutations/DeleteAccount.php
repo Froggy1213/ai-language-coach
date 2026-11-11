@@ -2,6 +2,7 @@
 
 namespace App\GraphQL\Mutations;
 
+use App\Billing\SubscriptionCancellationFailed;
 use App\Models\User;
 use App\Privacy\AccountDeletionService;
 use App\Privacy\ConfirmationRequired;
@@ -46,7 +47,15 @@ final class DeleteAccount
             );
         }
 
-        $this->deletionService->delete($user);
+        try {
+            $this->deletionService->delete($user);
+        } catch (SubscriptionCancellationFailed $exception) {
+            throw new Error(
+                $exception->getMessage(),
+                extensions: ['code' => 'BILLING_CANCEL_FAILED'],
+                previous: $exception,
+            );
+        }
 
         return true;
     }

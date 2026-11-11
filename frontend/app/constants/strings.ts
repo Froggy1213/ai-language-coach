@@ -435,6 +435,86 @@ export const settings = {
   loadError: 'アカウント情報を読み込めませんでした。',
 } as const
 
+
+/**
+ * The pricing screen. Plan names and descriptions are keyed by the backend's
+ * stable plan code (`entry`, `standard`, `pro`); the API sends money and
+ * minutes, never Japanese.
+ */
+export const pricing = {
+  eyebrow: 'PRICING',
+  intervalLabel: '請求サイクル',
+  title: '料金プラン',
+  lead: '話した時間だけ、続けられる。まずは無料の15分から。',
+  monthly: '月払い',
+  yearly: '年払い',
+  yearlyNote: '2か月分お得',
+  perMonth: '月',
+  perYear: '年',
+  monthlyEquivalent: (yen: number) => `月あたり ¥${yen.toLocaleString('ja-JP')}`,
+  freeTitle: 'Free',
+  freeBody: 'クレジットカードなしで15分。レベル判定と最初の会話に。',
+  freeCta: '無料で始める',
+  freeAllowance: '15分 / 合計',
+  minutesPerMonth: (minutes: number) => `${minutes}分 / 月`,
+  choose: 'このプランにする',
+  loginToChoose: 'ログインして申し込む',
+  current: '現在のプラン',
+  taxNote: '表示価格は税込です。いつでも解約できます。',
+  loginPrompt: 'すでにアカウントをお持ちの方は',
+  loginLink: 'ログイン',
+  checkoutError: 'お支払いの画面を開けませんでした。しばらくしてからお試しください。',
+  plans: {
+    entry: {
+      name: 'Entry',
+      tagline: '毎日の会話に',
+      description: '1日5分の会話練習。まずは習慣づくりから。',
+    },
+    standard: {
+      name: 'Standard',
+      tagline: 'しっかり話す',
+      description: '1日10分。レッスンとロールプレイを往復する。',
+    },
+    pro: {
+      name: 'Pro',
+      tagline: 'とことん話す',
+      description: '1日20分以上。試験前や出張前に集中して。',
+    },
+  },
+} as const
+
+/** The billing block on 設定. */
+export const billing = {
+  title: 'プランと利用状況',
+  plan: '現在のプラン',
+  freePlan: '無料プラン',
+  minutesUsed: (used: number, included: number) => `${used} / ${included}分`,
+  remaining: (minutes: number) => `残り ${minutes} 分`,
+  resetsLabel: '次回リセット',
+  currentPeriodEnd: '次回更新',
+  cancelAtPeriodEnd: '期間終了後に解約されます',
+  manage: '支払い・解約を管理',
+  change: 'プランを変更',
+  checkoutSuccess: 'お支払いが完了しました。反映まで少し時間がかかることがあります。',
+  checkoutCancelled: 'お支払いはキャンセルされました。',
+  pastDue: 'お支払いに失敗しています。支払い方法を確認してください。',
+  loadError: 'プラン情報を読み込めませんでした。',
+  portalError: '支払い画面を開けませんでした。しばらくしてからお試しください。',
+} as const
+
+/** The dialog that replaces a refused session with a way to keep talking. */
+export const paywall = {
+  title: '会話時間を使い切りました',
+  freeBody: '無料の15分を使い切りました。プランを選ぶと、ここから続けられます。',
+  paidBody: (used: number, included: number) => `今月の${included}分を使い切りました（${used}分使用）。`,
+  resets: (date: string) => `次回は${date}にリセットされます。`,
+  inactiveTitle: 'お支払いを確認してください',
+  inactiveBody: 'サブスクリプションのお支払いが完了していません。支払い方法を更新すると会話を再開できます。',
+  ctaPlans: 'プランを見る',
+  ctaBilling: '支払い方法を確認',
+  close: '閉じる',
+} as const
+
 export const landing = {
   nav: {
     story: 'ストーリー',

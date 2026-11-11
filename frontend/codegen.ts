@@ -5,9 +5,9 @@ import type { CodegenConfig } from '@graphql-codegen/cli'
  *
  * The schema is loaded from `../backend/graphql/**\/*.graphql` — the committed SDL:
  * - `schema.graphql` plus aggregate types under `types/`.
- * - `codegen-enums.graphql` — declarations of the five native PHP enums
+ * - `codegen-enums.graphql` — declarations of the six native PHP enums
  *   (`CefrLevel`, `RoadmapStatus`, `LessonCardStatus`, `AssessmentStatus`,
- *   `VoiceSessionStatus`). These reach GraphQL at runtime through `TypeRegistry`
+ *   `VoiceSessionStatus`, `BillingInterval`). These reach GraphQL at runtime through `TypeRegistry`
  *   (`AppServiceProvider`) rather than the served SDL (README decision 6),
  *   while `codegen-enums.graphql` provides them to codegen and IDEs, with
  *   parity enforced by `CodegenEnumsTest`.

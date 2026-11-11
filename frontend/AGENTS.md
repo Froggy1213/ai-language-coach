@@ -7,7 +7,7 @@ design system: [`../docs/design/README.md`](../docs/design/README.md); product c
 ## Routes
 
 `/` · `/roadmap` · `/lesson/{cardId}` · `/talk` · `/talk/{code}` · `/reflect` and
-`/reflect/{id}` (optional param) · `/review` · `/level` · `/settings` · `/login` · `/register`
+`/reflect/{id}` (optional param) · `/review` · `/level` · `/pricing` · `/settings` · `/login` · `/register`
 · `/dev/orb` (sandbox, deliberately unlinked).
 
 Legacy addresses are one-line pages calling `navigateTo(..., { redirectCode: 301 })`:

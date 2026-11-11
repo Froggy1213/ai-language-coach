@@ -84,6 +84,7 @@ Before provisioning infrastructure, verify that you have:
    - DeepSeek API key (Mistake analysis and CEFR assessment)
    - Cartesia API key (TTS, optional fallback)
    - Sentry DSN (Application error tracking)
+- Stripe secret key and webhook signing secret (billing; optional — leave empty to run without paid plans)
 5. **GitHub OIDC Role**:
    - An IAM role with trust policy allowing `token.actions.githubusercontent.com` to assume the deployment role for GitHub Actions CD.
    - Then arm the workflow: set the repository secret `AWS_ROLE_TO_ASSUME` to that role's ARN and the repository variable `AWS_DEPLOY_ENABLED=true`.
@@ -137,7 +138,7 @@ terraform apply tfplan
 ```
 
 ### Step 3: Populate Secrets in AWS Secrets Manager
-Terraform provisions `ai-language-coach/app-secrets` with generated passwords for MySQL, LiveKit, Reverb, and the internal secret. Update external vendor keys:
+Terraform provisions `ai-language-coach/app-secrets` with generated passwords for MySQL, LiveKit, Reverb, and the internal secret. Update external vendor keys, including `STRIPE_SECRET`, `STRIPE_WEBHOOK_SECRET` and the six `STRIPE_PRICE_*` ids (billing stays off while they are empty):
 
 ```bash
 aws secretsmanager update-secret \

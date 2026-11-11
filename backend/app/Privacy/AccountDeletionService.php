@@ -2,6 +2,8 @@
 
 namespace App\Privacy;
 
+use App\Billing\StripeGateway;
+use App\Billing\SubscriptionCancellationFailed;
 use App\Models\User;
 use App\Models\VoiceSession;
 use Aws\S3\S3Client;
@@ -18,6 +20,7 @@ final class AccountDeletionService
     public function __construct(
         private readonly StoresSubscriptions $storage,
         private readonly S3Client $s3Client,
+        private readonly StripeGateway $stripe,
         private readonly ?SchemaBuilder $schemaBuilder = null,
     ) {}
 
@@ -27,6 +30,11 @@ final class AccountDeletionService
     public function delete(User $user): void
     {
         $userId = $user->getKey();
+
+        // Billing first, and fail closed: deleting the row while Stripe still
+        // charges the learner would leave nothing to cancel and no one to
+        // reconcile against.
+        $this->cancelSubscriptions($user);
 
         // 1. Inside a transaction, first clear the user's Lighthouse subscription
         //    subscribers, then delete the user row. README decision 19 explains why:
@@ -53,6 +61,31 @@ final class AccountDeletionService
 
         // 3. Delete user's assessment audio objects from S3.
         $this->deleteUserAudioObjects((string) $userId);
+    }
+
+    /**
+     * Stops every Stripe subscription that could still charge this learner.
+     *
+     * Statuses that are already terminal are skipped; everything that Stripe
+     * may still invoice is cancelled, including `past_due` and `unpaid`.
+     *
+     * @throws SubscriptionCancellationFailed when Stripe refuses or is unreachable
+     */
+    private function cancelSubscriptions(User $user): void
+    {
+        $subscriptions = $user->subscriptions()
+            ->whereIn('status', ['active', 'trialing', 'past_due', 'unpaid', 'incomplete'])
+            ->get();
+
+        foreach ($subscriptions as $subscription) {
+            try {
+                $this->stripe->cancelSubscription($subscription->stripe_subscription_id);
+            } catch (Throwable $exception) {
+                report($exception);
+
+                throw SubscriptionCancellationFailed::forSubscription($subscription->stripe_subscription_id);
+            }
+        }
     }
 
     /**

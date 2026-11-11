@@ -207,6 +207,27 @@ class ProductionSanityCheckTest extends TestCase
         ProductionSanityCheck::check($this->app);
     }
 
+    public function test_refuses_a_test_mode_stripe_key_in_production(): void
+    {
+        $this->configureValidProduction();
+        config(['billing.secret' => 'sk_test_development_key']);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('STRIPE_SECRET');
+
+        ProductionSanityCheck::check($this->app);
+    }
+
+    public function test_allows_billing_to_be_switched_off_in_production(): void
+    {
+        $this->configureValidProduction();
+        config(['billing.secret' => null]);
+
+        ProductionSanityCheck::check($this->app);
+
+        $this->assertTrue(true);
+    }
+
     /**
      * Verify that non-production environments (local/testing) are completely unhindered by dev defaults.
      */
@@ -260,6 +281,7 @@ class ProductionSanityCheckTest extends TestCase
             'voice.internal_secret' => 'production_voice_internal_secret_at_least_32_chars_long',
             'cors.allowed_origins' => ['https://app.example.com'],
             'session.secure' => true,
+            'billing.secret' => 'sk_live_production_key',
         ]);
     }
 }

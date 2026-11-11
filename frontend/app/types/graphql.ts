@@ -34,6 +34,54 @@ export type AssessmentStatus =
   | 'failed'
   | 'processing';
 
+export type BillingInterval =
+  | 'month'
+  | 'year';
+
+/** The learner's current plan and voice-minute usage. */
+export type BillingOverview = {
+  __typename?: 'BillingOverview';
+  /** Whether the learner can open the Stripe billing portal. */
+  canManage: Scalars['Boolean']['output'];
+  /** True when the subscription is set to end at `currentPeriodEnd`. */
+  cancelAtPeriodEnd: Scalars['Boolean']['output'];
+  /** End of the period Stripe has already charged for. */
+  currentPeriodEnd?: Maybe<Scalars['DateTime']['output']>;
+  hasSubscription: Scalars['Boolean']['output'];
+  /** Seconds included are exposed as whole minutes. */
+  includedMinutes: Scalars['Int']['output'];
+  /** Billing interval of the current subscription; null on the free plan. */
+  interval?: Maybe<BillingInterval>;
+  /** `free` when the learner has no subscription. */
+  planCode: Scalars['String']['output'];
+  remainingMinutes: Scalars['Int']['output'];
+  /** When the monthly allowance resets; null on the lifetime free allowance. */
+  resetsAt?: Maybe<Scalars['DateTime']['output']>;
+  /** Stripe subscription status; null on the free plan. */
+  status?: Maybe<Scalars['String']['output']>;
+  usedMinutes: Scalars['Int']['output'];
+};
+
+/** A paid plan offered on the pricing screen. */
+export type BillingPlan = {
+  __typename?: 'BillingPlan';
+  /** Stable plan code (`entry`, `standard`, `pro`); the Japanese name lives in the interface. */
+  code: Scalars['String']['output'];
+  /** Voice minutes included in every monthly allowance window. */
+  includedMinutes: Scalars['Int']['output'];
+  /** Monthly price in yen, tax included. JPY is zero-decimal. */
+  monthlyPriceJpy: Scalars['Int']['output'];
+  /** Yearly price in yen, tax included (ten monthly payments). */
+  yearlyPriceJpy: Scalars['Int']['output'];
+};
+
+/** Where to send the learner to finish a Stripe-hosted flow. */
+export type BillingRedirect = {
+  __typename?: 'BillingRedirect';
+  /** Hosted Stripe URL. The client navigates to it, it never receives card data. */
+  url: Scalars['String']['output'];
+};
+
 export type CefrLevel =
   | 'A1'
   | 'A2'
@@ -161,6 +209,16 @@ export type Mutation = {
    */
   createAssessmentUploadUrl: PresignedUpload;
   /**
+   * Open the Stripe billing portal for the authenticated learner (payment method,
+   * plan change, cancellation). Returns the hosted URL.
+   */
+  createBillingPortalSession: BillingRedirect;
+  /**
+   * Create a Stripe Checkout session for a paid plan. Returns the hosted URL;
+   * the browser navigates to it and the card never touches this domain.
+   */
+  createCheckoutSession: BillingRedirect;
+  /**
    * Delete the authenticated user's account and all associated personal data.
    * Requires password verification and exact confirmation string `DELETE`.
    */
@@ -231,6 +289,12 @@ export type MutationConfirmCustomScenarioArgs = {
 
 export type MutationCreateAssessmentUploadUrlArgs = {
   contentType: Scalars['String']['input'];
+};
+
+
+export type MutationCreateCheckoutSessionArgs = {
+  interval: BillingInterval;
+  planCode: Scalars['String']['input'];
 };
 
 
@@ -339,6 +403,10 @@ export type PronunciationFeedback = {
 
 export type Query = {
   __typename?: 'Query';
+  /** The learner's plan, subscription status and voice-minute usage. */
+  billingOverview: BillingOverview;
+  /** Paid plans available for subscription. Public: the pricing screen renders for guests too. */
+  billingPlans: Array<BillingPlan>;
   /** Review items whose review date has arrived, soonest first. */
   dueReviews: Array<ReviewItem>;
   /** The currently authenticated user. */

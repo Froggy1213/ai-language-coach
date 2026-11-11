@@ -16,7 +16,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Date;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'target_language', 'timezone'])]
+#[Fillable(['name', 'email', 'password', 'target_language', 'timezone', 'stripe_customer_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -135,5 +135,19 @@ class User extends Authenticatable
     public function customScenarios(): HasMany
     {
         return $this->hasMany(CustomScenario::class);
+    }
+
+    /**
+     * Every subscription Stripe has ever reported for this learner.
+     *
+     * The newest row is the current plan; keeping the history is what lets a
+     * cancelled plan and a later resubscribe coexist without losing the
+     * previous billing period.
+     *
+     * @return HasMany<Subscription, $this>
+     */
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class);
     }
 }

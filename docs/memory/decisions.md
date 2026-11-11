@@ -96,3 +96,46 @@ README после этого — компактная справка; возвр
 **Отвергнуто:** оставить неявную фиксацию согласия (нет доказательства действия); отдельная команда только для assessments (дублирование расписания); класть payload в лог с ручной фильтрацией.
 **Файлы:** `backend/app/GraphQL/Mutations/RecordVoiceConsent.php`, `backend/app/Voice/StartVoiceSession.php`, `backend/app/Voice/VoiceSessionStarter.php`, `backend/app/GraphQL/Mutations/SubmitAssessment.php`, `backend/app/Console/Commands/PurgeTranscripts.php`, `backend/app/Observability/SentryEventScrubber.php`, `backend/app/{Mistakes,Assessments,Scenarios}/DeepSeek*.php`, `frontend/app/components/VoiceConsentGate.vue`, `frontend/app/composables/useVoiceConsent.ts`, `frontend/app/pages/{lesson,talk}/**`, `frontend/app/pages/level.vue`, `PRIVACY.md`
 **Статус:** active
+
+## 2026-11-11 — Stripe-подписки с помесячным лимитом минут
+
+**Решение:**
+1. Три платных тира (`entry` 799/7 990 ¥, `standard` 1 480/14 800 ¥, `pro` 2 980/29 800 ¥)
+   и 15 бесплатных минут навсегда. Суммы и включённые минуты — в `backend/config/billing.php`,
+   японские названия и описания — в `frontend/app/constants/strings.ts` по коду плана; API
+   отдаёт только код, цену и минуты.
+2. Hosted Stripe Checkout + Billing Portal через `stripe/stripe-php` напрямую, без Cashier и без
+   Elements: карты не проходят через наш домен, отмена и смена карты живут в портале Stripe.
+3. Минуты считаются из `voice_sessions.duration_sec`, а не отдельным счётчиком. Окно — месяц от
+   даты подписки (`usage_anchor_at`), в том числе для годового тарифа; незавершённая сессия
+   учитывается по elapsed с потолком `voice.max_session_seconds`.
+4. Проверка стоит в `VoiceSessionStarter` внутри транзакции под `lockForUpdate`, рядом с дневным
+   лимитом; отказ — типизированные `VOICE_MINUTES_EXHAUSTED` (used/included/resetsAt в
+   extensions) и `VOICE_SUBSCRIPTION_INACTIVE` (status).
+5. Вебхук `POST /api/webhooks/stripe` проверяет подпись по сырому телу (`constructEvent`) и
+   пишет `stripe_events.stripe_event_id` через `insertOrIgnore` в одной транзакции с эффектом:
+   повторная доставка — no-op, упавшая обработка откатывает и дедуп-строку, и Stripe может
+   повторить.
+6. Удаление аккаунта сначала отменяет подписку в Stripe. Если Stripe недоступен или отказал —
+   `BILLING_CANCEL_FAILED`, аккаунт остаётся: локальная строка — единственный указатель на
+   подписку, и удалить её, пока ученика продолжают списывать, значит сделать ошибку необратимой.
+7. `ProductionSanityCheck` отказывает в старте с `sk_test_`-ключом: тестовый checkout выглядит
+   здоровым и не берёт денег.
+
+**Почему:** 799 ¥ покрывают лишь ~150 минут, поэтому продаются минуты, а не «приложение».
+Hosted Checkout убирает PCI-поверхность. Ledger из сессий не расходится с вебхуками, в отличие от
+счётчика. Годовой тариф не должен выдавать годовой пакет минут: лимит остаётся помесячным.
+
+**Отвергнуто:** `laravel/cashier` (совместимость с Laravel 13 и собственный слой подписок);
+встроенная форма Elements (PCI и больше кода); счётчик минут в отдельной таблице (дрейф при
+ретраях); календарный месяц (короткий первый период для подписавшихся 30-го); безлимит на 799;
+разрешить тестовые ключи в production; отмена подписки после удаления строки.
+
+**Файлы:** `backend/config/billing.php`, `backend/app/Billing/*`, `backend/app/GraphQL/Queries/Billing{Plans,Overview}.php`,
+`backend/app/GraphQL/Mutations/Create{CheckoutSession,BillingPortalSession}.php`,
+`backend/app/Http/Controllers/StripeWebhookController.php`, `backend/app/Voice/VoiceSessionStarter.php`,
+`backend/app/Voice/StartVoiceSession.php`, `backend/app/Privacy/AccountDeletionService.php`,
+`backend/app/Support/ProductionSanityCheck.php`, `backend/graphql/types/billing.graphql`,
+`frontend/app/pages/pricing.vue`, `frontend/app/components/VoiceLimitGate.vue`,
+`frontend/app/composables/useBilling.ts`, `docker-compose.prod.yml`, `infra/terraform/{ecs,secrets}.tf`
+**Статус:** active

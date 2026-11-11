@@ -78,6 +78,26 @@ export function graphQLErrorIsValidation(error: GraphQLErrorLike | unknown): boo
   return extensions?.category === 'validation' || Boolean(validation)
 }
 
+
+/**
+ * Returns the first GraphQL error's `extensions` object, if present.
+ *
+ * Billing failures carry numbers in extensions (`usedSeconds`,
+ * `includedSeconds`, `resetsAt`) because the paywall renders them; parsing
+ * those out of the message would be guesswork.
+ */
+export function graphQLErrorExtensions(error: GraphQLErrorLike | unknown): Record<string, unknown> | null {
+  if (!isObject(error)) {
+    return null
+  }
+
+  const graphQLErrors = Array.isArray(error.graphQLErrors) ? error.graphQLErrors : []
+  const first = graphQLErrors[0]
+  const extensions = isObject(first) && isObject(first.extensions) ? first.extensions : undefined
+
+  return extensions ?? null
+}
+
 /** The one message that must never depend on an index lookup, so it stays total. */
 export const AUTH_EXPIRED_MESSAGE = 'セッションの有効期限が切れました。もう一度ログインしてください。'
 
@@ -90,6 +110,7 @@ export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
   VOICE_CONSENT_REQUIRED: '音声の録音と処理への同意が必要です。',
   SCENARIO_DRAFT_FAILED: 'AIがお題を組み立てられませんでした。もう一度お試しください。',
   SCENARIO_NOT_FOUND: '指定されたお題が見つかりません。',
+  BILLING_CANCEL_FAILED: 'サブスクリプションを解約できませんでした。通信状況を確認して、もう一度お試しください。',
 }
 
 /**

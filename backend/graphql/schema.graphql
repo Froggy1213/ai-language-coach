@@ -34,6 +34,12 @@ type Query {
 
     "Grammar points the learner got wrong in at least N distinct sessions within the rolling window."
     recurringMistakes: [RecurringMistake!]! @guard @field(resolver: "App\\GraphQL\\Queries\\RecurringMistakes")
+
+    "Paid plans available for subscription. Public: the pricing screen renders for guests too."
+    billingPlans: [BillingPlan!]! @field(resolver: "App\\GraphQL\\Queries\\BillingPlans")
+
+    "The learner's plan, subscription status and voice-minute usage."
+    billingOverview: BillingOverview! @guard @field(resolver: "App\\GraphQL\\Queries\\BillingOverview")
 }
 
 
@@ -200,6 +206,28 @@ type Mutation {
         @guard
         @throttle(maxAttempts: 5, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\DeleteAccount")
+
+    """
+    Create a Stripe Checkout session for a paid plan. Returns the hosted URL;
+    the browser navigates to it and the card never touches this domain.
+    """
+    createCheckoutSession(
+        "Stable plan code from `billingPlans`, e.g. `entry`."
+        planCode: String!
+        "How often Stripe charges the plan."
+        interval: BillingInterval!
+    ): BillingRedirect!
+        @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\CreateCheckoutSession")
+
+    """
+    Open the Stripe billing portal for the authenticated learner (payment method,
+    plan change, cancellation). Returns the hosted URL.
+    """
+    createBillingPortalSession: BillingRedirect!
+        @guard
+        @field(resolver: "App\\GraphQL\\Mutations\\CreateBillingPortalSession")
 }
 
 type Subscription {

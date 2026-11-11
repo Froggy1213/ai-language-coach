@@ -3,6 +3,7 @@
 namespace Tests\Unit\GraphQL;
 
 use App\Enums\AssessmentStatus;
+use App\Enums\BillingInterval;
 use App\Enums\CefrLevel;
 use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
@@ -26,6 +27,7 @@ class CodegenEnumsTest extends TestCase
         'LessonCardStatus' => LessonCardStatus::class,
         'AssessmentStatus' => AssessmentStatus::class,
         'VoiceSessionStatus' => VoiceSessionStatus::class,
+        'BillingInterval' => BillingInterval::class,
     ];
 
     public function test_codegen_enums_sdl_matches_php_enums(): void

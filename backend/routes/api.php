@@ -4,6 +4,7 @@ use App\Http\Controllers\FailVoiceSessionController;
 use App\Http\Controllers\LiveKitWebhookController;
 use App\Http\Controllers\RecordVoiceSessionTurnController;
 use App\Http\Controllers\ReportVoiceClientErrorController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Http\Middleware\VerifyInternalSecret;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
@@ -15,6 +16,13 @@ use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 | the `api` middleware group rather than `web`.
 */
 Route::post('/webhooks/livekit', LiveKitWebhookController::class);
+
+/*
+| Stripe calls this one too. The signature over the raw body is the
+| authentication, and the handler is idempotent per event id, so Stripe's
+| retries are safe.
+*/
+Route::post('/webhooks/stripe', StripeWebhookController::class);
 
 // The voice agent reports its own failures here (plan §5).
 Route::post('/internal/sessions/{session}/fail', FailVoiceSessionController::class)

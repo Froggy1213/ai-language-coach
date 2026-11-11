@@ -37,3 +37,8 @@ enum VoiceSessionStatus {
   failed
   abandoned
 }
+
+enum BillingInterval {
+  month
+  year
+}

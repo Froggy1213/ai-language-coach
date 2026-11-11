@@ -1,6 +1,6 @@
 # AI Language Coach — “Kirie”
 
-Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking learners: onboarding level assessment, a personalized grammar roadmap, two conversation modes with a real-time voice agent (a lesson focused on a grammar topic with in-line correction, and a role-play scenario with a post-conversation review), and spaced repetition (SM-2) based on mistakes.
+Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking learners: onboarding level assessment, a personalized grammar roadmap, two conversation modes with a real-time voice agent (a lesson focused on a grammar topic with in-line correction, and a role-play scenario with a post-conversation review), spaced repetition (SM-2) based on mistakes, and paid plans that meter voice minutes (15 free minutes, then a monthly allowance).
 
 - **Interface:** Japanese (`frontend/app/constants/strings.ts`); learning content — English (from the API).
 - **Brand:** **Kirie** (`APP_NAME=Kirie` in the backend and `app.name` in the frontend).
@@ -47,6 +47,7 @@ Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking lea
 |---|---|
 | Frontend | Nuxt 4 (Vue 3, SPA `ssr: false`) + Tailwind CSS 4 + `@urql/vue` |
 | Auth | Laravel Sanctum (SPA session cookie + CSRF) |
+| Billing | Stripe Checkout + Billing Portal (subscriptions, monthly voice-minute allowances) |
 | API | Laravel 13 + Lighthouse GraphQL (`/graphql`) |
 | Realtime | Laravel Reverb (Pusher protocol for GraphQL subscriptions through Laravel Echo) |
 | Queues | Redis 7 + Laravel Horizon |

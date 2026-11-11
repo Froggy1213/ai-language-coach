@@ -133,6 +133,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Duration
+    |--------------------------------------------------------------------------
+    |
+    | Mirrors the voice agent's own `VOICE_MAX_SESSION_SECONDS` (15 minutes).
+    | The billing allowance uses it as the ceiling for a session that has not
+    | reported its final duration yet: a room that is still open can cost at
+    | most this much, so that is what the in-flight estimate charges.
+    |
+    */
+
+    'max_session_seconds' => (int) env('VOICE_MAX_SESSION_SECONDS', 900),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mistake Analysis Delay
     |--------------------------------------------------------------------------
     |

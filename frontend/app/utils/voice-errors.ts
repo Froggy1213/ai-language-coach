@@ -1,5 +1,5 @@
 import type { CombinedError } from '@urql/vue'
-import { lesson, talk } from '~/constants/strings'
+import { lesson, paywall, talk } from '~/constants/strings'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 /**
@@ -16,6 +16,8 @@ export function mapVoiceError(failure: CombinedError): string {
       VOICE_FLEET_BUSY: lesson.fleetBusy,
       VOICE_START_FAILED: 'サーバーで会話セッションを開始できませんでした。しばらくしてからお試しください。',
       VOICE_DAILY_LIMIT_REACHED: '本日の会話セッションの上限に達しました。明日また試してください。',
+      VOICE_MINUTES_EXHAUSTED: paywall.title,
+      VOICE_SUBSCRIPTION_INACTIVE: paywall.inactiveTitle,
       LESSON_CARD_NOT_FOUND: 'このレッスンはロードマップにありません。',
       LESSON_CARD_LOCKED: 'このレッスンはまだ開いていません。',
       // The catalogue can change between the picker render and the tap.

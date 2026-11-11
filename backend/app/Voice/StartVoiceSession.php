@@ -2,6 +2,8 @@
 
 namespace App\Voice;
 
+use App\Billing\VoiceMinutesExhausted;
+use App\Billing\VoiceSubscriptionInactive;
 use App\Enums\LessonCardStatus;
 use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
@@ -138,6 +140,26 @@ final class StartVoiceSession
             throw new Error(
                 $exception->getMessage(),
                 extensions: ['code' => 'VOICE_DAILY_LIMIT_REACHED'],
+                previous: $exception,
+            );
+        } catch (VoiceMinutesExhausted $exception) {
+            throw new Error(
+                $exception->getMessage(),
+                extensions: [
+                    'code' => 'VOICE_MINUTES_EXHAUSTED',
+                    'usedSeconds' => $exception->usedSeconds,
+                    'includedSeconds' => $exception->includedSeconds,
+                    'resetsAt' => $exception->resetsAt?->toIso8601String(),
+                ],
+                previous: $exception,
+            );
+        } catch (VoiceSubscriptionInactive $exception) {
+            throw new Error(
+                $exception->getMessage(),
+                extensions: [
+                    'code' => 'VOICE_SUBSCRIPTION_INACTIVE',
+                    'status' => $exception->status,
+                ],
                 previous: $exception,
             );
         } catch (VoiceFleetBusy $exception) {

@@ -2,7 +2,7 @@
 import { useQuery } from '@urql/vue'
 import { ME_QUERY } from '~/graphql/documents'
 import { languageDisplayName } from '~/constants/languages'
-import { common, settings as copy } from '~/constants/strings'
+import { billing as billingCopy, common, pricing as pricingCopy, settings as copy } from '~/constants/strings'
 import { formatDate } from '~/utils/format'
 
 import type { CurrentUser } from '~/types/view-models'
@@ -26,6 +26,42 @@ const currentUser = computed(() => data.value?.me ?? user.value)
 const { theme, set: setTheme } = useTheme()
 
 const { deleting, error: deleteError, deleteAccount } = usePrivacy()
+
+/**
+ * Billing is a separate read from `me`: it is a heavier resolver (it sums the
+ * month's sessions), and a learner who never pays should not pay for it on
+ * every settings visit.
+ */
+const route = useRoute()
+const {
+  overview,
+  fetching: billingFetching,
+  error: billingError,
+  refresh: refreshBilling,
+  openPortal,
+  openingPortal,
+} = useBilling()
+
+const checkoutState = computed(() => String(route.query.checkout ?? ''))
+
+const planLabel = computed(() => {
+  const planCode = overview.value?.planCode ?? 'free'
+
+  if (planCode === 'free') {
+    return billingCopy.freePlan
+  }
+
+  return pricingCopy.plans[planCode as keyof typeof pricingCopy.plans]?.name ?? planCode
+})
+
+const usedPercent = computed(() => {
+  const used = overview.value?.usedMinutes ?? 0
+  const included = overview.value?.includedMinutes ?? 0
+
+  return included > 0 ? Math.min(100, Math.round((used / included) * 100)) : 0
+})
+
+onMounted(refreshBilling)
 
 const password = ref('')
 const confirmation = ref('')
@@ -97,6 +133,68 @@ async function handleDelete(): Promise<void> {
 
         <p v-if="currentUser.voiceConsentAt" class="pl-1 text-[0.75rem] text-[var(--ink-faint)]">
           {{ formatDate(currentUser.voiceConsentAt) }}
+        </p>
+      </section>
+
+
+      <!-- Billing. A learner on the free allowance sees what is left; a
+           subscriber sees the plan and the portal link. -->
+      <section class="space-y-3">
+        <h2 class="label">{{ billingCopy.title }}</h2>
+
+        <UiNotice v-if="checkoutState === 'success'" :message="billingCopy.checkoutSuccess" tone="success" />
+        <UiNotice v-else-if="checkoutState === 'cancelled'" :message="billingCopy.checkoutCancelled" tone="info" />
+        <UiNotice v-if="billingError" :message="billingError" />
+
+        <div v-if="overview" class="space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+          <div class="flex items-baseline justify-between gap-4">
+            <span class="text-[0.875rem] text-[var(--ink-muted)]">{{ billingCopy.plan }}</span>
+            <span class="text-[0.9375rem]">{{ planLabel }}</span>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="flex items-baseline justify-between gap-4 text-[0.8125rem]">
+              <span class="tnum text-[var(--ink)]">{{ billingCopy.minutesUsed(overview.usedMinutes, overview.includedMinutes) }}</span>
+              <span class="tnum text-[var(--ink-faint)]">{{ billingCopy.remaining(overview.remainingMinutes) }}</span>
+            </div>
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--line)]">
+              <div
+                class="h-full rounded-full bg-[var(--accent)] transition-[width] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                :style="{ width: `${usedPercent}%` }"
+              />
+            </div>
+          </div>
+
+          <p v-if="overview.resetsAt" class="text-[0.75rem] text-[var(--ink-faint)]">
+            {{ billingCopy.resetsLabel }}: {{ formatDate(overview.resetsAt) }}
+          </p>
+          <p v-else-if="overview.currentPeriodEnd" class="text-[0.75rem] text-[var(--ink-faint)]">
+            {{ billingCopy.currentPeriodEnd }}: {{ formatDate(overview.currentPeriodEnd) }}
+          </p>
+
+          <p v-if="overview.cancelAtPeriodEnd" class="text-[0.75rem] text-[var(--ink-faint)]">
+            {{ billingCopy.cancelAtPeriodEnd }}
+          </p>
+
+          <UiNotice v-if="overview.status === 'past_due'" :message="billingCopy.pastDue" tone="warn" />
+
+          <div class="flex flex-wrap gap-2 pt-1">
+            <UiButtonLink to="/pricing">
+              {{ billingCopy.change }}
+            </UiButtonLink>
+            <UiButton
+              v-if="overview.canManage"
+              :loading="openingPortal"
+              @click="openPortal"
+            >
+              {{ billingCopy.manage }}
+            </UiButton>
+          </div>
+        </div>
+
+        <p v-else-if="billingFetching" class="flex items-center gap-3 text-[0.9375rem] text-[var(--ink-muted)]">
+          <UiSpinner />
+          {{ billingCopy.title }}…
         </p>
       </section>
 

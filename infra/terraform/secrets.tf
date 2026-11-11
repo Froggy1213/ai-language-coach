@@ -127,6 +127,17 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
     GROQ_API_KEY          = ""
     CEREBRAS_API_KEY      = ""
     SENTRY_DSN            = "placeholder-replace-with-real-sentry-dsn"
+    # Billing is off until these are filled by hand: empty is a valid
+    # "not configured" state (checkout answers BILLING_NOT_CONFIGURED), while a
+    # test-mode key in production is refused by ProductionSanityCheck.
+    STRIPE_SECRET         = ""
+    STRIPE_WEBHOOK_SECRET = ""
+    STRIPE_PRICE_ENTRY_MONTHLY    = ""
+    STRIPE_PRICE_ENTRY_YEARLY     = ""
+    STRIPE_PRICE_STANDARD_MONTHLY = ""
+    STRIPE_PRICE_STANDARD_YEARLY  = ""
+    STRIPE_PRICE_PRO_MONTHLY      = ""
+    STRIPE_PRICE_PRO_YEARLY       = ""
   })
 
   lifecycle {

@@ -17,6 +17,18 @@ The application collects and processes only the data strictly necessary for lang
 | **Grammar Mistakes & Feedback** | Tracking learner mistakes, providing corrections, and generating explanations | MySQL 8.4 | `mistakes` (`user_utterance`, `correction`, `explanation`, `grammar_point_id`) |
 | **Spaced Repetition Schedule** | Scheduling flashcards and review intervals using the SM-2 algorithm | MySQL 8.4 | `review_items` (`ease_factor`, `interval_days`, `repetition_number`, `next_review_at`) |
 | **Realtime Subscriptions** | Realtime broadcast delivery for assessment results and session feedback | Redis 7 | `graphql.topic.*` sets and `graphql.subscriber.*` entries |
+| **Billing Identity** | Mapping the learner to their Stripe customer, plan and subscription state; monthly voice-minute allowance | MySQL 8.4 + Stripe | `users.stripe_customer_id`, `subscriptions` (`stripe_subscription_id`, `plan_code`, `status`, period dates) |
+
+---
+
+### Payment data
+
+Card data never reaches this application. Checkout and the billing portal are Stripe-hosted
+pages, and the browser navigates to them; the server stores only the Stripe customer id, the
+subscription id, the plan, the status and the period dates. Stripe is the processor for payment
+data and retains invoices and receipts under its own policy and tax-law requirements. Voice
+minutes are the only usage the application meters, and they are derived from
+`voice_sessions.duration_sec` rather than from a separate billing counter.
 
 ---
 
@@ -71,6 +83,8 @@ Both commands are idempotent, support `--dry-run` for auditing without data alte
 ## 4. Account Deletion
 
 Account deletion removes all personal data, learning progress, active subscriptions, and stored media files. Exactly one deletion service class (`App\Privacy\AccountDeletionService`) handles all deletions.
+
+Stripe subscriptions are cancelled **before** anything is deleted. If Stripe cannot be reached or refuses the cancellation, deletion fails with the typed `BILLING_CANCEL_FAILED` error and the account is left intact: the local row is the only pointer to the subscription, so deleting it while the learner is still being charged would make the mistake unrecoverable. The learner can retry once Stripe is reachable.
 
 ### Deletion Interfaces
 

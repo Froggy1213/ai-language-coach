@@ -391,3 +391,56 @@ export const DELETE_ACCOUNT_MUTATION = /* GraphQL */ `
   }
 `
 
+
+/**
+ * The public pricing table. Codes and numbers only; the Japanese copy is keyed
+ * by `code` in `constants/strings.ts`.
+ */
+export const BILLING_PLANS_QUERY = /* GraphQL */ `
+  query BillingPlans {
+    billingPlans {
+      code
+      monthlyPriceJpy
+      yearlyPriceJpy
+      includedMinutes
+    }
+  }
+`
+
+/**
+ * The learner's plan and the current monthly allowance. `resetsAt` is null on
+ * the lifetime free allowance, which is what the settings block keys on.
+ */
+export const BILLING_OVERVIEW_QUERY = /* GraphQL */ `
+  query BillingOverview {
+    billingOverview {
+      planCode
+      status
+      interval
+      includedMinutes
+      usedMinutes
+      remainingMinutes
+      resetsAt
+      currentPeriodEnd
+      cancelAtPeriodEnd
+      canManage
+      hasSubscription
+    }
+  }
+`
+
+export const CREATE_CHECKOUT_SESSION_MUTATION = /* GraphQL */ `
+  mutation CreateCheckoutSession($planCode: String!, $interval: BillingInterval!) {
+    createCheckoutSession(planCode: $planCode, interval: $interval) {
+      url
+    }
+  }
+`
+
+export const CREATE_BILLING_PORTAL_SESSION_MUTATION = /* GraphQL */ `
+  mutation CreateBillingPortalSession {
+    createBillingPortalSession {
+      url
+    }
+  }
+`

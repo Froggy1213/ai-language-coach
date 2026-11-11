@@ -6,7 +6,10 @@ use App\Assessments\AssessmentAudioStorage;
 use App\Assessments\CefrAssessor;
 use App\Assessments\DeepSeekCefrAssessor;
 use App\Assessments\S3AssessmentAudioStorage;
+use App\Billing\StripeGateway;
+use App\Billing\StripeSdkGateway;
 use App\Enums\AssessmentStatus;
+use App\Enums\BillingInterval;
 use App\Enums\CefrLevel;
 use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
@@ -71,6 +74,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(GoalReviewer::class, DeepSeekGoalReviewer::class);
         $this->app->bind(ScenarioDrafter::class, DeepSeekScenarioDrafter::class);
 
+        // Stripe is behind an interface so billing tests can assert what was
+        // sold without a network call, and so a misconfigured key fails in one
+        // place with BILLING_NOT_CONFIGURED rather than inside the SDK.
+        $this->app->bind(StripeGateway::class, fn (Application $app): StripeSdkGateway => new StripeSdkGateway(
+            (string) $app['config']->get('billing.secret'),
+        ));
+
         // LiveKit access tokens and the server API calls that dispatch the voice
         // agent (plan §5). A singleton because LiveKitApi wraps it and both read
         // the same key pair from `config/voice.php`.
@@ -116,5 +126,6 @@ class AppServiceProvider extends ServiceProvider
         $typeRegistry->register(new NativeEnumType(LessonCardStatus::class));
         $typeRegistry->register(new NativeEnumType(AssessmentStatus::class));
         $typeRegistry->register(new NativeEnumType(VoiceSessionStatus::class));
+        $typeRegistry->register(new NativeEnumType(BillingInterval::class));
     }
 }

@@ -2,6 +2,9 @@
 
 namespace App\Voice;
 
+use App\Billing\VoiceAllowanceResolver;
+use App\Billing\VoiceMinutesExhausted;
+use App\Billing\VoiceSubscriptionInactive;
 use App\Enums\VoiceSessionFailReason;
 use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
@@ -36,11 +39,14 @@ final class VoiceSessionStarter
 {
     public function __construct(
         private readonly VoiceSessionQuota $quota,
+        private readonly VoiceAllowanceResolver $allowances,
         private readonly VoiceAgentDispatcher $dispatcher,
     ) {}
 
     /**
      * @throws VoiceDailyLimitReached when the learner has used up today's sessions
+     * @throws VoiceMinutesExhausted when the plan's voice allowance is spent
+     * @throws VoiceSubscriptionInactive when the subscription cannot fund a session
      * @throws VoiceFleetBusy when no agent takes the room
      * @throws VoiceStartFailed when room creation, dispatch or the agent wait fails
      */
@@ -69,6 +75,11 @@ final class VoiceSessionStarter
             }
 
             $this->quota->ensureWithinDailyLimit($user);
+
+            // The daily cap is anti-abuse; this is what the learner paid for.
+            // Checked under the same lock, so two concurrent starts cannot both
+            // spend the last remaining minute.
+            $this->allowances->ensureCanStart($user);
 
             // The room name is derivable from a primary key on purpose: it is not a
             // secret, it is an address. What protects the room is the signed token.
