@@ -4,7 +4,8 @@ Updated: 2026-11-11 · session: Stripe-биллинг — подписки, ми
 
 ## Сейчас
 
-Ветка `main`, в рабочем дереве **незакоммиченная** реализация платной подписки через Stripe.
+Ветка `main`, биллинг закоммичен (`9d054d1 feat(billing): add Stripe subscriptions with monthly
+voice-minute allowances`) и запушен в `origin/main`.
 Продукт теперь умеет продавать минуты, а не «приложение»: три платных тира с годовыми ценами,
 15 бесплатных минут навсегда и жёсткий лимит по минутам, посчитанный из
 `voice_sessions.duration_sec`.
@@ -47,11 +48,10 @@ Updated: 2026-11-11 · session: Stripe-биллинг — подписки, ми
 1. **Stripe-аккаунт** (руками): создать 6 price-объектов (JPY, tax-inclusive), добавить вебхук
    `https://$APP_DOMAIN/api/webhooks/stripe` на четыре события, заполнить `STRIPE_SECRET`,
    `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`; прогнать тестовый checkout картой `4242 4242 4242 4242`.
-2. **Закоммитить** биллинг (сейчас всё в рабочем дереве).
-3. **Деплой-блокеры из прошлой сессии** (не сделаны): TLS-прокси перед LiveKit 7880, ECR
+2. **Деплой-блокеры из прошлой сессии** (не сделаны): TLS-прокси перед LiveKit 7880, ECR
    `IMMUTABLE` против `:latest`, `REVERB_HOST=127.0.0.1` в ECS, scheduler в ECS, RDS TLS,
    `GrammarPointSeeder` в migration-таск.
-4. **Биллинг-долги**: proration/смена плана через портал (UI пока не показывает разницу),
+3. **Биллинг-долги**: proration/смена плана через портал (UI пока не показывает разницу),
    Stripe Tax/JCT (сейчас выключен), dunning-письма, top-up пакеты минут, политика возвратов,
    интеграция `voice:usage-report` с включёнными минутами плана.
 
