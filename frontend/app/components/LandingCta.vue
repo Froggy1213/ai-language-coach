@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { landing } from '~/constants/strings'
+import { landing, legal } from '~/constants/strings'
 </script>
 
 <template>
   <!-- =======================================================================
        FINAL CALL TO ACTION
        ======================================================================= -->
-  <section class="mx-auto max-w-6xl px-5 pt-8 pb-28 sm:px-6">
+  <section class="mx-auto max-w-6xl px-5 pt-8 pb-20 sm:px-6">
     <div class="relative overflow-hidden rounded-3xl border border-[var(--line-strong)] bg-[var(--surface-strong)] px-6 py-14 text-center sm:px-12 sm:py-20">
       <div
         class="pointer-events-none absolute inset-0 opacity-30"
@@ -33,5 +33,23 @@ import { landing } from '~/constants/strings'
         </div>
       </div>
     </div>
+
+    <footer class="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--line)] pt-6 text-[0.8125rem] text-[var(--ink-faint)]">
+      <span class="display text-[0.9375rem] text-[var(--ink-muted)]">Kirie</span>
+      <nav class="flex flex-wrap items-center gap-5">
+        <NuxtLink to="/pricing" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.pricing }}
+        </NuxtLink>
+        <NuxtLink to="/privacy" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.privacy }}
+        </NuxtLink>
+        <NuxtLink to="/terms" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.terms }}
+        </NuxtLink>
+        <NuxtLink to="/tokushoho" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.tokushoho }}
+        </NuxtLink>
+      </nav>
+    </footer>
   </section>
 </template>

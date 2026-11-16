@@ -27,6 +27,16 @@ import { landing } from '~/constants/strings'
             {{ badge }}
           </span>
         </div>
+
+        <div class="pt-2">
+          <NuxtLink
+            to="/privacy"
+            class="inline-flex items-center gap-1.5 text-[0.875rem] text-[var(--accent)] underline-offset-4 hover:underline"
+          >
+            <span>{{ landing.privacy.policyLink }}</span>
+            <span aria-hidden="true">→</span>
+          </NuxtLink>
+        </div>
       </div>
     </div>
   </section>

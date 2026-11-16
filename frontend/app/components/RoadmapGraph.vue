@@ -242,6 +242,12 @@ function activateNode(node: GraphNode): void {
   }
 }
 
+function deactivateNode(code: string): void {
+  if (activeCode.value === code) {
+    activeCode.value = null
+  }
+}
+
 function onNodeKeydown(event: KeyboardEvent, node: GraphNode): void {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
@@ -374,6 +380,7 @@ function onNodeKeydown(event: KeyboardEvent, node: GraphNode): void {
         class="mx-auto block h-auto w-full min-w-[640px] select-none"
         role="group"
         :aria-label="roadmap.title"
+        @mouseleave="activeCode = null"
       >
         <!-- CEFR Horizontal Bands -->
         <g class="roadmap-bands">
@@ -463,7 +470,9 @@ function onNodeKeydown(event: KeyboardEvent, node: GraphNode): void {
               isNodeDimmed(node) ? 'opacity-25' : 'opacity-100',
             ]"
             @mouseenter="activeCode = node.code"
+            @mouseleave="deactivateNode(node.code)"
             @focus="activeCode = node.code"
+            @blur="deactivateNode(node.code)"
             @click="activateNode(node)"
             @keydown="onNodeKeydown($event, node)"
           >
@@ -472,6 +481,7 @@ function onNodeKeydown(event: KeyboardEvent, node: GraphNode): void {
               v-if="node.recommended || activeCode === node.code"
               :r="graph.nodeRadius + 7"
               fill="none"
+              pointer-events="none"
               :stroke="
                 node.needsPractice
                   ? 'color-mix(in oklab, var(--color-amber-bright) 45%, transparent)'
@@ -485,6 +495,7 @@ function onNodeKeydown(event: KeyboardEvent, node: GraphNode): void {
               v-else-if="node.needsPractice && node.status !== 'locked'"
               :r="graph.nodeRadius + 5"
               fill="none"
+              pointer-events="none"
               stroke="color-mix(in oklab, var(--color-amber-bright) 42%, transparent)"
               stroke-width="3.5"
             />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BillingInterval, BillingPlan } from '~/types/graphql'
-import { pricing as copy } from '~/constants/strings'
+import { legal, pricing as copy } from '~/constants/strings'
 
 /**
  * 料金プラン — the public pricing screen.
@@ -21,12 +21,28 @@ const {
   refresh,
   checkout,
   checkingOut,
+  openPortal,
+  openingPortal,
   error,
 } = useBilling()
 
 const interval = ref<BillingInterval>('month')
 
+/**
+ * Stripe sends a cancelled Checkout back here. The notice is read once and the
+ * query is stripped, so navigating back to the plans does not replay it.
+ */
+const route = useRoute()
+const router = useRouter()
+const checkoutCancelled = ref(false)
+
 onMounted(async () => {
+  checkoutCancelled.value = route.query.checkout === 'cancelled'
+
+  if (checkoutCancelled.value) {
+    void router.replace({ query: {} }).catch(() => {})
+  }
+
   await loadPlans()
 
   if (user.value) {
@@ -54,9 +70,19 @@ function isCurrent(plan: BillingPlan): boolean {
   return overview.value?.hasSubscription === true && overview.value.planCode === plan.code
 }
 
+const hasActiveSubscription = computed(() =>
+  overview.value?.hasSubscription === true
+  && ['active', 'trialing', 'past_due'].includes(overview.value.status ?? ''),
+)
+
 async function choose(plan: BillingPlan): Promise<void> {
   if (!user.value) {
     await navigateTo('/register')
+    return
+  }
+
+  if (hasActiveSubscription.value) {
+    await openPortal()
     return
   }
 
@@ -67,6 +93,8 @@ async function choose(plan: BillingPlan): Promise<void> {
 <template>
   <section class="mx-auto max-w-4xl space-y-8">
     <PageHeader :eyebrow="copy.eyebrow" :title="copy.title" :lead="copy.lead" />
+
+    <UiNotice v-if="checkoutCancelled" tone="info" :message="copy.checkoutCancelled" />
 
     <p v-if="!user" class="text-[0.875rem] text-[var(--ink-faint)]">
       {{ copy.loginPrompt }}
@@ -159,8 +187,8 @@ async function choose(plan: BillingPlan): Promise<void> {
           <UiButton
             variant="primary"
             block
-            :loading="checkingOut === `${plan.code}:${interval}`"
-            :disabled="checkingOut !== null && checkingOut !== `${plan.code}:${interval}`"
+            :loading="checkingOut === `${plan.code}:${interval}` || (hasActiveSubscription && openingPortal)"
+            :disabled="(checkingOut !== null && checkingOut !== `${plan.code}:${interval}`) || openingPortal"
             @click="choose(plan)"
           >
             {{ user ? copy.choose : copy.loginToChoose }}
@@ -169,6 +197,19 @@ async function choose(plan: BillingPlan): Promise<void> {
       </article>
     </div>
 
-    <p class="text-center text-[0.75rem] leading-relaxed text-[var(--ink-faint)]">{{ copy.taxNote }}</p>
+    <div class="space-y-3 text-center">
+      <p class="text-[0.75rem] leading-relaxed text-[var(--ink-faint)]">{{ copy.taxNote }}</p>
+      <nav class="flex flex-wrap items-center justify-center gap-5 text-[0.75rem] text-[var(--ink-faint)]">
+        <NuxtLink to="/terms" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.terms }}
+        </NuxtLink>
+        <NuxtLink to="/privacy" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.privacy }}
+        </NuxtLink>
+        <NuxtLink to="/tokushoho" class="transition-colors hover:text-[var(--ink)]">
+          {{ legal.links.tokushoho }}
+        </NuxtLink>
+      </nav>
+    </div>
   </section>
 </template>

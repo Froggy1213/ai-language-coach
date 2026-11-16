@@ -5,8 +5,8 @@ import type { Assessment, CefrLevel, PronunciationFeedback, VoiceSession } from 
  *
  * This is not a schema type because it projects only the subset of fields requested
  * by `ME_QUERY` for global auth/session state, rather than the complete GraphQL `User`.
- * Pages with richer requirements (such as `app/pages/settings.vue`) keep their own
- * query data types (e.g. `MeData`).
+ * Pages with richer requirements (such as the 設定 screens under `app/pages/settings/`)
+ * keep their own query data types (e.g. `MeData`).
  */
 export interface CurrentUser {
   id: string

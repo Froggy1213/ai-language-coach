@@ -107,7 +107,11 @@ harness — not linked from the app, but kept because tuning the orb blind is gu
 | `/reflect/:id` | `pages/reflect/[[id]].vue` | **振り返り** Mistakes as corrections, grouped by grammar point; for a scenario, also the goal review (goal achieved, and what was missed). |
 | `/review` | `pages/review.vue` | **復習** Spaced repetition as recall: the learner's own sentence from the conversation, the correction behind the reveal, four grades. |
 | `/level` | `pages/level.vue` | **レベル判定** CEFR placement recording: consent → record → result. |
-| `/settings` | `pages/settings.vue` | **設定** Account, plan and voice-minute usage, theme, session, data deletion. |
+| `/settings` | `pages/settings/index.vue` | **設定** The hub: the learner's identity, and the four screens that hold the controls. Sign-out stays here. |
+| `/settings/account` | `pages/settings/account.vue` | **アカウント** Name and email, the read-only language and level, password change. |
+| `/settings/billing` | `pages/settings/billing.vue` | **プランと利用状況** Plan, minute allowance, reset date, Stripe Billing Portal. The Checkout return lands here. |
+| `/settings/appearance` | `pages/settings/appearance.vue` | **表示** Theme, chosen from two previews rather than a switch. |
+| `/settings/privacy` | `pages/settings/privacy.vue` | **データとプライバシー** Voice-consent record and the guarded account deletion. |
 | `/pricing` | `pages/pricing.vue` | **料金プラン** Monthly/yearly plans, minutes each includes, and the free allowance. Public: guests can read the price before signing up. |
 | `/login`, `/register` | `pages/login.vue`, `pages/register.vue` | Auth. |
 

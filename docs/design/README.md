@@ -5,7 +5,7 @@ that changing them casually will break something.
 
 Reference renders live next to this file: `today-mobile.jpg`, `conversation-mobile.jpg`,
 `roadmap-desktop.jpg`, `orb-states-dark.jpg`, `orb-states-light.jpg`,
-`settings-mobile.jpg`.
+`settings-mobile.jpg` (the 設定 hub).
 
 ## The brief this answers
 
@@ -35,6 +35,13 @@ sheet, the live session, the mistake analysis and the action footer on one scree
 own sake — talking and reviewing have *opposite* needs. Conversation wants no text on
 screen at all; review wants the mistakes and nothing else. Splitting them is what lets
 each one be quiet.
+
+設定 applies the rule one level down. It is a hub, not a workbench: the identity card
+says who the learner is, and four rows open the screens that own the controls —
+アカウント (name, email, password, level), プランと利用状況 (minutes and Stripe),
+表示 (theme), データとプライバシー (voice consent and deletion). The destructive flow
+lives on the last one, behind its own password-and-`DELETE` gate, rather than at the
+bottom of an unrelated scroll.
 
 **A native shell, not a website.** Persistent bottom tab bar on phones (five labelled
 tabs, ≥44px), sticky header on desktop. No tab is ever disabled: a locked lesson shows

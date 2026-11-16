@@ -90,9 +90,10 @@ export function useBilling() {
       if (failure || !data?.createCheckoutSession.url) {
         error.value = graphQLErrorMessageFor(failure, {
           codes: {
-            BILLING_NOT_CONFIGURED: 'このプランは現在お申し込みいただけません。',
-            BILLING_PLAN_NOT_FOUND: 'このプランは現在お申し込みいただけません。',
-            BILLING_PROVIDER_ERROR: '決済画面を開けませんでした。しばらくしてからお試しください。',
+            BILLING_ALREADY_SUBSCRIBED: pricingCopy.alreadySubscribedError,
+            BILLING_NOT_CONFIGURED: copy.notConfigured,
+            BILLING_PLAN_NOT_FOUND: copy.notConfigured,
+            BILLING_PROVIDER_ERROR: copy.providerError,
           },
           fallback: pricingCopy.checkoutError,
         })

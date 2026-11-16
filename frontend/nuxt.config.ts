@@ -92,6 +92,16 @@ export default defineNuxtConfig({
       livekit: {
         url: 'ws://localhost:7880',
       },
+      // Optional operator disclosure overrides for /tokushoho and /privacy
+      // (NUXT_PUBLIC_LEGAL_OPERATOR_NAME, _ADDRESS, _PHONE, _EMAIL).
+      // When unset, /tokushoho uses Stripe Japan's standard individual
+      // disclosure wording ("請求があったら遅滞なく開示します").
+      legal: {
+        operatorName: '',
+        address: '',
+        phone: '',
+        email: '',
+      },
     },
   },
 })

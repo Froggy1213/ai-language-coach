@@ -406,33 +406,101 @@ export const level = {
   sessionExpired: 'セッションが切れました。もう一度ログインしてください。',
 } as const
 
+/**
+ * 設定 — the hub and its four sub-screens.
+ *
+ * `rows` are the hub's navigation entries, `sections` their group headings.
+ * Account, appearance and data each have their own page, so the strings are
+ * grouped the same way; a key that only the hub uses says so in its name.
+ */
 export const settings = {
   title: '設定',
-  subtitle: 'アカウント、表示、データの扱い。',
-  account: 'アカウント',
+  subtitle: 'アカウント、プラン、表示、データの扱い。',
+  backToSettings: '設定に戻る',
+
+  sections: {
+    plan: 'プラン',
+    appearance: '表示',
+    data: 'データとプライバシー',
+    session: 'セッション',
+  },
+
+  rows: {
+    editProfile: 'プロフィールを編集',
+    changePassword: 'パスワードを変更',
+    plan: 'プランと利用状況',
+    theme: 'テーマ',
+    voiceConsent: '音声録音の同意',
+    deleteAccount: 'アカウントの削除',
+  },
+
+  passwordSet: '設定済み',
+  planSummary: (plan: string, remaining: number) => `${plan}・残り${remaining}分`,
+
+  accountTitle: 'アカウント',
+  accountLead: 'プロフィール、学習の設定、パスワード。',
+  profileSection: 'プロフィール',
   name: 'お名前',
+  nameLabel: 'お名前・ニックネーム',
+  nameHint: 'ホーム画面の挨拶などに表示されます。',
   email: 'メールアドレス',
+  emailHint: 'ログインとお知らせの宛先に使います。',
+  saveProfile: 'プロフィールを保存',
+  savingProfile: '保存しています…',
+  profileSaved: 'プロフィールを更新しました。',
+  profileError: 'プロフィールを更新できませんでした。',
+  learningSection: '学習',
   language: '学習中の言語',
+  languageHint: '学習する言語は、アカウント作成時に決まります。',
   levelLabel: 'CEFRレベル',
-  voiceConsent: '音声録音の同意',
+  levelHint: '会話の難易度とロードマップは、このレベルに合わせて作られます。',
+  retakeLevel: '判定を受け直す',
+  passwordSection: 'パスワード',
+  passwordHint: '新しいパスワードは8文字以上で設定してください。',
+  currentPassword: '現在のパスワード',
+  currentPasswordPlaceholder: '現在のパスワードを入力',
+  newPassword: '新しいパスワード',
+  newPasswordPlaceholder: '新しいパスワード（8文字以上）',
+  confirmNewPassword: '新しいパスワード（確認）',
+  confirmNewPasswordPlaceholder: '新しいパスワードをもう一度入力',
+  passwordMismatchConfirm: '新しいパスワードと確認用パスワードが一致しません。',
+  updatePasswordCta: 'パスワードを変更',
+  updatingPassword: '変更しています…',
+  passwordUpdated: 'パスワードを変更しました。',
+  passwordUpdateError: 'パスワードを変更できませんでした。',
+
+  appearanceTitle: '表示',
+  appearanceLead: '画面の明るさを選べます。設定はこの端末に保存されます。',
+  themeSection: 'テーマ',
+  themeHint: 'ダークテーマは、夜の会話練習でも目が疲れにくい設定です。',
+  themeDarkHint: '夜の練習でもまぶしくない',
+  themeLightHint: '明るい場所でも読みやすい',
+  themeSelected: '選択中',
+
+  privacyTitle: 'データとプライバシー',
+  privacyLead: '録音の同意と、保存されるデータについて。',
+  consentSection: '音声録音の同意',
+  consentBody: '音声は、文字起こし・AI講師との会話・振り返りのために処理されます。',
+  consentDate: (date: string) => `同意を記録した日: ${date}`,
+  consentMissingBody: '会話練習とレベル判定には、音声の録音と処理への同意が必要です。',
   voiceConsentYes: '記録あり',
   voiceConsentNo: '未記録',
-  appearance: '表示',
-  themeHint: 'ダークテーマは、夜の会話練習でも目が疲れにくい設定です。',
-  session: 'セッション',
-  logout: 'ログアウト',
-  loggingOut: 'ログアウトしています…',
-  logoutHint: '次に使うときは、もう一度ログインしてください。',
+  grantConsent: '同意を記録する',
+  grantingConsent: '記録中…',
+  privacyPolicyLink: 'プライバシーポリシーを読む',
   danger: 'アカウントの削除',
   dangerBody:
     'この操作は取り消せません。プロフィール、ロードマップ、会話履歴、間違い、録音がすべて削除されます。',
-  currentPassword: '現在のパスワード',
   passwordPlaceholder: 'パスワードを入力',
   confirmLabel: '確認のため',
   confirmSuffix: 'と入力してください',
   deleteCta: 'アカウントを削除',
   deleting: '削除しています…',
-  loadError: 'アカウント情報を読み込めませんでした。',
+  deleteError: 'アカウントを削除できませんでした。しばらくしてからお試しください。',
+
+  logout: 'ログアウト',
+  loggingOut: 'ログアウトしています…',
+  logoutHint: '次に使うときは、もう一度ログインしてください。',
 } as const
 
 
@@ -464,6 +532,8 @@ export const pricing = {
   loginPrompt: 'すでにアカウントをお持ちの方は',
   loginLink: 'ログイン',
   checkoutError: 'お支払いの画面を開けませんでした。しばらくしてからお試しください。',
+  checkoutCancelled: 'お支払いはキャンセルされました。プランを選び直せます。',
+  alreadySubscribedError: 'すでにプランをご契約中です。設定画面からプランを変更してください。',
   plans: {
     entry: {
       name: 'Entry',
@@ -486,20 +556,32 @@ export const pricing = {
 /** The billing block on 設定. */
 export const billing = {
   title: 'プランと利用状況',
+  lead: '話した時間と、次回の更新。',
   plan: '現在のプラン',
   freePlan: '無料プラン',
+  unknownPlan: '有料プラン',
+  freeNote: '無料の15分は、レベル判定と最初の会話に使えます。',
   minutesUsed: (used: number, included: number) => `${used} / ${included}分`,
-  remaining: (minutes: number) => `残り ${minutes} 分`,
+  remainingLabel: '残り',
+  usageLabel: '今月の利用',
+  usageLifetime: 'これまでの利用',
+  minutesUnit: '分',
+  statusActive: '有効',
+  statusTrialing: 'トライアル中',
+  statusPastDue: 'お支払い待ち',
+  statusUnpaid: 'お支払い未完了',
+  statusCanceled: '解約済み',
   resetsLabel: '次回リセット',
   currentPeriodEnd: '次回更新',
   cancelAtPeriodEnd: '期間終了後に解約されます',
   manage: '支払い・解約を管理',
   change: 'プランを変更',
   checkoutSuccess: 'お支払いが完了しました。反映まで少し時間がかかることがあります。',
-  checkoutCancelled: 'お支払いはキャンセルされました。',
   pastDue: 'お支払いに失敗しています。支払い方法を確認してください。',
   loadError: 'プラン情報を読み込めませんでした。',
   portalError: '支払い画面を開けませんでした。しばらくしてからお試しください。',
+  notConfigured: 'このプランは現在お申し込みいただけません。',
+  providerError: '決済画面を開けませんでした。しばらくしてからお試しください。',
 } as const
 
 /** The dialog that replaces a refused session with a way to keep talking. */
@@ -664,6 +746,7 @@ export const landing = {
       '明示的な音声処理同意ゲート',
       'ワンクリックで全データ完全消去',
     ],
+    policyLink: 'プライバシーポリシー全文を見る',
   },
   cta: {
     eyebrow: 'START SPEAKING TODAY',
@@ -674,3 +757,137 @@ export const landing = {
   },
 } as const
 
+export const legal = {
+  links: {
+    privacy: 'プライバシーポリシー',
+    terms: '利用規約',
+    tokushoho: '特定商取引法に基づく表記',
+    pricing: '料金プラン',
+    backHome: 'ホームへ戻る',
+  },
+  privacy: {
+    eyebrow: 'PRIVACY POLICY',
+    title: 'プライバシーポリシー',
+    lead: 'Kirie（キリエ）は、学習に必要な最小限のデータのみを扱い、音声データの即時消去と透明な保持期間を徹底しています。',
+    updatedAt: '最終改定日: 2026年11月11日',
+    sections: [
+      {
+        title: '1. 取得する情報と利用目的',
+        body: '当サービスは、AIによる英会話練習・CEFRレベル判定・文法ロードマップ作成・間隔反復（SM-2）復習の提供に必要な範囲でのみ情報を取得します。',
+        items: [
+          'アカウント情報：お名前、メールアドレス、パスワードハッシュ、学習対象言語、タイムゾーン、現在のCEFRレベル（本人確認および学習進捗の保持のため）',
+          '音声処理の同意記録：録音および音声解析に対する明示的な同意日時（同意証跡の記録のため）',
+          'レベル判定の録音データ：レベル判定時に録音された音声ファイル（文字起こしおよびCEFR評価のため）',
+          '会話セッションの文字起こし・文法フィードバック：発話テキスト、文法ミスの指摘・解説、および応答遅延の計測値（振り返りと復習スケジュール算出のため）',
+          '決済関連識別子：Stripe顧客ID、サブスクリプションID、契約プラン、利用期間（利用時間枠の管理のため）',
+        ],
+      },
+      {
+        title: '2. 音声データと文字起こしの保持期間・自動消去',
+        body: '音声および会話ログは、教育上の目的を果たした後に自動で消去される設計になっています。',
+        items: [
+          'レベル判定の音声ファイル：暗号化されたストレージへ直接アップロードされ、文字起こしとCEFR判定が完了した直後（通常数分以内）に自動削除されます。万一処理が中断された残存ファイルも、毎日実行されるクリーンアップにより7日以内に完全消去されます。',
+          '会話・判定の文字起こし（トランスクリプト）：作成から90日が経過すると、日次バッチ処理により自動的に消去されます。学習の記録（CEFR判定結果、抽出された文法ミス、復習カード）のみが残ります。',
+          '同意の取得：初回のレベル判定または音声セッションの前に明示的な同意画面を表示し、同意が記録されるまでサーバーは音声処理を一切受け付けません。',
+        ],
+      },
+      {
+        title: '3. クレジットカード・決済情報の取り扱い',
+        body: 'クレジットカード番号などの決済情報は当サービスのサーバーを通過・保存せず、決済代行会社であるStripe, Inc.が提供するホスト型画面（Stripe Checkoutおよびカスタマーポータル）にて直接処理されます。',
+        items: [],
+      },
+      {
+        title: '4. 外部サービス（業務委託先）の利用',
+        body: 'リアルタイムの音声対話および学習フィードバックを生成するため、以下の外部プロバイダに必要なデータを送信します。また、エラー監視（Sentry）では発話テキストやプロンプト等の個人情報を送信前にスクラビング（除去）しています。',
+        items: [
+          '音声認識（STT）：Deepgram',
+          '音声合成（TTS）：Cartesia / OpenAI',
+          '対話生成および文法・レベル解析（LLM）：Groq / Cerebras / OpenAI / DeepSeek',
+          'リアルタイム音声通信基盤（WebRTC）：LiveKit',
+          '決済処理：Stripe',
+        ],
+      },
+      {
+        title: '5. アカウントと全データの自己削除',
+        body: 'ログイン後の「設定」画面にある「アカウントの削除」から、いつでもご自身の操作でアカウントを完全に削除できます。削除を実行すると、有効なStripeサブスクリプションが即座に解約されたうえで、プロフィール・ロードマップ・会話履歴・文法ミス・録音データがすべてデータベースおよびストレージから消去されます（データベースの自動バックアップスナップショットに含まれる履歴は、バックアップ保持期間の満了に伴い順次消滅します）。',
+        items: [],
+      },
+    ],
+  },
+  terms: {
+    eyebrow: 'TERMS OF SERVICE',
+    title: '利用規約',
+    lead: 'Kirie（以下「当サービス」）をご利用いただく際の条件を定めるものです。',
+    updatedAt: '最終改定日: 2026年11月11日',
+    sections: [
+      {
+        title: '1. サービスの内容',
+        body: '当サービスは、AI音声コーチとのリアルタイム英会話練習、音声によるCEFRレベル判定、文法ロードマップ、および間隔反復（SM-2）による復習機能を提供する語学学習サービスです。AIによる判定やフィードバックは学習支援を目的としたものであり、特定の試験結果や正確性を保証するものではありません。',
+        items: [],
+      },
+      {
+        title: '2. アカウント登録と管理',
+        body: '利用者は正確な情報をもってアカウントを登録し、ご自身の責任においてパスワードおよびセッションを管理するものとします。1つのアカウントを複数人で共有することはできません。',
+        items: [],
+      },
+      {
+        title: '3. 無料利用枠と有料サブスクリプション',
+        body: '新規アカウントには、クレジットカード登録不要で利用できる無料会話枠（合計15分）が付与されます。有料プラン（Entry / Standard / Pro）をご契約いただくと、プランに応じた月間会話分数が付与されます。',
+        items: [
+          '月間利用枠のリセット：月払い・年払いのいずれにおいても、月間の会話可能時間はご契約日を起点として1か月ごとにリセットされます。未使用分の翌月への繰り越しはありません。',
+          '1日あたりのセッション上限：システム保護および健全な運用のため、1日あたりの音声セッション開始回数に上限（原則10回/日）を設けています。',
+        ],
+      },
+      {
+        title: '4. 解約・プラン変更・返金について',
+        body: '有料サブスクリプションは、「設定」画面の「支払い・解約を管理」（Stripeカスタマーポータル）からいつでも解約またはプラン変更が可能です。',
+        items: [
+          '解約の効力：解約手続きを行うと次回以降の自動更新が停止され、現在の請求期間（月払いまたは年払い）の終了日までは引き続きプランをご利用いただけます。',
+          '返金ポリシー：デジタルコンテンツおよびクラウド音声処理サービスの性質上、決済完了後の期間途中の解約による日割り・月割りでの返金は行っておりません（法令により返金が義務付けられる場合を除きます）。',
+        ],
+      },
+      {
+        title: '5. 禁止事項',
+        body: '利用者は、当サービスの利用にあたり以下の行為をしてはなりません。違反が確認された場合、事前の通知なく利用制限またはアカウント停止を行うことがあります。',
+        items: [
+          '法令または公序良俗に違反する行為、違法・有害なコンテンツを音声またはテキストで送信する行為',
+          '自動化ツールやスクリプト等による大量リクエスト、リバースエンジニアリング、またはサーバー・音声基盤に過度な負荷をかける行為',
+          '第三者のになりすまし、または不正な決済手段を使用する行為',
+        ],
+      },
+      {
+        title: '6. 免責事項・サービスの変更',
+        body: '当サービスは、通信回線や外部AIプロバイダ・音声通信基盤の障害、メンテナンス等により一時的に中断される場合があります。法令で認められる最大限の範囲において、当サービスの利用または利用不能により生じた損害について、運営者の故意または重過失による場合を除き、過去1か月間に利用者が当サービスに支払った利用料金を上限として責任を負うものとします。',
+        items: [],
+      },
+    ],
+  },
+  tokushoho: {
+    eyebrow: 'SPECIFIED COMMERCIAL TRANSACTIONS ACT',
+    title: '特定商取引法に基づく表記',
+    lead: '特定商取引法第11条に基づき、以下のとおり表示いたします。',
+    disclosureFallback: '請求があったら遅滞なく開示します',
+    operatorFallback: 'Kirie 運営事務局（個人事業主・請求があったら遅滞なく開示します）',
+    emailFallback: '請求があったら遅滞なく開示します（設定画面またはサポート窓口よりお問い合わせください）',
+    rows: {
+      operator: '販売事業者・運営責任者',
+      address: '所在地',
+      phone: '電話番号',
+      email: 'メールアドレス',
+      price: '販売価格',
+      priceValue: '各プランページ（/pricing）に表示された税込価格（Entry: 月額799円・年額7,990円 / Standard: 月額1,480円・年額14,800円 / Pro: 月額2,980円・年額29,800円）',
+      additionalFees: '商品代金以外の必要料金',
+      additionalFeesValue: 'インターネット接続料金および通信料金はお客様のご負担となります。',
+      paymentMethod: 'お支払方法',
+      paymentMethodValue: 'クレジットカード決済（Stripe）',
+      paymentTiming: 'お支払時期',
+      paymentTimingValue: '初回お申し込み時および毎月の更新日（年払いの場合は毎年の更新日）に決済されます。',
+      deliveryTiming: '商品の引渡時期（役務の提供時期）',
+      deliveryTimingValue: '決済完了後、ただちにご利用いただけます。',
+      cancellation: '解約・返品・交換について',
+      cancellationValue: 'デジタルサービスの性質上、決済完了後の返品・返金はお受けしておりません。「設定」画面の支払い管理ポータルよりいつでも解約手続きが可能であり、解約後は次回更新日以降の請求が停止され、現在の契約期間満了まで引き続きご利用いただけます。',
+      environment: '動作環境',
+      environmentValue: 'マイク入力およびWebRTCに対応した最新のWebブラウザ（Chrome、Safari、Edge、Firefox）',
+    },
+  },
+} as const

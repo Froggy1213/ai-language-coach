@@ -47,6 +47,13 @@ test.describe('Roadmap screen @smoke', () => {
     expect(await graphNodes.count()).toBe(json.data.roadmap.lessonCards.length);
     await expect(page.getByText(`${json.data.roadmap.lessonCards.length}レッスン`)).toBeVisible();
 
+    // Hovering a node dims unrelated nodes; moving the pointer away clears the highlight.
+    const dimmedNodes = page.locator('[data-node-code].opacity-25');
+    await graphNodes.first().hover();
+    await expect(dimmedNodes.first()).toBeVisible();
+    await page.getByRole('heading', { level: 1, name: 'ロードマップ' }).hover();
+    await expect(dimmedNodes).toHaveCount(0);
+
     // Switching to リスト renders the vertical rail's <li> nodes (RoadmapLesson.vue),
     // one per card in the payload.
     await page.getByTestId('roadmap-view-list').click();

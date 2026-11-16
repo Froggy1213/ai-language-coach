@@ -110,7 +110,11 @@ addresses the specs drive:
 | `/review` | 復習 — spaced repetition |
 | `/level` | レベル判定 — CEFR placement recording (replaced `/onboarding`) |
 | `/onboarding` | redirect to `/level` (legacy) |
-| `/settings` | 設定 — account, theme, sign-out, delete account |
+| `/settings` | 設定 — the hub: identity, sign-out, links to the settings screens |
+| `/settings/account` | アカウント — name, email, password |
+| `/settings/billing` | プランと利用状況 — plan, minutes, Stripe portal |
+| `/settings/appearance` | 表示 — theme |
+| `/settings/privacy` | データとプライバシー — voice consent, delete account |
 | `/login`, `/register` | auth forms; sign-in submits `ログイン`, registration submits `アカウントを作成` |
 
 Interface copy lives in `frontend/app/constants/strings.ts` (Japanese) and is the

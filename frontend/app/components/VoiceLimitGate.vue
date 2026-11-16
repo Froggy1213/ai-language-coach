@@ -64,7 +64,7 @@ const resetDate = computed(() => {
             {{ copy.close }}
           </UiButton>
 
-          <UiButtonLink v-if="inactive" to="/settings" variant="primary">
+          <UiButtonLink v-if="inactive" to="/settings/billing" variant="primary">
             {{ copy.ctaBilling }}
           </UiButtonLink>
           <UiButtonLink v-else to="/pricing" variant="primary">

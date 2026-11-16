@@ -274,6 +274,10 @@ export type Mutation = {
    * and recompute its spaced repetition schedule using the SM-2 algorithm.
    */
   submitReviewResult: ReviewItem;
+  /** Change the authenticated learner's password after verifying the current password. */
+  updatePassword: Scalars['Boolean']['output'];
+  /** Update the authenticated learner's display name (nickname) and email address. */
+  updateProfile: User;
 };
 
 
@@ -350,6 +354,18 @@ export type MutationSubmitAssessmentArgs = {
 export type MutationSubmitReviewResultArgs = {
   grammarPointId: Scalars['ID']['input'];
   quality: Scalars['Int']['input'];
+};
+
+
+export type MutationUpdatePasswordArgs = {
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
+};
+
+
+export type MutationUpdateProfileArgs = {
+  email: Scalars['String']['input'];
+  name: Scalars['String']['input'];
 };
 
 /**

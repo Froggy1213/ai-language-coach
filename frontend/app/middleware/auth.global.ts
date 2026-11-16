@@ -1,5 +1,5 @@
 const GUEST_ONLY_ROUTES = ['login', 'register']
-const PUBLIC_ROUTES = ['index', 'login', 'register', 'pricing']
+const PUBLIC_ROUTES = ['index', 'login', 'register', 'pricing', 'privacy', 'terms', 'tokushoho']
 
 /**
  * Keeps guests on public/sign-in pages and signed-in users off login/register.

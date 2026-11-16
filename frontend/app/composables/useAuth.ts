@@ -1,5 +1,12 @@
 import type { CombinedError } from '@urql/vue'
-import { LOGIN_MUTATION, LOGOUT_MUTATION, ME_QUERY, REGISTER_MUTATION } from '~/graphql/documents'
+import {
+  LOGIN_MUTATION,
+  LOGOUT_MUTATION,
+  ME_QUERY,
+  REGISTER_MUTATION,
+  UPDATE_PASSWORD_MUTATION,
+  UPDATE_PROFILE_MUTATION,
+} from '~/graphql/documents'
 import type { CurrentUser } from '~/types/view-models'
 
 /**
@@ -63,6 +70,28 @@ export function useAuth() {
     await clearSession()
   }
 
+  async function updateProfile(name: string, email: string): Promise<CurrentUser | null> {
+    const { error } = await $urql
+      .mutation(UPDATE_PROFILE_MUTATION, { name, email })
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+
+    return await refresh()
+  }
+
+  async function updatePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const { error } = await $urql
+      .mutation(UPDATE_PASSWORD_MUTATION, { currentPassword, newPassword })
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+  }
+
   async function ensureResolved(): Promise<void> {
     if (!resolved.value) {
       await refresh()
@@ -77,6 +106,8 @@ export function useAuth() {
     login,
     register,
     logout,
+    updateProfile,
+    updatePassword,
     clearSession,
   }
 }

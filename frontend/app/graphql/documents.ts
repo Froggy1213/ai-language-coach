@@ -79,6 +79,24 @@ export const LOGOUT_MUTATION = /* GraphQL */ `
   }
 `
 
+
+export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
+  mutation UpdateProfile($name: String!, $email: String!) {
+    updateProfile(name: $name, email: $email) {
+      id
+      name
+      email
+    }
+  }
+`
+
+
+export const UPDATE_PASSWORD_MUTATION = /* GraphQL */ `
+  mutation UpdatePassword($currentPassword: String!, $newPassword: String!) {
+    updatePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+  }
+`
+
 export const ROADMAP_QUERY = /* GraphQL */ `
   query Roadmap {
     roadmap {

@@ -25,6 +25,13 @@ test.describe('Pricing screen @smoke', () => {
     await expect(page.getByText(/¥7,990/)).toBeVisible();
     await expect(page.getByText(/月あたり ¥666/)).toBeVisible();
 
+    // Stripe sends a cancelled Checkout back with `?checkout=cancelled`; the
+    // learner gets a notice instead of a silent return, and the query is
+    // stripped so a back-navigation does not replay it.
+    await page.goto('/pricing?checkout=cancelled');
+    await expect(page.getByText('お支払いはキャンセルされました。プランを選び直せます。')).toBeVisible();
+    await expect(page).toHaveURL(/\/pricing$/);
+
     tracker.assertClean();
   });
 });

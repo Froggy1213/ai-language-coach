@@ -1,3 +1,4 @@
+import { settings as copy } from '~/constants/strings'
 import { DELETE_ACCOUNT_MUTATION } from '~/graphql/documents'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
@@ -8,7 +9,7 @@ export function usePrivacy() {
   const deleting = ref(false)
   const error = ref<string | null>(null)
 
-  const fallbackError = 'アカウントを削除できませんでした。しばらくしてからお試しください。'
+  const fallbackError = copy.deleteError
 
   async function deleteAccount(password: string, confirmation: string): Promise<boolean> {
     deleting.value = true
