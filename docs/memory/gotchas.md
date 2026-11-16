@@ -83,3 +83,30 @@ BUILDX_CONFIG="$PWD/.buildx" docker compose --profile full build api web
 
 Проверка, что образ действительно новый: `docker inspect <container> --format '{{.Created}}'`
 и `curl` по новой ручке (у нас — `POST /api/webhooks/stripe`, ожидается 503 без секрета).
+
+## 2026-11-16 — graphify живёт в venv `uv tool`, а не в системном Python
+
+`graphify` уже стоял: `/Users/hikki/.local/bin/graphify` 0.9.63, пакет — в
+`~/.local/share/uv/tools/graphifyy/...`. Поэтому `python3 -c "import graphify"` падает с
+`ModuleNotFoundError`, а сниппеты апстрим-скилла (`from graphify.detect import detect`,
+`from graphify.extract import extract`) не работают: только CLI. Переустановка
+`uv tool install graphifyy` без approval не проходит — uv пишет в `~/.cache/uv`, sandbox
+запрещает.
+
+Три ловушки CLI, проверенные на этом репозитории:
+
+- `graphify explain --help` — не справка: неизвестный аргумент трактуется как имя узла
+  (`helpers.ts`). Справка — `graphify --help`.
+- `affected` требует уникальной метки: `VoiceSession` → `No unique node match`, а
+  `VoiceSessionLifecycle.php` → нормальный список. Уточняй суффиксом `.php` / `.vue` или
+  именем метода (`.finished()`).
+- `graphify update .` после удаления кода не уменьшает граф без `--force`; предупреждения про
+  16 `.tf` (`tree_sitter_hcl` не установлен) — ожидаемы, infra-вопросы решаются чтением Terraform.
+
+## 2026-11-16 — Холодная загрузка SPA с `#hash` не скроллит к якорю
+
+При `ssr: false` Nuxt применяет hash-scroll до того, как асинхронная страница отрисует секцию:
+прямой заход на `/settings/account#password` открывается сверху, хотя переход по той же ссылке
+внутри SPA работает. Лечится `useHashScroll` (`frontend/app/composables/useHashScroll.ts`):
+`onMounted` + `nextTick` + `scrollIntoView`, плюс `scroll-mt-*` на самой цели. Проверять нужно
+именно холодную загрузку, а не клик из приложения — клик маскирует дефект.

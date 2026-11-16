@@ -139,3 +139,60 @@ Hosted Checkout убирает PCI-поверхность. Ledger из сесс�
 `frontend/app/pages/pricing.vue`, `frontend/app/components/VoiceLimitGate.vue`,
 `frontend/app/composables/useBilling.ts`, `docker-compose.prod.yml`, `infra/terraform/{ecs,secrets}.tf`
 **Статус:** active
+
+## 2026-11-16 — Граф кода: graphify, только код, только локально
+
+**Решение:** в репозиторий добавлен скилл `.agents/skills/graphify/SKILL.md` (формат DSH:
+папка + `SKILL.md` с frontmatter), граф собирается `graphify extract . --code-only` и живёт в
+`graphify-out/`, добавленном в `.gitignore`. Первая разведка по незнакомой области идёт через
+`graphify explain` / `affected` / `path` / `query`, а не через grep+read; маршрут записан в
+`AGENTS.md` §Граф кода, детали — в самом скилле.
+
+**Почему:** апстрим-скилл написан под Claude Code: его шаги вызывают
+`python3 -c "import graphify"` и Agent tool, а на этой машине пакет лежит в приватном venv
+`uv tool` и импорт падает. Поэтому скилл переписан под CLI, которым мы реально пользуемся, и
+под инструменты DSH. `--code-only` даёт 3.6k узлов за ~9 с и ноль токенов; семантический
+проход по 32 документам и 6 картинкам стоил бы LLM-вызовов и пока не нужен. `graphify-out/`
+не коммитим: `graph.json` ~4 МБ и протухает на каждом коммите, пересборка дешевле ревью.
+
+**Отвергнуто:** `graphify install --project --platform agents` (копирует апстрим-скилл с
+python-импортами и вызовами Claude Agent tool); установка в `~/.agents/skills` или
+`~/.dsh/skills` (навык про конкретный репозиторий, плюс запись вне воркспейса требует approval);
+коммит `graphify-out/`; `--mcp`-сервер (хостовый конфиг и процесс на каждую сессию ради команд,
+которые CLI отдаёт и так).
+
+**Файлы:** `.agents/skills/graphify/SKILL.md`, `.gitignore`, `AGENTS.md` §Граф кода
+**Статус:** active
+
+## 2026-11-16 — Настройки разделены на хаб и четыре экрана
+
+**Решение:** `/settings` стал картой настроек: карточка личности (имя, email, CEFR), строки
+входа в «アカウント», «プラン», «表示» и «データ», выход и юридические ссылки. Управление ушло на
+отдельные маршруты: `/settings/account` (имя/email, язык и уровень только для чтения, пароль),
+`/settings/billing` (план, минуты, Stripe Portal; сюда же возвращает Checkout),
+`/settings/appearance` (тема двумя превью), `/settings/privacy` (запись согласия на голос и
+удаление аккаунта). Общие рамка и строка — `SettingsPage.vue` / `SettingsRow.vue`; вся копия — в
+`settings` и `billing` внутри `frontend/app/constants/strings.ts`.
+
+**Почему:** прежняя страница смешивала чтение (имя, email, язык, уровень), две формы, биллинг,
+тему, выход и необратимое удаление в один скролл; имя и email печатались дважды — в `dl` и сразу
+под ним в полях. Хаб с одним экраном на задачу следует §«One page, one job» в
+`docs/design/README.md`, сохраняет нативный для мобильного список и уводит опасное действие с
+глазной дистанции остальных настроек.
+
+**Отвергнуто:** вкладки или аккордеон внутри одного URL (нет deep-link, «назад» ведёт не туда,
+и это всё равно один длинный роут); отдельная страница на каждую секцию (шесть страниц при пяти
+строках — больше навигации, чем настроек); оставить одну страницу и свернуть секции (проблема не
+в длине, а в смешении чтения и изменения).
+
+**Файлы:** `frontend/app/pages/settings/{index,account,billing,appearance,privacy}.vue`,
+`frontend/app/components/{SettingsPage,SettingsRow}.vue`, `frontend/app/composables/useHashScroll.ts`,
+`frontend/app/utils/plan-label.ts`, `frontend/app/composables/{useBilling,usePrivacy}.ts`,
+`frontend/app/constants/strings.ts`,
+`frontend/app/components/VoiceLimitGate.vue`, `frontend/app/pages/pricing.vue`,
+`backend/app/Billing/BillingCheckout.php`,
+`backend/app/GraphQL/Mutations/CreateCheckoutSession.php`,
+`backend/tests/Feature/Billing/BillingGraphQLTest.php`, `e2e/{settings,pricing}.spec.ts`,
+`frontend/README.md`, `e2e/README.md`, `AGENTS.md`, `docs/design/README.md`,
+`docs/design/settings-mobile.jpg`
+**Статус:** active

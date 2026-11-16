@@ -18,12 +18,22 @@
 4. `README.md` — стек, локальный запуск, архитектурные инварианты, CI.
 5. `AGENTS.md` подсистемы, в которой будешь менять код (карта ниже).
 
+## Граф кода
+
+`graphify-out/graph.json` — этот репозиторий как граф: файлы, классы, функции, вызовы, импорты,
+у каждого узла `file:line`. Собран локальным AST-парсингом, без LLM (~9 с, 0 токенов);
+в `.gitignore`, обновляется `graphify update .`. Перед разведкой по незнакомой области —
+`graphify explain "<Символ>"` и `graphify affected "<Символ>"` вместо grep+read; если граф
+старше последнего коммита, сначала `graphify update .`. Граф даёт связи, но не содержимое:
+файл перед правкой всё равно читается. Команды и ограничения —
+`.agents/skills/graphify/SKILL.md`.
+
 ## Карта
 
 | Путь | Что это | Канон |
 |---|---|---|
 | `backend/` | Laravel 13 + Lighthouse GraphQL (`/graphql`), Sanctum (SPA-куки + CSRF), Reverb, Horizon. Домен — папка в `backend/app/`: `Voice`, `Grammar`, `Review`, `Scenarios`, `Assessments`, `Mistakes`, `Privacy`, `Billing`, `Observability`; рядом инфраструктурные `GraphQL`, `Console`, `Providers`, `Support`, `Enums`, `Rules`, `Models`, `Http`. Схема — `backend/graphql/schema.graphql` + доменные файлы в `backend/graphql/types/` | `backend/AGENTS.md` (Laravel Boost), `README.md` |
-| `frontend/` | Nuxt 4 SPA (`ssr: false`), Vue 3, Tailwind 4, `@urql/vue`, Echo + pusher-js. Маршруты: `/`, `/roadmap`, `/lesson/{cardId}`, `/talk`, `/talk/{code}`, `/reflect/{id}`, `/review`, `/level`, `/pricing`, `/settings`, `/login`, `/register`, `/dev/*`. Старые `/onboarding`, `/practice/{cardId}`, `/session/{id}` — страницы-редиректы 301 | `frontend/README.md`, `docs/design/README.md` |
+| `frontend/` | Nuxt 4 SPA (`ssr: false`), Vue 3, Tailwind 4, `@urql/vue`, Echo + pusher-js. Маршруты: `/`, `/roadmap`, `/lesson/{cardId}`, `/talk`, `/talk/{code}`, `/reflect/{id}`, `/review`, `/level`, `/pricing`, `/settings` (+ `/settings/account`, `/settings/billing`, `/settings/appearance`, `/settings/privacy`), `/login`, `/register`, `/dev/*`. Старые `/onboarding`, `/practice/{cardId}`, `/session/{id}` — страницы-редиректы 301 | `frontend/README.md`, `docs/design/README.md` |
 | `agent/` | Python-воркер `livekit-agents`: STT Deepgram, TTS Cartesia, диалоговая LLM. Один модуль — один вопрос, таблица в README | `agent/README.md` |
 | `e2e/` | Playwright smoke против живого стека | `e2e/README.md` |
 | `infra/`, `docker/`, `docs/deployment.md` | Terraform (ECS/RDS/ElastiCache/LiveKit EC2), Caddy, однохостовый прод | `docs/deployment.md` |

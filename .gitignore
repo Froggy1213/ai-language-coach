@@ -67,3 +67,6 @@ override.tf.json
 terraform.rc
 crash.log
 crash.*.log
+
+# graphify knowledge graph (regenerate: graphify update .)
+graphify-out/

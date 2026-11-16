@@ -1,76 +1,77 @@
 # Progress
 
-Updated: 2026-11-11 · session: Stripe-биллинг — подписки, минуты, paywall
+Updated: 2026-11-16 · session: settings-hub — `/settings` разделён на хаб и четыре экрана
 
 ## Сейчас
 
-Ветка `main`, биллинг закоммичен (`9d054d1 feat(billing): add Stripe subscriptions with monthly
-voice-minute allowances`) и запушен в `origin/main`.
-Продукт теперь умеет продавать минуты, а не «приложение»: три платных тира с годовыми ценами,
-15 бесплатных минут навсегда и жёсткий лимит по минутам, посчитанный из
-`voice_sessions.duration_sec`.
+Ветка `main`. Поверх пре-релизного аудита, графа роадмапа и управления профилем/паролем
+страница настроек перестроена по принципу «один экран — одна задача»:
 
-- **Планы** (`backend/config/billing.php`): Entry 799 ¥/мес или 7 990 ¥/год (150 мин/мес),
-  Standard 1 480 / 14 800 (300), Pro 2 980 / 29 800 (700). Годовой тариф даёт те же минуты
-  **помесячно**, а не годовой пакет. Японские названия — в `frontend/app/constants/strings.ts`
-  по коду плана.
-- **Оплата**: hosted Stripe Checkout + Billing Portal через `stripe/stripe-php` напрямую
-  (Cashier не используется). Карты не проходят через наш домен.
-- **Вебхук** `POST /api/webhooks/stripe`: подпись по сырому телу, таблица `stripe_events`
-  (`insertOrIgnore` в одной транзакции с эффектом), повторная доставка — no-op.
-- **Лимит минут**: `VoiceAllowanceResolver` считает использование по `duration_sec` за месячное
-  окно от даты подписки (для годовой — тоже помесячно), незавершённая сессия учитывается по
-  elapsed с потолком 15 минут. Проверка — в `VoiceSessionStarter` под `lockForUpdate`.
-  Отказы: `VOICE_MINUTES_EXHAUSTED` (used/included/resetsAt в extensions) и
-  `VOICE_SUBSCRIPTION_INACTIVE`.
-- **Интерфейс**: публичная `/pricing` (гостям тоже), блок «プランと利用状況» в `/settings`,
-  диалог `VoiceLimitGate` на `/lesson/:cardId` и `/talk/:code` вместо голого текста ошибки.
-- **Удаление аккаунта** сначала отменяет подписку в Stripe; при сбое — `BILLING_CANCEL_FAILED`
-  и аккаунт остаётся, чтобы не потерять единственный указатель на подписку.
-- **Защита прода**: `ProductionSanityCheck` отказывает в старте с `sk_test_`-ключом.
-- **Инфраструктура**: `STRIPE_*` проброшены в `docker-compose.prod.yml` и в ECS
-  (`laravel_secret_keys` + пустые значения в `secrets.tf`); `FRONTEND_URL` задан как `APP_DOMAIN`.
+- **Хаб** (`frontend/app/pages/settings/index.vue`): карточка личности (имя, email, CEFR),
+  строки входа в «アカウント», «プラン», «表示» и «データ», выход и юридические ссылки. Строки —
+  `SettingsRow`, общая рамка подэкранов — `SettingsPage`.
+- **`/settings/account`**: форма имени/email (без дублирующего `dl`), язык и уровень только для
+  чтения с пояснениями, смена пароля.
+- **`/settings/billing`**: план, статус Stripe (включая `unpaid`), остаток минут с прогрессом,
+  Portal; читает `?checkout=success`, показывает подтверждение и вычищает query, не блокируя
+  загрузку плана. `BillingCheckout` возвращает Checkout и Portal на этот маршрут,
+  `VoiceLimitGate` ведёт туда же. Для бесплатного плана подпись — «これまでの利用», для
+  платного — «今月の利用».
+- **`/settings/appearance`**: тема двумя превью (нативные radio) вместо сегментного контрола.
+- **`/settings/privacy`**: запись согласия на голос с датой, объяснение и ссылка на политику,
+  удаление аккаунта за паролем и `DELETE`; после записи согласия фокус уходит на live-регион
+  статуса.
+- `useHashScroll` доводит `#password`/`#delete` до якоря при холодной загрузке; `planLabel`
+  вынесен в `utils/plan-label.ts` и не печатает неизвестный код плана по-английски.
+- Копия — только в `settings`/`billing` в `frontend/app/constants/strings.ts`; японских литералов
+  в шаблонах нет.
+- `e2e/settings.spec.ts` ходит по хабу и всем четырём подэкранам (включая `?checkout=success`);
+  `e2e/pricing.spec.ts` проверяет возврат с отменённого Checkout. Таблицы маршрутов обновлены в
+  `frontend/README.md`, `e2e/README.md`, `AGENTS.md`, `docs/design/README.md`.
+- `docs/design/settings-mobile.jpg` переснят с прод-сборки (хаб, тёмная тема).
 
-## Проверено в этой сессии
+## Проверено
 
-- `php artisan test` — **592 passed / 2940 assertions** (включая `VoiceAllowanceTest`,
-  `StripeWebhookTest`, `BillingGraphQLTest`, тесты отмены подписки при удалении аккаунта и
-  `ProductionSanityCheckTest`).
-- `pint --test` — чисто; `lighthouse:validate-schema` — валидна; `route:list` видит
-  `/api/webhooks/stripe` (503 без секрета — ожидаемо).
-- `npm run codegen` — стабилен (хеш до/после совпал), `npm run typecheck`, `npm run build` — чисто.
-- E2E smoke — **18/18**, уже без `E2E_CHANNEL=chrome`; добавлен `pricing.spec.ts`.
-- Стек пересобран (`api`, `web`) и поднят: 10 контейнеров healthy; `/up` 200;
-  `billingPlans` GraphQL отдаёт три плана.
+- **2026-11-16 (settings-hub):** `npm run typecheck` и `npm run build` — чисто; полный `@smoke`
+  против пересобранного `coach_web` — `18 passed` (52.7 s), включая `auth.spec.ts`,
+  расширенный `settings.spec.ts` и `pricing.spec.ts`. Проверено вручную: `?checkout=success`
+  показывает notice и исчезает после `router.replace`; холодная загрузка
+  `/settings/account#password` и `/settings/privacy#delete` скроллит к якорю.
+- Бэкенд: `php artisan test --compact --filter=BillingGraphQLTest` — `11 passed (49 assertions)`;
+  `./vendor/bin/pint --test` — `PASS 308 files`; `npm run codegen` воспроизводим (sha256
+  `graphql.ts` до и после совпадает). Diff `graphql.ts` против HEAD — это незакоммиченная схема
+  `updateProfile`/`updatePassword` прошлой сессии, не дрейф генерации.
+- Визуальная проверка: хаб и все четыре подэкрана сняты Playwright в тёмной и светлой темах,
+  десктоп 1280×900 и мобайл 390×844; в консоли только известный отказ Echo-сокета на неверном
+  порту Reverb в dev-конфиге.
+- Итоговый образ `ai_language_coach-web` пересобран и поднят в `docker compose`; `coach_web` —
+  healthy, прямые загрузки `/settings` и `/settings/account` отдают 200.
+- `graphify update .` — `3700` узлов, `7768` рёбер, `253` сообщества.
 
 ## Дальше
 
-1. **Stripe-аккаунт** (руками): создать 6 price-объектов (JPY, tax-inclusive), добавить вебхук
-   `https://$APP_DOMAIN/api/webhooks/stripe` на четыре события, заполнить `STRIPE_SECRET`,
-   `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`; прогнать тестовый checkout картой `4242 4242 4242 4242`.
-2. **Деплой-блокеры из прошлой сессии** (не сделаны): TLS-прокси перед LiveKit 7880, ECR
-   `IMMUTABLE` против `:latest`, `REVERB_HOST=127.0.0.1` в ECS, scheduler в ECS, RDS TLS,
-   `GrammarPointSeeder` в migration-таск.
-3. **Биллинг-долги**: proration/смена плана через портал (UI пока не показывает разницу),
-   Stripe Tax/JCT (сейчас выключен), dunning-письма, top-up пакеты минут, политика возвратов,
-   интеграция `voice:usage-report` с включёнными минутами плана.
+1. **Stripe-аккаунт** (руками, когда подключаются оплаты): создать 6 price-объектов (JPY,
+   tax-inclusive), добавить вебхук `https://$APP_DOMAIN/api/webhooks/stripe`, заполнить
+   `STRIPE_SECRET`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`.
+2. **Деплой-блокеры AWS ECS** (актуально только при выборе AWS ECS вместо single-host
+   `docker-compose.prod.yml`): ECR `IMMUTABLE` против `:latest`, `REVERB_HOST=127.0.0.1` в ECS,
+   scheduler в ECS, RDS TLS (`MYSQL_ATTR_SSL_CA`), `GrammarPointSeeder` в migration-таск.
 
 ## Открытые вопросы
 
-- Цены указаны как tax-inclusive, Stripe Tax выключен. Регистрация JCT и выставление налогов —
-  решение оператора, не кода.
-- Политика возвратов и отмена годовой подписки (доступ до конца периода — сейчас так) не описаны
-  в пользовательских документах.
-- 39 ссылок «README, решение N» всё ещё висят в пустоту (см. прошлую запись).
+- В `docs/design/` лежит только рендер хаба; подэкраны описаны текстом. Добавлять ли отдельные
+  рендеры `settings-account`, `settings-billing` и т.д., если они понадобятся как референс.
+- Семантический проход graphify по документам (`.md`, PDF) по-прежнему требует LLM-бэкенда и
+  отложен до реальной потребности.
+- Скилл graphify лежит в репозитории (`.agents/skills`), а не глобально: `~/.dsh/skills` и
+  `~/.agents/skills` — запись вне воркспейса, нужен approval.
 
 ## Блокировано
 
-Ничего в коде. Реальный платёж нельзя проверить без Stripe-ключей и price-объектов.
+Ничего в коде.
 
 ## Прошлая сессия
 
+- 2026-11-16 — управление профилем и паролем в `/settings`, защита от дублей Checkout, legal-страницы.
+- 2026-11-16 — graphify: граф кода, DSH-скилл, `--code-only` без LLM, `graphify-out/` в `.gitignore`.
 - 2026-11-11 — Stripe-биллинг: планы, минуты, Checkout/Portal, вебхук, paywall, `/pricing`.
-- 2026-11-09 — приватность: согласие на голос, retention assessment-транскриптов, PII в Sentry.
-- 2026-11-09 — 復習 как recall-first карточка по своим ошибкам.
-- 2026-11-09 — кастомные сценарии: пересборка образов, миграция `custom_scenarios`, E2E-фикс GET-моков.
-- 2026-11-09 — граф знаний: пересборка образов, миграции, seeder, E2E.
