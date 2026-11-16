@@ -18,6 +18,10 @@
         </include>
     </source>
     <php>
+        <!-- The full suite peaks above PHP's default 128M CLI limit (Lighthouse
+             AST cache + 594 feature tests in one process), so it is raised here
+             rather than relying on the machine's php.ini. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

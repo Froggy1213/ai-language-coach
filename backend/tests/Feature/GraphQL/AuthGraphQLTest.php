@@ -250,4 +250,115 @@ class AuthGraphQLTest extends TestCase
             'id' => $token->accessToken->id,
         ]);
     }
+
+    public function test_update_profile_updates_name_and_email(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Old Name',
+            'email' => 'old@example.com',
+            'email_verified_at' => now(),
+        ]);
+        Sanctum::actingAs($user);
+
+        // Updating only name while keeping the same email succeeds.
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($name: String!, $email: String!) {
+                updateProfile(name: $name, email: $email) {
+                    id
+                    name
+                    email
+                }
+            }
+        ', [
+            'name' => '  Nickname  ',
+            'email' => 'old@example.com',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.updateProfile.name', 'Nickname')
+            ->assertJsonPath('data.updateProfile.email', 'old@example.com');
+
+        $user->refresh();
+        $this->assertNotNull($user->email_verified_at);
+
+        // Changing email updates it and clears email_verified_at.
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($name: String!, $email: String!) {
+                updateProfile(name: $name, email: $email) {
+                    id
+                    name
+                    email
+                }
+            }
+        ', [
+            'name' => 'New Name',
+            'email' => 'new@example.com',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.updateProfile.name', 'New Name')
+            ->assertJsonPath('data.updateProfile.email', 'new@example.com');
+
+        $user->refresh();
+        $this->assertSame('New Name', $user->name);
+        $this->assertSame('new@example.com', $user->email);
+        $this->assertNull($user->email_verified_at);
+    }
+
+    public function test_update_profile_rejects_duplicate_email_from_another_user(): void
+    {
+        $other = User::factory()->create(['email' => 'taken@example.com']);
+        $user = User::factory()->create(['email' => 'mine@example.com']);
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($name: String!, $email: String!) {
+                updateProfile(name: $name, email: $email) {
+                    id
+                }
+            }
+        ', [
+            'name' => 'Updated',
+            'email' => $other->email,
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLValidationError('email', 'The email has already been taken.');
+
+        $this->assertSame('mine@example.com', $user->fresh()->email);
+    }
+
+    public function test_update_password_changes_password_when_current_password_matches(): void
+    {
+        $user = User::factory()->create(['password' => 'old-secret']);
+        Sanctum::actingAs($user);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($currentPassword: String!, $newPassword: String!) {
+                updatePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+            }
+        ', [
+            'currentPassword' => 'old-secret',
+            'newPassword' => 'new-secret-123',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.updatePassword', true);
+
+        $user->refresh();
+        $this->assertTrue(Hash::check('new-secret-123', $user->password));
+    }
+
+    public function test_update_password_rejects_wrong_current_password_with_password_mismatch(): void
+    {
+        $user = User::factory()->create(['password' => 'correct-secret']);
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            mutation ($currentPassword: String!, $newPassword: String!) {
+                updatePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+            }
+        ', [
+            'currentPassword' => 'wrong-secret',
+            'newPassword' => 'new-secret-123',
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('PASSWORD_MISMATCH', $response->json('errors.0.extensions.code'));
+        $this->assertTrue(Hash::check('correct-secret', $user->fresh()->password));
+    }
 }

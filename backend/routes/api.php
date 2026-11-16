@@ -15,14 +15,16 @@ use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 | of a session. The route also has to stay CSRF-exempt, which it is by being in
 | the `api` middleware group rather than `web`.
 */
-Route::post('/webhooks/livekit', LiveKitWebhookController::class);
+Route::post('/webhooks/livekit', LiveKitWebhookController::class)
+    ->middleware('throttle:300,1');
 
 /*
 | Stripe calls this one too. The signature over the raw body is the
 | authentication, and the handler is idempotent per event id, so Stripe's
 | retries are safe.
 */
-Route::post('/webhooks/stripe', StripeWebhookController::class);
+Route::post('/webhooks/stripe', StripeWebhookController::class)
+    ->middleware('throttle:300,1');
 
 // The voice agent reports its own failures here (plan §5).
 Route::post('/internal/sessions/{session}/fail', FailVoiceSessionController::class)

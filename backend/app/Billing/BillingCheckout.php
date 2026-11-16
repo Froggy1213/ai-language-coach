@@ -29,19 +29,23 @@ final class BillingCheckout
             throw BillingNotConfigured::missingPrice($plan->code, $interval);
         }
 
+        if ($user->subscriptions()->whereIn('status', ['active', 'trialing', 'past_due'])->exists()) {
+            throw BillingAlreadySubscribed::forUser();
+        }
+
         $frontend = (string) config('billing.frontend_url');
 
         return $this->gateway->checkoutUrl(
             user: $user,
             plan: $plan,
             interval: $interval,
-            successUrl: $frontend.'/settings?checkout=success',
+            successUrl: $frontend.'/settings/billing?checkout=success',
             cancelUrl: $frontend.'/pricing?checkout=cancelled',
         );
     }
 
     public function portalUrl(User $user): string
     {
-        return $this->gateway->portalUrl($user, (string) config('billing.frontend_url').'/settings');
+        return $this->gateway->portalUrl($user, (string) config('billing.frontend_url').'/settings/billing');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\GraphQL\Mutations;
 
+use App\Billing\BillingAlreadySubscribed;
 use App\Billing\BillingCheckout;
 use App\Billing\BillingNotConfigured;
 use App\Billing\BillingPlanNotFound;
@@ -15,7 +16,7 @@ use Stripe\Exception\ApiErrorException;
  * Creates the Stripe Checkout session for a chosen plan and returns its URL.
  *
  * The mutation never sees a card: the browser navigates to Stripe, pays there,
- * and comes back through `/settings?checkout=success`. What it does own is the
+ * and comes back through `/settings/billing?checkout=success`. What it does own is the
  * mapping from the paywall's typed failure to an error code the client can
  * branch on.
  */
@@ -38,6 +39,8 @@ final class CreateCheckoutSession
 
         try {
             return ['url' => $this->checkout->checkoutUrl($user, $args['planCode'], $interval)];
+        } catch (BillingAlreadySubscribed $exception) {
+            throw new Error($exception->getMessage(), extensions: ['code' => 'BILLING_ALREADY_SUBSCRIBED'], previous: $exception);
         } catch (BillingPlanNotFound $exception) {
             throw new Error($exception->getMessage(), extensions: ['code' => 'BILLING_PLAN_NOT_FOUND'], previous: $exception);
         } catch (BillingNotConfigured $exception) {

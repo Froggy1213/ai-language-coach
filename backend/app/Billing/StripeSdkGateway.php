@@ -33,6 +33,11 @@ final class StripeSdkGateway implements StripeGateway
             'interval' => $interval->value,
         ];
 
+        // Scoped to a 60-second bucket so an accidental double-click reuses the
+        // same Checkout Session, while a learner who cancels and tries again a
+        // minute later is not locked out for Stripe's 24-hour idempotency TTL.
+        $minuteBucket = intdiv(time(), 60);
+
         $session = $this->client()->checkout->sessions->create([
             'mode' => 'subscription',
             'customer' => $this->customerId($user),
@@ -48,7 +53,7 @@ final class StripeSdkGateway implements StripeGateway
             'subscription_data' => ['metadata' => $metadata],
             'metadata' => $metadata,
         ], [
-            'idempotency_key' => "kirie-checkout-{$user->getKey()}-{$plan->code}-{$interval->value}",
+            'idempotency_key' => "kirie-checkout-{$user->getKey()}-{$plan->code}-{$interval->value}-{$minuteBucket}",
         ]);
 
         return (string) $session->url;

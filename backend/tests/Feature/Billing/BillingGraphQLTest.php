@@ -142,7 +142,7 @@ class BillingGraphQLTest extends TestCase
         $checkout = $this->stripe->checkouts[0];
         $this->assertSame('standard', $checkout['plan']->code);
         $this->assertSame('year', $checkout['interval']->value);
-        $this->assertSame('https://app.test/settings?checkout=success', $checkout['successUrl']);
+        $this->assertSame('https://app.test/settings/billing?checkout=success', $checkout['successUrl']);
         $this->assertSame('https://app.test/pricing?checkout=cancelled', $checkout['cancelUrl']);
     }
 
@@ -171,6 +171,34 @@ class BillingGraphQLTest extends TestCase
         $this->assertSame([], $this->stripe->checkouts);
     }
 
+    public function test_an_active_subscriber_cannot_start_a_duplicate_checkout_session(): void
+    {
+        $user = User::factory()->create();
+        Subscription::factory()->for($user)->forPlan('entry')->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            mutation { createCheckoutSession(planCode: "standard", interval: month) { url } }
+        ');
+
+        $this->assertSame('BILLING_ALREADY_SUBSCRIBED', $response->json('errors.0.extensions.code'));
+        $this->assertSame([], $this->stripe->checkouts);
+    }
+
+    public function test_a_canceled_subscriber_can_start_a_new_checkout_session(): void
+    {
+        $user = User::factory()->create();
+        Subscription::factory()->for($user)->forPlan('entry')->canceled()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            mutation { createCheckoutSession(planCode: "standard", interval: month) { url } }
+        ');
+
+        $response->assertGraphQLErrorFree();
+        $this->assertCount(1, $this->stripe->checkouts);
+    }
+
     public function test_the_portal_redirect_is_returned_for_a_subscriber(): void
     {
         $user = User::factory()->create(['stripe_customer_id' => 'cus_test']);
@@ -183,7 +211,7 @@ class BillingGraphQLTest extends TestCase
         $response->assertGraphQLErrorFree();
         $this->assertSame('https://billing.stripe.test/ps_test', $response->json('data.createBillingPortalSession.url'));
         $this->assertCount(1, $this->stripe->portals);
-        $this->assertSame('https://app.test/settings', $this->stripe->portals[0]['returnUrl']);
+        $this->assertSame('https://app.test/settings/billing', $this->stripe->portals[0]['returnUrl']);
     }
 
     private function overview(): TestResponse

@@ -66,6 +66,34 @@ type Mutation {
     logout: Boolean! @guard @field(resolver: "App\\GraphQL\\Mutations\\Logout")
 
     """
+    Update the authenticated learner's display name (nickname) and email address.
+    """
+    updateProfile(
+        "Display name / nickname shown across the app."
+        name: String!
+        "Account email address."
+        email: String!
+    ): User!
+        @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\UpdateProfile")
+        @validator(class: "App\\GraphQL\\Validators\\UpdateProfileValidator")
+
+    """
+    Change the authenticated learner's password after verifying the current password.
+    """
+    updatePassword(
+        "The learner's current password."
+        currentPassword: String!
+        "The new password (at least 8 characters)."
+        newPassword: String!
+    ): Boolean!
+        @guard
+        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\UpdatePassword")
+        @validator(class: "App\\GraphQL\\Validators\\UpdatePasswordValidator")
+
+    """
     Build the roadmap for the authenticated user's current CEFR band, or return
     the one they already have. Idempotent, so a retry after a timeout is safe.
     """
@@ -153,7 +181,10 @@ type Mutation {
         lessonCardId: ID
         "The scenario to practise; exactly one of lessonCardId or scenarioCode."
         scenarioCode: String
-    ): VoiceSession! @guard @field(resolver: "App\\Voice\\StartVoiceSession")
+    ): VoiceSession!
+        @guard
+        @throttle(maxAttempts: 15, decayMinutes: 1)
+        @field(resolver: "App\\Voice\\StartVoiceSession")
 
     """
     End the conversation the learner just finished. Moves the session to
@@ -227,6 +258,7 @@ type Mutation {
     """
     createBillingPortalSession: BillingRedirect!
         @guard
+        @throttle(maxAttempts: 10, decayMinutes: 1)
         @field(resolver: "App\\GraphQL\\Mutations\\CreateBillingPortalSession")
 }
 
