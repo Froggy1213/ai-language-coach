@@ -18,7 +18,7 @@ import { graphQLErrorMessageFor } from '~/utils/graphql-error'
  * State is shared through `useAuth`; the route guard resolves it before mount and
  * `updateProfile` refreshes it, so this page owns only the form's local state.
  */
-const { user, updateProfile, updatePassword } = useAuth()
+const { user, updateProfile, updatePassword, sendEmailVerification } = useAuth()
 useHashScroll()
 
 const profileName = ref('')
@@ -26,6 +26,9 @@ const profileEmail = ref('')
 const profileSaving = ref(false)
 const profileError = ref<string | null>(null)
 const profileSuccess = ref<string | null>(null)
+const verificationSending = ref(false)
+const verificationSent = ref(false)
+const verificationError = ref<string | null>(null)
 
 watch(
   user,
@@ -37,6 +40,14 @@ watch(
     profileEmail.value = value.email
   },
   { immediate: true },
+)
+
+watch(
+  () => [user.value?.email, user.value?.emailVerifiedAt],
+  () => {
+    verificationSent.value = false
+    verificationError.value = null
+  },
 )
 
 const profileDirty = computed(() => {
@@ -63,9 +74,14 @@ async function handleProfileSave(): Promise<void> {
     return
   }
 
+  const emailChanged = trimmedEmail !== user.value?.email
   profileSaving.value = true
   profileError.value = null
   profileSuccess.value = null
+  if (emailChanged) {
+    verificationSent.value = false
+    verificationError.value = null
+  }
 
   try {
     await updateProfile(trimmedName, trimmedEmail)
@@ -76,6 +92,23 @@ async function handleProfileSave(): Promise<void> {
     })
   } finally {
     profileSaving.value = false
+  }
+}
+
+async function handleResendVerification(): Promise<void> {
+  verificationSending.value = true
+  verificationError.value = null
+  verificationSent.value = false
+
+  try {
+    await sendEmailVerification()
+    verificationSent.value = true
+  } catch (failure) {
+    verificationError.value = graphQLErrorMessageFor(failure as CombinedError, {
+      fallback: copy.verificationSendError,
+    })
+  } finally {
+    verificationSending.value = false
   }
 }
 
@@ -143,6 +176,40 @@ async function handlePasswordUpdate(): Promise<void> {
             data-testid="settings-profile-email"
           >
         </UiField>
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span
+            v-if="user.emailVerifiedAt"
+            class="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,var(--color-sage-400)_36%,transparent)] bg-[color-mix(in_oklab,var(--color-sage-500)_12%,transparent)] px-2.5 py-0.5 text-[0.75rem] font-medium text-[var(--color-sage-400)]"
+            data-testid="settings-email-verified-badge"
+          >
+            <span aria-hidden="true" class="size-1.5 rounded-full bg-[var(--color-sage-400)]" />
+            {{ copy.emailVerified }}
+          </span>
+          <span
+            v-else
+            class="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,var(--color-amber-bright)_36%,transparent)] bg-[color-mix(in_oklab,var(--color-amber-bright)_12%,transparent)] px-2.5 py-0.5 text-[0.75rem] font-medium text-[var(--color-amber-bright)]"
+            data-testid="settings-email-unverified-badge"
+          >
+            <span aria-hidden="true" class="size-1.5 rounded-full bg-[var(--color-amber-bright)]" />
+            {{ copy.emailUnverified }}
+          </span>
+
+          <UiButton
+            v-if="!user.emailVerifiedAt"
+            type="button"
+            variant="quiet"
+            size="sm"
+            :loading="verificationSending"
+            data-testid="settings-resend-verification"
+            @click="handleResendVerification"
+          >
+            {{ verificationSending ? copy.resendingVerification : copy.resendVerification }}
+          </UiButton>
+        </div>
+
+        <UiNotice v-if="!user.emailVerifiedAt && verificationError" :message="verificationError" />
+        <UiNotice v-else-if="!user.emailVerifiedAt && verificationSent" :message="copy.verificationSent" tone="success" />
 
         <UiNotice v-if="profileError" :message="profileError" />
         <UiNotice v-else-if="profileSuccess" :message="profileSuccess" tone="success" />

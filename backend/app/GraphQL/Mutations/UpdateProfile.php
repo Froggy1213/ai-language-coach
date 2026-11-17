@@ -17,8 +17,9 @@ final class UpdateProfile
 
         $name = trim($args['name']);
         $email = trim($args['email']);
+        $emailChanged = $user->email !== $email;
 
-        if ($user->email !== $email) {
+        if ($emailChanged) {
             $user->email_verified_at = null;
         }
 
@@ -26,6 +27,10 @@ final class UpdateProfile
             'name' => $name,
             'email' => $email,
         ])->save();
+
+        if ($emailChanged) {
+            rescue(fn () => $user->sendEmailVerificationNotification(), report: true);
+        }
 
         return $user->refresh();
     }

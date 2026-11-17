@@ -242,6 +242,11 @@ export type Mutation = {
    */
   finishVoiceSession: VoiceSession;
   /**
+   * Request a password reset email for the given address. Always returns true
+   * so account existence cannot be enumerated.
+   */
+  forgotPassword: Scalars['Boolean']['output'];
+  /**
    * Build the roadmap for the authenticated user's current CEFR band, or return
    * the one they already have. Idempotent, so a retry after a timeout is safe.
    */
@@ -264,6 +269,13 @@ export type Mutation = {
    * code when no agent worker is free.
    */
   requestVoiceToken: VoiceSession;
+  /** Reset a learner's password using a single-use token from the reset email. */
+  resetPassword: Scalars['Boolean']['output'];
+  /**
+   * Resend the email verification link to the authenticated learner if their
+   * email address is still unverified.
+   */
+  sendEmailVerificationNotification: Scalars['Boolean']['output'];
   /**
    * Hand an uploaded recording to the transcription and CEFR analysis job. The
    * answer arrives through the `assessmentReady` subscription.
@@ -278,6 +290,11 @@ export type Mutation = {
   updatePassword: Scalars['Boolean']['output'];
   /** Update the authenticated learner's display name (nickname) and email address. */
   updateProfile: User;
+  /**
+   * Verify a learner's email address using the signed parameters from the
+   * verification link.
+   */
+  verifyEmail: Scalars['Boolean']['output'];
 };
 
 
@@ -326,6 +343,11 @@ export type MutationFinishVoiceSessionArgs = {
 };
 
 
+export type MutationForgotPasswordArgs = {
+  email: Scalars['String']['input'];
+};
+
+
 export type MutationLoginArgs = {
   email: Scalars['String']['input'];
   password: Scalars['String']['input'];
@@ -343,6 +365,13 @@ export type MutationRegisterArgs = {
 export type MutationRequestVoiceTokenArgs = {
   lessonCardId?: InputMaybe<Scalars['ID']['input']>;
   scenarioCode?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationResetPasswordArgs = {
+  email: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+  token: Scalars['String']['input'];
 };
 
 
@@ -366,6 +395,14 @@ export type MutationUpdatePasswordArgs = {
 export type MutationUpdateProfileArgs = {
   email: Scalars['String']['input'];
   name: Scalars['String']['input'];
+};
+
+
+export type MutationVerifyEmailArgs = {
+  expires: Scalars['Int']['input'];
+  hash: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+  signature: Scalars['String']['input'];
 };
 
 /**
@@ -560,6 +597,8 @@ export type User = {
   currentLevel: CefrLevel;
   /** Account email address. */
   email: Scalars['String']['output'];
+  /** When the learner verified their email address, or null if still unverified. */
+  emailVerifiedAt?: Maybe<Scalars['DateTime']['output']>;
   /** Unique primary key. */
   id: Scalars['ID']['output'];
   /**

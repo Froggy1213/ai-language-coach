@@ -66,6 +66,60 @@ type Mutation {
     logout: Boolean! @guard @field(resolver: "App\\GraphQL\\Mutations\\Logout")
 
     """
+    Request a password reset email for the given address. Always returns true
+    so account existence cannot be enumerated.
+    """
+    forgotPassword(
+        "Email address of the account."
+        email: String!
+    ): Boolean!
+        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\ForgotPassword")
+        @validator(class: "App\\GraphQL\\Validators\\ForgotPasswordValidator")
+
+    """
+    Reset a learner's password using a single-use token from the reset email.
+    """
+    resetPassword(
+        "Password reset token from the reset link."
+        token: String!
+        "Account email address."
+        email: String!
+        "The new password (at least 8 characters)."
+        password: String!
+    ): Boolean!
+        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\ResetPassword")
+        @validator(class: "App\\GraphQL\\Validators\\ResetPasswordValidator")
+
+    """
+    Resend the email verification link to the authenticated learner if their
+    email address is still unverified.
+    """
+    sendEmailVerificationNotification: Boolean!
+        @guard
+        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\SendEmailVerificationNotification")
+
+    """
+    Verify a learner's email address using the signed parameters from the
+    verification link.
+    """
+    verifyEmail(
+        "User ID from the verification link."
+        id: ID!
+        "SHA-1 hash of the email address being verified."
+        hash: String!
+        "Unix expiration timestamp."
+        expires: Int!
+        "HMAC-SHA256 signature."
+        signature: String!
+    ): Boolean!
+        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @field(resolver: "App\\GraphQL\\Mutations\\VerifyEmail")
+        @validator(class: "App\\GraphQL\\Validators\\VerifyEmailValidator")
+
+    """
     Update the authenticated learner's display name (nickname) and email address.
     """
     updateProfile(

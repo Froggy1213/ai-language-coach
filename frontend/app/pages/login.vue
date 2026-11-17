@@ -9,6 +9,9 @@ import { app, login as copy } from '~/constants/strings'
  * nothing else to do on this screen but the form.
  */
 const { login } = useAuth()
+const route = useRoute()
+
+const resetSucceeded = computed(() => route.query.reset === 'success')
 
 const email = ref('')
 const password = ref('')
@@ -43,6 +46,8 @@ async function submit(): Promise<void> {
       </div>
     </header>
 
+    <UiNotice v-if="resetSucceeded" :message="copy.resetSuccess" tone="success" />
+
     <form class="space-y-4" @submit.prevent="submit">
       <UiField :label="copy.email">
         <input
@@ -54,15 +59,26 @@ async function submit(): Promise<void> {
         >
       </UiField>
 
-      <UiField :label="copy.password">
-        <input
-          v-model="password"
-          type="password"
-          required
-          autocomplete="current-password"
-          class="field-input"
-        >
-      </UiField>
+      <div class="space-y-2">
+        <UiField :label="copy.password">
+          <input
+            v-model="password"
+            type="password"
+            required
+            autocomplete="current-password"
+            class="field-input"
+          >
+        </UiField>
+
+        <div class="flex justify-end">
+          <NuxtLink
+            to="/forgot-password"
+            class="text-[0.8125rem] text-[var(--ink-muted)] underline-offset-4 transition-colors hover:text-[var(--accent)] hover:underline"
+          >
+            {{ copy.forgotPassword }}
+          </NuxtLink>
+        </div>
+      </div>
 
       <UiNotice :message="error" />
 

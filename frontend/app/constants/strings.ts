@@ -37,11 +37,52 @@ export const login = {
   subtitle: 'ロードマップの続きから再開できます。',
   email: 'メールアドレス',
   password: 'パスワード',
+  forgotPassword: 'パスワードをお忘れですか？',
   submit: 'ログイン',
   pending: 'ログインしています…',
   noAccount: 'アカウントをお持ちでないですか？',
   toRegister: '新規登録',
+  resetSuccess: 'パスワードを再設定しました。新しいパスワードでログインしてください。',
   error: 'ログインできませんでした。',
+} as const
+
+export const forgotPassword = {
+  title: 'パスワードの再設定',
+  subtitle: '登録済みのメールアドレスを入力してください。再設定用のリンクをお送りします。',
+  email: 'メールアドレス',
+  submit: '再設定メールを送信',
+  pending: '送信しています…',
+  sentNotice: '入力されたメールアドレスが登録されている場合、再設定用のリンクを送信しました。受信トレイをご確認ください。',
+  backToLogin: 'ログインに戻る',
+  error: '再設定メールを送信できませんでした。しばらくしてからお試しください。',
+} as const
+
+export const resetPassword = {
+  title: '新しいパスワードを設定',
+  subtitle: '8文字以上の新しいパスワードを入力してください。',
+  newPassword: '新しいパスワード',
+  passwordHint: '8文字以上。',
+  confirmPassword: '新しいパスワード（確認）',
+  passwordMismatch: '新しいパスワードと確認用パスワードが一致しません。',
+  submit: 'パスワードを再設定',
+  pending: '再設定しています…',
+  invalidLink: '再設定リンクが無効か、必要な情報が不足しています。もう一度リクエストしてください。',
+  requestNewLink: '再設定メールをもう一度リクエスト',
+  error: 'パスワードを再設定できませんでした。もう一度お試しください。',
+} as const
+
+export const verifyEmail = {
+  title: 'メールアドレスの確認',
+  verifying: 'メールアドレスを確認しています…',
+  success: 'メールアドレスを確認しました。',
+  invalidOrExpired: '確認リンクが無効か、有効期限が切れています。',
+  resendCta: '確認メールを再送',
+  resending: '送信しています…',
+  resent: '確認メールを送信しました。受信トレイをご確認ください。',
+  resendError: '確認メールを送信できませんでした。しばらくしてからお試しください。',
+  toHome: 'ホームへ進む',
+  toLogin: 'ログインへ進む',
+  toAccountSettings: 'アカウント設定へ',
 } as const
 
 export const register = {
@@ -445,6 +486,12 @@ export const settings = {
   nameHint: 'ホーム画面の挨拶などに表示されます。',
   email: 'メールアドレス',
   emailHint: 'ログインとお知らせの宛先に使います。',
+  emailVerified: '確認済み',
+  emailUnverified: '未確認',
+  resendVerification: '確認メールを再送',
+  resendingVerification: '送信しています…',
+  verificationSent: '確認メールを送信しました。受信トレイをご確認ください。',
+  verificationSendError: '確認メールを送信できませんでした。しばらくしてからお試しください。',
   saveProfile: 'プロフィールを保存',
   savingProfile: '保存しています…',
   profileSaved: 'プロフィールを更新しました。',

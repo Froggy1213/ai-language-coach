@@ -196,3 +196,51 @@ python-импортами и вызовами Claude Agent tool); установ
 `frontend/README.md`, `e2e/README.md`, `AGENTS.md`, `docs/design/README.md`,
 `docs/design/settings-mobile.jpg`
 **Статус:** active
+
+## 2026-11-17 — Подтверждение email (stateless HMAC), сброс пароля через SPA и Resend API
+
+**Решение:**
+1. Транзакционная почта (подтверждение email и сброс пароля) в продакшене идёт по HTTPS API
+   через встроенный драйвер Laravel `resend` (`resend/resend-php`), локально по умолчанию остаётся
+   `MAIL_MAILER=log`.
+2. Уведомления (`VerifyEmailNotification`, `ResetPasswordNotification`) формулируются на
+   вежливом японском языке и строят ссылки относительно `config('app.frontend_url')`
+   (`/verify-email` и `/reset-password`), а не `APP_URL`.
+3. Подтверждение email использует stateless HMAC-SHA256 токен по `APP_KEY` в
+   `App\Support\EmailVerificationToken` (`id|sha1(email)|expires`, срок жизни 60 минут) и
+   публичную GraphQL-мутацию `verifyEmail`, возвращающую типизированные ошибки
+   `EMAIL_VERIFICATION_INVALID` и `EMAIL_VERIFICATION_EXPIRED`.
+4. Повторная отправка (`sendEmailVerificationNotification`) защищена `@guard` и возвращает `true`
+   без отправки письма, если адрес уже подтверждён. `Register` и смена email в `UpdateProfile`
+   отправляют письмо через `rescue(..., report: true)`, не срывая регистрацию или обновление
+   профиля при ошибке почтового провайдера.
+5. `forgotPassword` всегда возвращает `true` (без раскрытия существования аккаунта), а
+   `resetPassword` сбрасывает пароль и `remember_token` через `Password::broker()->reset(...)`,
+   отдавая `PASSWORD_RESET_INVALID` при неверном или истёкшем токене.
+
+**Почему:**
+В облачных и контейнерных средах исходящий SMTP часто заблокирован или требует отдельного relay,
+тогда как Resend работает по HTTPS и уже прописан в `backend/config/mail.php` и `services.php`.
+Поскольку клиент живёт в отдельном Nuxt SPA на `FRONTEND_URL`, письмо должно вести на маршруты
+SPA, а stateless HMAC-подпись для `/verify-email` позволяет подтвердить адрес, даже если ссылку
+открыли на другом устройстве или в браузере без активной cookie-сессии.
+
+**Отвергнуто:**
+Классический GET-маршрут Laravel `verification.verify` с редиректом и требованием активной
+сессии (ломает сценарий открытия письма в другом браузере и уводит мимо SPA); SMTP-транспорт
+для продакшена (больше сетевых и инфраструктурных зависимостей); жёсткий проброс исключений
+почты из `Register` и `UpdateProfile` (временный сбой почты не должен блокировать создание
+аккаунта или сохранение профиля при наличии кнопки повторной отправки в `/settings/account`).
+
+**Файлы:** `backend/composer.{json,lock}`, `backend/config/app.php`, `backend/app/Models/User.php`,
+`backend/app/Support/EmailVerificationToken.php`,
+`backend/app/Notifications/{VerifyEmailNotification,ResetPasswordNotification}.php`,
+`backend/app/GraphQL/Mutations/{Register,UpdateProfile,ForgotPassword,ResetPassword,SendEmailVerificationNotification,VerifyEmail}.php`,
+`backend/app/GraphQL/Validators/{ForgotPasswordValidator,ResetPasswordValidator,VerifyEmailValidator}.php`,
+`backend/graphql/{schema.graphql,types/user.graphql}`,
+`backend/tests/Feature/GraphQL/AuthGraphQLTest.php`,
+`frontend/app/pages/{login,forgot-password,reset-password,verify-email,settings/account}.vue`,
+`frontend/app/{composables/useAuth.ts,constants/strings.ts,graphql/documents.ts,middleware/auth.global.ts,types/graphql.ts,types/view-models.ts,utils/graphql-error.ts}`,
+`frontend/README.md`, `backend/.env.example`, `.env.production.example`, `docker-compose.prod.yml`,
+`infra/terraform/{variables,ecs,secrets}.tf`, `AGENTS.md`
+**Статус:** active

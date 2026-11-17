@@ -12,6 +12,7 @@ export interface CurrentUser {
   id: string
   name: string
   email: string
+  emailVerifiedAt?: string | null
   targetLanguage: string
   currentLevel: CefrLevel
   voiceConsentAt?: string | null

@@ -33,6 +33,7 @@ export const ME_QUERY = /* GraphQL */ `
       id
       name
       email
+      emailVerifiedAt
       targetLanguage
       currentLevel
       voiceConsentAt
@@ -86,6 +87,7 @@ export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
       id
       name
       email
+      emailVerifiedAt
     }
   }
 `
@@ -94,6 +96,30 @@ export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
 export const UPDATE_PASSWORD_MUTATION = /* GraphQL */ `
   mutation UpdatePassword($currentPassword: String!, $newPassword: String!) {
     updatePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+  }
+`
+
+export const FORGOT_PASSWORD_MUTATION = /* GraphQL */ `
+  mutation ForgotPassword($email: String!) {
+    forgotPassword(email: $email)
+  }
+`
+
+export const RESET_PASSWORD_MUTATION = /* GraphQL */ `
+  mutation ResetPassword($token: String!, $email: String!, $password: String!) {
+    resetPassword(token: $token, email: $email, password: $password)
+  }
+`
+
+export const SEND_EMAIL_VERIFICATION_MUTATION = /* GraphQL */ `
+  mutation SendEmailVerificationNotification {
+    sendEmailVerificationNotification
+  }
+`
+
+export const VERIFY_EMAIL_MUTATION = /* GraphQL */ `
+  mutation VerifyEmail($id: ID!, $hash: String!, $expires: Int!, $signature: String!) {
+    verifyEmail(id: $id, hash: $hash, expires: $expires, signature: $signature)
   }
 `
 

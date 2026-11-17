@@ -67,6 +67,21 @@ variable "acm_certificate_arn" {
 }
 
 # ------------------------------------------------------------------------------
+# Transactional Mail (Resend)
+# ------------------------------------------------------------------------------
+variable "mail_mailer" {
+  type        = string
+  description = "Laravel mail transport driver (resend in production)"
+  default     = "resend"
+}
+
+variable "mail_from_address" {
+  type        = string
+  description = "Sender address for transactional email (empty defaults to noreply@$${var.app_domain})"
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
 # Database (RDS MySQL 8.4) - Plan §3, §8
 # ------------------------------------------------------------------------------
 variable "protect_data" {

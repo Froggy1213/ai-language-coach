@@ -114,6 +114,8 @@ harness — not linked from the app, but kept because tuning the orb blind is gu
 | `/settings/privacy` | `pages/settings/privacy.vue` | **データとプライバシー** Voice-consent record and the guarded account deletion. |
 | `/pricing` | `pages/pricing.vue` | **料金プラン** Monthly/yearly plans, minutes each includes, and the free allowance. Public: guests can read the price before signing up. |
 | `/login`, `/register` | `pages/login.vue`, `pages/register.vue` | Auth. |
+| `/forgot-password`, `/reset-password` | `pages/forgot-password.vue`, `pages/reset-password.vue` | Password reset request and token-based reset. |
+| `/verify-email` | `pages/verify-email.vue` | Signed email verification link handler. |
 
 Legacy routes kept as 301 redirects: `/practice/:cardId` → `/lesson/:cardId`,
 `/session/:id` → `/reflect/:id`, and `/onboarding` → `/level`.

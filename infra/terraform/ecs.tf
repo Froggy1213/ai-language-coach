@@ -139,6 +139,7 @@ locals {
     { name = "LOG_CHANNEL", value = "stderr" },
     { name = "LOG_LEVEL", value = "info" },
     { name = "APP_URL", value = "https://${var.app_domain}" },
+    { name = "FRONTEND_URL", value = "https://${var.app_domain}" },
     { name = "DB_CONNECTION", value = "mysql" },
     { name = "DB_HOST", value = aws_db_instance.main.address },
     { name = "DB_PORT", value = "3306" },
@@ -189,7 +190,11 @@ locals {
     # package reads this key for its own default model, whose fallback is still
     # Nova-2 — the previous generation, and a different model from the Nova-3 the
     # streaming agent uses. Named once here so both passes transcribe the same way.
-    { name = "DEEPGRAM_DEFAULT_MODEL", value = "nova-3" }
+    { name = "DEEPGRAM_DEFAULT_MODEL", value = "nova-3" },
+    # Transactional email (email verification, password reset) via Resend.
+    { name = "MAIL_MAILER", value = var.mail_mailer },
+    { name = "MAIL_FROM_ADDRESS", value = var.mail_from_address != "" ? var.mail_from_address : "noreply@${var.app_domain}" },
+    { name = "MAIL_FROM_NAME", value = "Kirie" }
   ]
 
   laravel_secret_keys = [
@@ -203,6 +208,7 @@ locals {
     "VOICE_INTERNAL_SECRET",
     "DEEPGRAM_API_KEY",
     "DEEPSEEK_API_KEY",
+    "RESEND_API_KEY",
     "SENTRY_DSN",
     "STRIPE_SECRET",
     "STRIPE_WEBHOOK_SECRET",

@@ -25,6 +25,8 @@ final class Register
             'target_language' => $args['targetLanguage'],
         ]);
 
+        rescue(fn () => $user->sendEmailVerificationNotification(), report: true);
+
         // `current_level` stays at its A1 default until the assessment sets it.
         $this->auth->guard('web')->login($user);
 

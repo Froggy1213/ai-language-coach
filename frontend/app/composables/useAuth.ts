@@ -1,11 +1,15 @@
 import type { CombinedError } from '@urql/vue'
 import {
+  FORGOT_PASSWORD_MUTATION,
   LOGIN_MUTATION,
   LOGOUT_MUTATION,
   ME_QUERY,
   REGISTER_MUTATION,
+  RESET_PASSWORD_MUTATION,
+  SEND_EMAIL_VERIFICATION_MUTATION,
   UPDATE_PASSWORD_MUTATION,
   UPDATE_PROFILE_MUTATION,
+  VERIFY_EMAIL_MUTATION,
 } from '~/graphql/documents'
 import type { CurrentUser } from '~/types/view-models'
 
@@ -92,6 +96,50 @@ export function useAuth() {
     }
   }
 
+  async function forgotPassword(email: string): Promise<void> {
+    const { error } = await $urql
+      .mutation(FORGOT_PASSWORD_MUTATION, { email })
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+  }
+
+  async function resetPassword(token: string, email: string, password: string): Promise<void> {
+    const { error } = await $urql
+      .mutation(RESET_PASSWORD_MUTATION, { token, email, password })
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+  }
+
+  async function sendEmailVerification(): Promise<void> {
+    const { error } = await $urql
+      .mutation(SEND_EMAIL_VERIFICATION_MUTATION, {})
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+  }
+
+  async function verifyEmail(id: string, hash: string, expires: number, signature: string): Promise<void> {
+    const { error } = await $urql
+      .mutation(VERIFY_EMAIL_MUTATION, { id, hash, expires, signature })
+      .toPromise()
+
+    if (error) {
+      throw error
+    }
+
+    if (user.value) {
+      await refresh()
+    }
+  }
+
   async function ensureResolved(): Promise<void> {
     if (!resolved.value) {
       await refresh()
@@ -108,6 +156,10 @@ export function useAuth() {
     logout,
     updateProfile,
     updatePassword,
+    forgotPassword,
+    resetPassword,
+    sendEmailVerification,
+    verifyEmail,
     clearSession,
   }
 }

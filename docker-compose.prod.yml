@@ -92,6 +92,13 @@ x-prod-laravel-environment: &prod-laravel-environment
   # Checkout success/cancel and portal return URLs. One origin in production.
   FRONTEND_URL: https://${APP_DOMAIN:?set APP_DOMAIN}
 
+  # Mail (Resend). Transactional email (verification, password reset) via the
+  # Resend HTTP API.
+  MAIL_MAILER: ${MAIL_MAILER:-resend}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-noreply@${APP_DOMAIN}}
+  MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Kirie}
+
   # LiveKit. Two addresses for two audiences, exactly as the development profile
   # has it: the API dials LIVEKIT_URL, the learner's browser dials
   # LIVEKIT_PUBLIC_URL.

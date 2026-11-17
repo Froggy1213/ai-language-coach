@@ -18,6 +18,7 @@
 # VOICE_INTERNAL_SECRET    Shared secret for /api/internal/sessions/*       laravel-app, voice-agent
 # DEEPGRAM_API_KEY         Deepgram Nova-3 streaming & batch STT            horizon-worker, voice-agent
 # DEEPSEEK_API_KEY         DeepSeek LLM for CEFR and mistake analysis       horizon-worker, voice-agent
+# RESEND_API_KEY           Resend HTTP API key for transactional email      laravel-app, horizon-worker
 # GROQ_API_KEY             Fast dialogue LLM (chosen by latency benchmark)  voice-agent-worker
 # CEREBRAS_API_KEY         Alternative fast dialogue LLM                    voice-agent-worker
 # CARTESIA_API_KEY         Cartesia Sonic streaming TTS                     voice-agent-worker
@@ -127,6 +128,10 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
     GROQ_API_KEY          = ""
     CEREBRAS_API_KEY      = ""
     SENTRY_DSN            = "placeholder-replace-with-real-sentry-dsn"
+    # Transactional email via Resend. Empty until a real key is added; when
+    # MAIL_MAILER=resend is active, sending mail requires a valid key and a
+    # verified sending domain matching MAIL_FROM_ADDRESS.
+    RESEND_API_KEY = ""
     # Billing is off until these are filled by hand: empty is a valid
     # "not configured" state (checkout answers BILLING_NOT_CONFIGURED), while a
     # test-mode key in production is refused by ProductionSanityCheck.

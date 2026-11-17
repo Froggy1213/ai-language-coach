@@ -9,6 +9,9 @@ type User {
     "Account email address."
     email: String!
 
+    "When the learner verified their email address, or null if still unverified."
+    emailVerifiedAt: DateTime @rename(attribute: "email_verified_at")
+
     "Language the user is learning."
     targetLanguage: String! @rename(attribute: "target_language")
 

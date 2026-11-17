@@ -3,8 +3,12 @@
 namespace Tests\Feature\GraphQL;
 
 use App\Models\User;
+use App\Notifications\ResetPasswordNotification;
+use App\Notifications\VerifyEmailNotification;
+use App\Support\EmailVerificationToken;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
 use Tests\TestCase;
@@ -360,5 +364,359 @@ class AuthGraphQLTest extends TestCase
 
         $this->assertSame('PASSWORD_MISMATCH', $response->json('errors.0.extensions.code'));
         $this->assertTrue(Hash::check('correct-secret', $user->fresh()->password));
+    }
+
+    public function test_register_sends_email_verification_notification(): void
+    {
+        Notification::fake();
+        config()->set('app.frontend_url', 'https://app.example.com');
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                register(
+                    name: "Ada"
+                    email: "verify-on-register@example.com"
+                    password: "secret-password"
+                    targetLanguage: "en"
+                ) {
+                    id
+                    emailVerifiedAt
+                }
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.register.emailVerifiedAt', null);
+
+        $user = User::firstWhere('email', 'verify-on-register@example.com');
+        $this->assertNotNull($user);
+
+        Notification::assertSentTo($user, VerifyEmailNotification::class, function (VerifyEmailNotification $notification) use ($user): bool {
+            $mail = $notification->toMail($user);
+            $this->assertSame('【Kirie】メールアドレスの確認', $mail->subject);
+            $this->assertStringStartsWith('https://app.example.com/verify-email?', (string) $mail->actionUrl);
+
+            parse_str((string) parse_url((string) $mail->actionUrl, PHP_URL_QUERY), $query);
+
+            return ($query['id'] ?? null) === (string) $user->id
+                && ($query['hash'] ?? null) === sha1($user->email)
+                && EmailVerificationToken::verifySignature(
+                    (string) ($query['id'] ?? ''),
+                    (string) ($query['hash'] ?? ''),
+                    (int) ($query['expires'] ?? 0),
+                    (string) ($query['signature'] ?? ''),
+                );
+        });
+    }
+
+    public function test_update_profile_sends_verification_notification_only_when_email_changes(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create([
+            'name' => 'Old Name',
+            'email' => 'same@example.com',
+            'email_verified_at' => now(),
+        ]);
+        Sanctum::actingAs($user);
+
+        // Changing only the name keeps email verified and sends no notification.
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($name: String!, $email: String!) {
+                updateProfile(name: $name, email: $email) {
+                    id
+                    emailVerifiedAt
+                }
+            }
+        ', [
+            'name' => 'New Name',
+            'email' => 'same@example.com',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree();
+
+        Notification::assertNothingSent();
+
+        // Changing the email clears verification and sends the verification mail to the new address.
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($name: String!, $email: String!) {
+                updateProfile(name: $name, email: $email) {
+                    id
+                    email
+                    emailVerifiedAt
+                }
+            }
+        ', [
+            'name' => 'New Name',
+            'email' => 'changed@example.com',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.updateProfile.email', 'changed@example.com')
+            ->assertJsonPath('data.updateProfile.emailVerifiedAt', null);
+
+        $user->refresh();
+        Notification::assertSentTo($user, VerifyEmailNotification::class, function (VerifyEmailNotification $notification) use ($user): bool {
+            $mail = $notification->toMail($user);
+            parse_str((string) parse_url((string) $mail->actionUrl, PHP_URL_QUERY), $query);
+
+            return ($query['hash'] ?? null) === sha1('changed@example.com');
+        });
+    }
+
+    public function test_send_email_verification_notification_requires_authentication_and_skips_verified_users(): void
+    {
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                sendEmailVerificationNotification
+            }
+        ')
+            ->assertGraphQLErrorMessage('Unauthenticated.');
+
+        Notification::fake();
+
+        $unverified = User::factory()->unverified()->create();
+        Sanctum::actingAs($unverified);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                sendEmailVerificationNotification
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.sendEmailVerificationNotification', true);
+
+        Notification::assertSentTo($unverified, VerifyEmailNotification::class);
+
+        Notification::fake();
+
+        $verified = User::factory()->create(['email_verified_at' => now()]);
+        Sanctum::actingAs($verified);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation {
+                sendEmailVerificationNotification
+            }
+        ', [], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.sendEmailVerificationNotification', true);
+
+        Notification::assertNothingSent();
+    }
+
+    public function test_verify_email_marks_user_as_verified_with_valid_signature(): void
+    {
+        $user = User::factory()->unverified()->create();
+        $url = EmailVerificationToken::makeUrl($user);
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+        $mutation = /** @lang GraphQL */ '
+            mutation ($id: ID!, $hash: String!, $expires: Int!, $signature: String!) {
+                verifyEmail(id: $id, hash: $hash, expires: $expires, signature: $signature)
+            }
+        ';
+
+        $variables = [
+            'id' => (string) $query['id'],
+            'hash' => (string) $query['hash'],
+            'expires' => (int) $query['expires'],
+            'signature' => (string) $query['signature'],
+        ];
+
+        $this->graphQL($mutation, $variables, [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.verifyEmail', true);
+
+        $this->assertTrue($user->fresh()->hasVerifiedEmail());
+
+        // Calling verifyEmail again on an already-verified account remains idempotent.
+        $this->graphQL($mutation, $variables, [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.verifyEmail', true);
+    }
+
+    public function test_verify_email_rejects_expired_link(): void
+    {
+        $user = User::factory()->unverified()->create();
+        $url = EmailVerificationToken::makeUrl($user, now()->subMinute()->getTimestamp());
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            mutation ($id: ID!, $hash: String!, $expires: Int!, $signature: String!) {
+                verifyEmail(id: $id, hash: $hash, expires: $expires, signature: $signature)
+            }
+        ', [
+            'id' => (string) $query['id'],
+            'hash' => (string) $query['hash'],
+            'expires' => (int) $query['expires'],
+            'signature' => (string) $query['signature'],
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('EMAIL_VERIFICATION_EXPIRED', $response->json('errors.0.extensions.code'));
+        $this->assertFalse($user->fresh()->hasVerifiedEmail());
+    }
+
+    public function test_verify_email_rejects_tampered_signature_or_wrong_email_hash(): void
+    {
+        $user = User::factory()->unverified()->create(['email' => 'real@example.com']);
+        $expires = now()->addMinutes(30)->getTimestamp();
+        $validHash = sha1($user->email);
+        $validSignature = EmailVerificationToken::sign((string) $user->id, $validHash, $expires);
+
+        $mutation = /** @lang GraphQL */ '
+            mutation ($id: ID!, $hash: String!, $expires: Int!, $signature: String!) {
+                verifyEmail(id: $id, hash: $hash, expires: $expires, signature: $signature)
+            }
+        ';
+
+        $tampered = $this->graphQL($mutation, [
+            'id' => (string) $user->id,
+            'hash' => $validHash,
+            'expires' => $expires,
+            'signature' => $validSignature.'0',
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('EMAIL_VERIFICATION_INVALID', $tampered->json('errors.0.extensions.code'));
+        $this->assertFalse($user->fresh()->hasVerifiedEmail());
+
+        $wrongHash = sha1('wrong@example.com');
+        $wrongHashSignature = EmailVerificationToken::sign((string) $user->id, $wrongHash, $expires);
+
+        $mismatched = $this->graphQL($mutation, [
+            'id' => (string) $user->id,
+            'hash' => $wrongHash,
+            'expires' => $expires,
+            'signature' => $wrongHashSignature,
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('EMAIL_VERIFICATION_INVALID', $mismatched->json('errors.0.extensions.code'));
+        $this->assertFalse($user->fresh()->hasVerifiedEmail());
+    }
+
+    public function test_forgot_password_sends_reset_notification_and_hides_account_existence(): void
+    {
+        Notification::fake();
+        config()->set('app.frontend_url', 'https://app.example.com');
+
+        $user = User::factory()->create(['email' => 'learner@example.com']);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($email: String!) {
+                forgotPassword(email: $email)
+            }
+        ', [
+            'email' => $user->email,
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.forgotPassword', true);
+
+        Notification::assertSentTo($user, ResetPasswordNotification::class, function (ResetPasswordNotification $notification) use ($user): bool {
+            $mail = $notification->toMail($user);
+            $this->assertSame('【Kirie】パスワードの再設定', $mail->subject);
+            $this->assertStringStartsWith('https://app.example.com/reset-password?', (string) $mail->actionUrl);
+
+            parse_str((string) parse_url((string) $mail->actionUrl, PHP_URL_QUERY), $query);
+
+            return ($query['token'] ?? null) === $notification->token
+                && ($query['email'] ?? null) === $user->email;
+        });
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($email: String!) {
+                forgotPassword(email: $email)
+            }
+        ', [
+            'email' => 'unknown@example.com',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.forgotPassword', true);
+
+        Notification::assertCount(1);
+    }
+
+    public function test_reset_password_updates_password_with_valid_token(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create([
+            'email' => 'reset@example.com',
+            'password' => 'old-password',
+            'remember_token' => 'initial-token',
+        ]);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($email: String!) {
+                forgotPassword(email: $email)
+            }
+        ', [
+            'email' => $user->email,
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree();
+
+        $capturedToken = null;
+        Notification::assertSentTo($user, ResetPasswordNotification::class, function (ResetPasswordNotification $notification) use (&$capturedToken): bool {
+            $capturedToken = $notification->token;
+
+            return true;
+        });
+        $this->assertIsString($capturedToken);
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($token: String!, $email: String!, $password: String!) {
+                resetPassword(token: $token, email: $email, password: $password)
+            }
+        ', [
+            'token' => $capturedToken,
+            'email' => $user->email,
+            'password' => 'new-secret-password',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLErrorFree()
+            ->assertJsonPath('data.resetPassword', true);
+
+        $user->refresh();
+        $this->assertTrue(Hash::check('new-secret-password', $user->password));
+        $this->assertNotSame('initial-token', $user->remember_token);
+
+        // The reset token is single-use and rejected if replayed.
+        $replay = $this->graphQL(/** @lang GraphQL */ '
+            mutation ($token: String!, $email: String!, $password: String!) {
+                resetPassword(token: $token, email: $email, password: $password)
+            }
+        ', [
+            'token' => $capturedToken,
+            'email' => $user->email,
+            'password' => 'another-secret-password',
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('PASSWORD_RESET_INVALID', $replay->json('errors.0.extensions.code'));
+    }
+
+    public function test_reset_password_rejects_invalid_token_and_validates_input(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'invalid-reset@example.com',
+            'password' => 'keep-this-password',
+        ]);
+
+        $response = $this->graphQL(/** @lang GraphQL */ '
+            mutation ($token: String!, $email: String!, $password: String!) {
+                resetPassword(token: $token, email: $email, password: $password)
+            }
+        ', [
+            'token' => 'not-a-valid-token',
+            'email' => $user->email,
+            'password' => 'new-secret-password',
+        ], [], self::SPA_HEADERS);
+
+        $this->assertSame('PASSWORD_RESET_INVALID', $response->json('errors.0.extensions.code'));
+        $this->assertTrue(Hash::check('keep-this-password', $user->fresh()->password));
+
+        $this->graphQL(/** @lang GraphQL */ '
+            mutation ($token: String!, $email: String!, $password: String!) {
+                resetPassword(token: $token, email: $email, password: $password)
+            }
+        ', [
+            'token' => 'not-a-valid-token',
+            'email' => $user->email,
+            'password' => 'short',
+        ], [], self::SPA_HEADERS)
+            ->assertGraphQLValidationKeys(['password']);
     }
 }
