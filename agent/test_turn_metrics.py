@@ -234,6 +234,33 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["tts_first_chunk"], 150.0)
             self.assertEqual(payload["total_turnaround"], 850.0)
 
+    async def test_tts_without_speech_id_attaches_to_the_waiting_turn(self):
+        # Deepgram's TTSMetrics carry no speech_id (Cartesia's do). The first
+        # audio chunk still has to land on the turn that is waiting for it,
+        # otherwise `tts_first_chunk` silently drops out of the latency record.
+        tracker = TurnMetricsTracker(session_id=21)
+        tracker.on_user_speech("Describe the room.")
+
+        dispatched_payloads = []
+
+        async def fake_report(session_id, payload):
+            dispatched_payloads.append((session_id, payload))
+
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="sp-9", end_of_utterance_delay=0.3)
+            )
+            tracker.handle_metric(
+                DummyMetric(type="llm_metrics", speech_id="sp-9", ttft=0.4)
+            )
+            tracker.handle_metric(DummyMetric(type="tts_metrics", ttfb=0.2))
+
+            await asyncio.sleep(0.01)
+
+        self.assertEqual(len(dispatched_payloads), 1)
+        self.assertEqual(dispatched_payloads[0][1]["turn_id"], "sp-9")
+        self.assertEqual(dispatched_payloads[0][1]["tts_first_chunk"], 200.0)
+
     async def test_phantom_greeting_is_ignored(self):
         tracker = TurnMetricsTracker(session_id=12)
         dispatched_payloads = []

@@ -110,3 +110,35 @@ BUILDX_CONFIG="$PWD/.buildx" docker compose --profile full build api web
 внутри SPA работает. Лечится `useHashScroll` (`frontend/app/composables/useHashScroll.ts`):
 `onMounted` + `nextTick` + `scrollIntoView`, плюс `scroll-mt-*` на самой цели. Проверять нужно
 именно холодную загрузку, а не клик из приложения — клик маскирует дефект.
+
+## 2026-11-18 — Удалённый из каталога голос Cartesia выглядит как «агент молчит»
+
+Если voice id, который держит `agent/speech.py`, удалён из каталога Cartesia, синтез отвечает
+`404 Voice not found`. Плагин `livekit-plugins-cartesia` не поднимает это до уровня сессии: в
+логах только `failed to synthesize speech: no audio frames were pushed for text: …` с повторами
+0.1/2/2 с, затем `APIError` в `_tts_inference_task`. Снаружи — тишина при исправных STT (Deepgram
+`nova-3` даёт транскрипты) и LLM (Groq отвечает, `TURN_LATENCY` есть), поэтому симптом легко
+принять за «ИИ не слышит/не отвечает» целиком. Проверка: `GET https://api.cartesia.ai/voices` с
+`Authorization: Bearer $CARTESIA_API_KEY` и `Cartesia-Version: 2025-04-16`; с `X-API-Key` этот
+endpoint отвечает `401`, хотя `/tts/bytes` тот же ключ принимает. Лечится заменой id, а не
+конфигом контейнера.
+
+## 2026-11-18 — После сна OrbStack STT падает с `ClientConnectorDNSError`
+
+Когда демон OrbStack был выключен/спал, контейнер `coach_voice_agent` не резолвил внешние имена:
+`APIConnectionError: failed to connect to deepgram (ClientConnectorDNSError)`, повторы
+0.1/2/2 с, затем `AgentSession is closing due to unrecoverable error`. Тот же симптом у Cartesia,
+но с `ClientConnectorDNSError` вместо `Voice not found`. Отличить от поломки кода дешево: на
+работающем демоне `socket.gethostbyname('api.deepgram.com')` и TLS из контейнера проходят, и
+`docker compose restart voice-agent` (или перезапуск OrbStack) возвращает распознавание. Код и
+ключи при этом не меняются.
+
+## 2026-11-18 — `TTSMetrics` приходят после синтеза, у Deepgram ещё и без `speech_id`
+
+`livekit-agents` эмитит `TTSMetrics` по завершении синтеза реплики, а не на первом аудиочанке:
+Deepgram Aura на шестисекундный ответ приходит примерно через 3.3 с после LLM. У Deepgram в
+метрике нет `speech_id` (у Cartesia есть). Трекер ходов отправлял ход по таймауту 2 с, поэтому
+`tts_first_chunk_ms` в `TURN_LATENCY` оставался `null` и TTS-стадия молча выпадала из телеметрии,
+хотя звук был. Лечение: `TURN_FLUSH_DELAY_SECONDS = 5.0` и `TURN_DRAIN_TIMEOUT_SECONDS = 6.0`
+в `agent/session.py` плюс `_attach_uncorrelated_tts` в `turn_tracker.py` для метрики без
+`speech_id`. При смене TTS-провайдера первым делом проверять, что `tts_first_chunk_ms` не опустел.

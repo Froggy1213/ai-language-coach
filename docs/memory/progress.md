@@ -1,72 +1,63 @@
 # Progress
 
-Updated: 2026-11-17 · session: email-verification-password-reset — сброс пароля, подтверждение email и транспорт Resend
+Updated: 2026-11-18 · session: voice-tts-recovery — Aura вместо Cartesia и 30 минут free в месяц
 
 ## Сейчас
 
-Ветка `main`. Поверх разделённых настроек (`/settings/*`) добавлены подтверждение email,
-сброс пароля и продакшн-почта через Resend:
+Ветка `main`. Голосовой пайплайн переведён на **Deepgram Aura** как основной TTS: Cartesia
+остаётся fallback и больше не участвует, пока задан `DEEPGRAM_API_KEY`. Причина перехода —
+Cartesia была выбрана только за один мультиязычный голос, а продукт учит лишь английскому
+(`config/languages.php`); Deepgram уже STT-вендор, дешевле и в замере не медленнее (ttfb
+0.20–0.32 с против 0.35 с). Прежний голос Cartesia к тому же удалили из каталога, из-за чего
+агент молчал (`Voice not found` → `no audio frames were pushed`).
 
-- **Бэкенд:** `User` реализует `MustVerifyEmail` с японскими уведомлениями
-  (`VerifyEmailNotification`, `ResetPasswordNotification`); ссылки строятся от
-  `config('app.frontend_url')`. `EmailVerificationToken` подписывает ссылки HMAC-SHA256 по
-  `APP_KEY` с TTL 60 минут. Регистрация (`Register`) и смена адреса в `UpdateProfile`
-  отправляют письмо через `rescue(..., report: true)`. Добавлены GraphQL-мутации
-  `forgotPassword`, `resetPassword`, `sendEmailVerificationNotification`, `verifyEmail`, поле
-  `User.emailVerifiedAt`, валидаторы и зависимость `resend/resend-php`.
-- **Фронтенд:** добавлены публичные маршруты `/forgot-password`, `/reset-password` (guest-only)
-  и `/verify-email` (для гостей и авторизованных), ссылка и notice `?reset=success` на `/login`,
-  а также бейдж статуса (`確認済み` / `未確認`) и повторная отправка в `/settings/account`.
-  Японские строки вынесены в `frontend/app/constants/strings.ts`, коды ошибок — в
-  `frontend/app/utils/graphql-error.ts`, типы сгенерированы в `frontend/app/types/graphql.ts`.
-- **Инфра и конфиги:** локально по умолчанию остаётся `MAIL_MAILER=log`; в
-  `.env.production.example`, `docker-compose.prod.yml` и Terraform (`variables.tf`, `ecs.tf`,
-  `secrets.tf`) добавлены `MAIL_MAILER=resend`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME=Kirie`,
-  `FRONTEND_URL` и секрет `RESEND_API_KEY`. Таблицы маршрутов обновлены в `frontend/README.md`
-  и `AGENTS.md`.
+Одновременно free-план стал **30 минут в месяц** вместо пожизненных 15: окно считается от даты
+регистрации (`VoiceAllowanceResolver::freeAllowance`), `resetsAt` теперь не `null` и у free.
+
+Заодно починена телеметрия TTS: у Deepgram `TTSMetrics` приходят после синтеза (~3.3 с) и без
+`speech_id`, поэтому `tts_first_chunk_ms` выпадал из `TURN_LATENCY`. Вынесены
+`TURN_FLUSH_DELAY_SECONDS = 5.0` и `TURN_DRAIN_TIMEOUT_SECONDS = 6.0`, добавлена привязка
+метрики без `speech_id` к ожидающему ходу.
 
 ## Проверено
 
-- **2026-11-17 (email-verification-password-reset):** полный прогон `php artisan test --compact`
-  — `607 passed (3014 assertions)`, включая 9 новых тестов в `AuthGraphQLTest` с
-  `Notification::fake()`; `./vendor/bin/pint --test` — `passed`;
-  `php artisan lighthouse:validate-schema` — `The defined schema is valid.`;
-  `composer validate --no-check-publish` — valid; резолв драйвера `ResendTransport` — успешно.
-- **Фронтенд:** `npm run codegen` детерминирован (sha256 `app/types/graphql.ts` до и после
-  совпадает: `d3e49ddb...`); `npm run typecheck` — passed (2026 ms); `npm run build` — passed
-  (1.87 MB / 457 kB gzip); японских UI-литералов в шаблонах/скриптах затронутых `.vue` нет.
-- **Инфра:** `docker compose --profile full -f docker-compose.yml -f docker-compose.prod.yml config`
-  с тестовым env-файлом успешно рендерит `MAIL_*`, `RESEND_API_KEY` и `FRONTEND_URL`.
-  `terraform fmt` / `terraform validate` не запускались (`terraform` не установлен — unverified).
-  E2E-тесты Playwright для новых маршрутов и реальная доставка через Resend API пока не
-  проверялись (unverified).
+- **Сквозной программный прогон** (комната + explicit dispatch + 20 с английской речи из wav):
+  Deepgram STT даёт транскрипты, Groq отвечает, TTS — `aura-2-thalia-en` / `ttfb` 0.20–0.32 с,
+  `audio_duration` 6.2–6.8 с; `TURN_LATENCY` теперь с `tts_first_chunk_ms` 236.6.
+- `cd agent && python3 -m unittest discover -s . -p "test_*.py"` — `Ran 115 tests`, `OK`
+  (`skipped=16`): новый тест на приоритет Deepgram и на TTS-метрику без `speech_id`.
+- `cd backend && php artisan test --compact` — `608 passed (3016 assertions)`;
+  `./vendor/bin/pint --dirty` — passed.
+- `cd frontend && npm run codegen` — diff в `app/types/graphql.ts` только комментарий поля
+  `resetsAt`; `npm run typecheck` и `npm run build` — passed (1.87 MB / 457 kB gzip).
+- Живой стек пересобран (`api`, `web`, `voice-agent`), все healthy; `config:show billing.free_seconds`
+  = 1800; резолвер на реальном пользователе: `plan=free included=30min used=16min resets=2026-12-14`.
+- `README.md`, `AGENTS.md`, `agent/README.md`, `infra/README.md` (цена TTS и total) обновлены под
+  новый стек и лимит.
 
 ## Дальше
 
-1. **Resend-домен и ключ** (при выкладке): подтвердить отправляющий домен в Resend под
-   `MAIL_FROM_ADDRESS`, заполнить `RESEND_API_KEY` в `.env.production` или AWS Secrets Manager
-   (`<name_prefix>/app-secrets` до `terraform apply`, т.к. у `secret_string` стоит `ignore_changes`).
-2. **Stripe-аккаунт** (руками, когда подключаются оплаты): создать 6 price-объектов (JPY,
-   tax-inclusive), добавить вебхук `https://$APP_DOMAIN/api/webhooks/stripe`, заполнить
-   `STRIPE_SECRET`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`.
-3. **Деплой-блокеры AWS ECS** (актуально только при выборе AWS ECS вместо single-host
-   `docker-compose.prod.yml`): ECR `IMMUTABLE` против `:latest`, `REVERB_HOST=127.0.0.1` в ECS,
-   scheduler в ECS, RDS TLS (`MYSQL_ATTR_SSL_CA`), `GrammarPointSeeder` в migration-таск.
+1. **Живой прогон из браузера** на `/lesson/{cardId}`: программный probe проверяет пайплайн, но не
+   UI-транскрипты и не слышимость в колонках.
+2. **Markdown в ответах агента**: в транскриптах вида `what **is** in the room` LLM отдаёт
+   разметку, которая попадает в TTS-текст. Проверить, читается ли она вслух, и либо запретить
+   markdown в промпте, либо чистить перед синтезом.
+3. **Проверить Aura-2 на длинных репликах**: метрика приходит после полного синтеза; при ответах
+   дольше ~5 с `tts_first_chunk` снова может потеряться (см. `gotchas.md`, 2026-11-18).
 
 ## Открытые вопросы
 
-- Нужны ли отдельные Playwright `@smoke`-тесты для `/forgot-password`, `/reset-password` и
-  `/verify-email` (с извлечением ссылки из `storage/logs/laravel.log` при `MAIL_MAILER=log`).
-- Семантический проход graphify по документам (`.md`, PDF) отложен до реальной потребности;
-  после коммита изменений стоит обновить граф через `graphify update .`.
-- В `docs/design/` лежит только рендер хаба настроек; подэкраны описаны текстом.
+- Оставлять ли Cartesia в образе и ключах как fallback, или убрать совсем (сейчас она инертна).
+- Free-план: 30 минут в месяц — это же значение для всех новых и текущих free-учёток? Сейчас
+  применилось ко всем без миграции, использованные минуты считаются с даты регистрации.
+- Не проверялись: Stripe checkout, Resend, деплой AWS (см. запись 2026-11-17).
 
 ## Блокировано
 
-Ничего в коде (`terraform` CLI отсутствует на локальной машине).
+Ничего в коде.
 
 ## Прошлая сессия
 
-- 2026-11-16 — `/settings` разделён на хаб (`index`) и четыре экрана (`account`, `billing`, `appearance`, `privacy`).
-- 2026-11-16 — управление профилем и паролем в `/settings`, защита от дублей Checkout, legal-страницы.
-- 2026-11-16 — graphify: граф кода, локальный скилл, `--code-only` без LLM.
+- 2026-11-18 — голос восстановлен: удалённый голос Cartesia заменён, пайплайн проверен end-to-end.
+- 2026-11-17 — подтверждение email, сброс пароля, Resend.
+- 2026-11-16 — `/settings` разделён на хаб и четыре экрана; профиль и пароль.

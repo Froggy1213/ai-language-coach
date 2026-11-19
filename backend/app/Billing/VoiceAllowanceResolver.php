@@ -73,13 +73,21 @@ final class VoiceAllowanceResolver
 
     private function freeAllowance(User $user): VoiceAllowance
     {
+        // The free allowance is monthly too, anchored on the day the learner
+        // registered. A calendar month would hand a learner who joins on the
+        // 28th three days of allowance and then a full one; the registration
+        // anniversary is the same window paid plans use.
+        [$windowStart, $windowEnd] = $this->monthlyWindow(
+            CarbonImmutable::instance($user->created_at ?? now())
+        );
+
         return new VoiceAllowance(
             planCode: 'free',
             status: null,
             interval: null,
-            includedSeconds: (int) config('billing.free_seconds', 900),
-            usedSeconds: $this->usedSeconds($user),
-            resetsAt: null,
+            includedSeconds: (int) config('billing.free_seconds', 1800),
+            usedSeconds: $this->usedSeconds($user, $windowStart, $windowEnd),
+            resetsAt: $windowEnd,
             currentPeriodEnd: null,
             cancelAtPeriodEnd: false,
             hasSubscription: false,
@@ -103,7 +111,16 @@ final class VoiceAllowanceResolver
             ?? $subscription->created_at
             ?? now();
 
-        $anchor = CarbonImmutable::instance($anchor);
+        return $this->monthlyWindow(CarbonImmutable::instance($anchor));
+    }
+
+    /**
+     * The monthly window that contains "now", anchored on one day.
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function monthlyWindow(CarbonImmutable $anchor): array
+    {
         $now = CarbonImmutable::now();
 
         $months = $now->greaterThan($anchor)

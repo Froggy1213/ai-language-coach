@@ -244,3 +244,56 @@ SPA, а stateless HMAC-подпись для `/verify-email` позволяет 
 `frontend/README.md`, `backend/.env.example`, `.env.production.example`, `docker-compose.prod.yml`,
 `infra/terraform/{variables,ecs,secrets}.tf`, `AGENTS.md`
 **Статус:** active
+
+## 2026-11-18 — Голос Cartesia заменён на «Jessica — Clear Communicator»
+
+**Решение:** дефолт `CARTESIA_VOICES['en']` в `agent/speech.py` — `25d7abcb-4d6d-4aca-adce-8a1c85620c8b`.
+**Почему:** прежний id `248be419-…` удалён из каталога Cartesia, и синтез отвечал `Voice not
+found`, то есть агент молчал при исправных STT и LLM. Id прочитан из каталога аккаунта
+(`GET /voices`) и проверен реальным синтезом; Jessica выбрана за чёткую дикцию, важную для
+учебного контента.
+**Отвергнуто:** Deepgram Aura `aura-2-thalia-en` (рабочий fallback и единственный ключ уже есть,
+но другой тембр и ещё один вендор TTS в пайплайне); Naledi/Katie/Julia/Skylar — синтез проверен,
+но тон выбран как менее нейтральный для учебных фраз; оставить старый id и полагаться на
+`CARTESIA_VOICE` в `.env` (дефолт в коде сломан для любой чистой установки).
+**Следствие:** голоса Cartesia живут в каталоге и удаляются — при «тишине агента» первым делом
+сверять id с `GET /voices` (см. `gotchas.md`, 2026-11-18).
+**Файлы:** `agent/speech.py`
+**Статус:** active
+
+## 2026-11-18 — Основной TTS — Deepgram Aura, Cartesia остаётся fallback
+
+**Решение:** `create_tts` (`agent/speech.py`) выбирает Deepgram Aura первым; Cartesia — только
+если ключа Deepgram нет.
+**Почему:** продукт учит только английскому (`config/languages.php`: `supported => ['en']`), а
+уникальное преимущество Cartesia — один голос на 44 языка — не используется. Deepgram уже
+STT-вендор: один аккаунт, один ключ, один каталог. Aura дешевле ($30/1M символов против
+$38–65 у Cartesia) и по замеру не медленнее: ttfb 0.20–0.32 с у `aura-2-thalia-en` против
+0.35 с у `sonic-3` в том же пайплайне. Каталог Cartesia уже удалил голос из-под агента — это
+стоило тишины в эфире.
+**Отвергнуто:** оставить Cartesia основным (второй вендор и уже случившийся сбой каталога);
+ElevenLabs (в 2–5 раз дороже, мультиязычность сейчас не нужна).
+**Следствие:** `CARTESIA_VOICES` в коде остаётся, но не участвует, пока задан
+`DEEPGRAM_API_KEY`; `CARTESIA_VOICE` больше не влияет на локальный стек. Смена провайдера
+потребовала правки телеметрии — см. `gotchas.md`, 2026-11-18.
+**Файлы:** `agent/speech.py`, `agent/test_dialogue_config.py`, `README.md`, `AGENTS.md`,
+`agent/README.md`, `infra/README.md`
+**Статус:** active
+
+## 2026-11-18 — Бесплатный план: 30 минут в месяц с окном от даты регистрации
+
+**Решение:** `billing.free_seconds` = 1800; `VoiceAllowanceResolver::freeAllowance` считает
+`usedSeconds` в месячном окне с анкором на `users.created_at`, а `resetsAt` — конец окна.
+**Почему:** free-план был пожизненным trial; продукт решил давать 30 минут каждый месяц.
+Анкор от регистрации, а не календарный месяц, не даёт короткого первого периода — это та же
+логика, что у подписок (`usageWindow`).
+**Отвергнуто:** календарный месяц (первый период зависит от даты регистрации); скользящие
+30 дней (не совпадает с «месяцем» в UI и с окном подписок).
+**Следствие:** `resetsAt` теперь не `null` и для free; `usageLifetime` удалён, `/settings/billing`
+показывает «今月の利用»; японская копия про 15 минут заменена на 30 в месяц.
+**Файлы:** `backend/config/billing.php`, `backend/.env.example`,
+`backend/app/Billing/{VoiceAllowanceResolver,VoiceAllowance}.php`,
+`backend/graphql/types/billing.graphql`, `backend/tests/Feature/Billing/*`,
+`frontend/app/constants/strings.ts`, `frontend/app/pages/settings/billing.vue`,
+`frontend/app/graphql/documents.ts`, `.env.production.example`, `docker-compose.prod.yml`
+**Статус:** active

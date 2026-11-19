@@ -54,7 +54,7 @@ Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking lea
 | DB | MySQL 8.4 |
 | Media | LiveKit Server (WebRTC) |
 | Voice Agent | Python 3.11 + `livekit-agents` |
-| STT / TTS | Deepgram Nova-3 / Cartesia Sonic-3 |
+| STT / TTS | Deepgram Nova-3 / Deepgram Aura-2 |
 | LLM (async) | DeepSeek-V3 through `laravel/ai` (mistake analysis, scenario goal review, and CEFR assessment) |
 | LLM (dialogue) | Groq / Cerebras / OpenAI (`LLM_PROVIDER`; slow providers such as DeepSeek are blocked at startup) |
 | Observability | Sentry (PII scrubber), CloudWatch Metrics (`TurnLatencyMs`, `VoiceSeconds`), Laravel Telescope (dev) |

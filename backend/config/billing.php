@@ -51,13 +51,15 @@ return [
     | Free Allowance
     |--------------------------------------------------------------------------
     |
-    | A new learner gets 15 minutes of voice practice without a card. The
-    | allowance is lifetime, not monthly: it is the trial, and it is consumed by
-    | the same `voice_sessions.duration_sec` the paid allowance uses.
+    | A new learner gets 30 minutes of voice practice every month without a
+    | card. The window is the learner's own monthly anniversary (the day they
+    | registered), not the calendar month, so the first month is never short.
+    | The allowance is consumed by the same `voice_sessions.duration_sec` the
+    | paid allowance uses.
     |
     */
 
-    'free_seconds' => (int) env('BILLING_FREE_SECONDS', 900),
+    'free_seconds' => (int) env('BILLING_FREE_SECONDS', 1800),
 
     /*
     |--------------------------------------------------------------------------

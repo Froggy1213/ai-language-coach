@@ -41,7 +41,7 @@ class VoiceAllowanceTest extends TestCase
         parent::setUp();
 
         config([
-            'billing.free_seconds' => 900,
+            'billing.free_seconds' => 1800,
             'voice.livekit.url' => 'wss://livekit.test',
             'voice.livekit.public_url' => null,
             'voice.livekit.api_key' => 'test-api-key',
@@ -61,32 +61,46 @@ class VoiceAllowanceTest extends TestCase
         ]);
     }
 
-    public function test_a_new_learner_has_fifteen_free_minutes(): void
+    public function test_a_new_learner_has_thirty_free_minutes_every_month(): void
     {
         $allowance = $this->allowance();
 
         $this->assertSame('free', $allowance->planCode);
-        $this->assertSame(900, $allowance->includedSeconds);
+        $this->assertSame(1800, $allowance->includedSeconds);
         $this->assertSame(0, $allowance->usedSeconds);
-        $this->assertSame(15, $allowance->remainingMinutes());
-        $this->assertNull($allowance->resetsAt);
+        $this->assertSame(30, $allowance->remainingMinutes());
+        $this->assertNotNull($allowance->resetsAt);
         $this->assertFalse($allowance->hasSubscription);
     }
 
     public function test_a_free_session_is_refused_once_the_allowance_is_spent(): void
     {
-        $this->sessions(10, 90);
+        $this->sessions(20, 90);
         Sanctum::actingAs($this->user);
 
         $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $this->card->getKey()]);
 
         $this->assertSame('VOICE_MINUTES_EXHAUSTED', $response->json('errors.0.extensions.code'));
-        $this->assertSame(900, $response->json('errors.0.extensions.usedSeconds'));
-        $this->assertSame(900, $response->json('errors.0.extensions.includedSeconds'));
-        $this->assertNull($response->json('errors.0.extensions.resetsAt'));
+        $this->assertSame(1800, $response->json('errors.0.extensions.usedSeconds'));
+        $this->assertSame(1800, $response->json('errors.0.extensions.includedSeconds'));
+        $this->assertNotNull($response->json('errors.0.extensions.resetsAt'));
 
         // The refusal happens before LiveKit is touched: no room, no agent.
         Http::assertNothingSent();
+    }
+
+    public function test_only_sessions_inside_the_free_monthly_window_count(): void
+    {
+        // Last month's free minutes are last month's: spending the whole 30
+        // minutes then must not leave this month's allowance empty.
+        VoiceSession::factory()->for($this->user)->for($this->card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'duration_sec' => 1800,
+            'created_at' => now()->subMonthNoOverflow(),
+        ]);
+
+        $this->assertSame(0, $this->allowance()->usedSeconds);
+        $this->assertSame(30, $this->allowance()->remainingMinutes());
     }
 
     public function test_a_paid_plan_raises_the_allowance_to_its_monthly_minutes(): void

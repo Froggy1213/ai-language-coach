@@ -55,7 +55,7 @@ export type BillingOverview = {
   /** `free` when the learner has no subscription. */
   planCode: Scalars['String']['output'];
   remainingMinutes: Scalars['Int']['output'];
-  /** When the monthly allowance resets; null on the lifetime free allowance. */
+  /** When the monthly allowance resets. Both the free and the paid allowance are monthly, so this is always set. */
   resetsAt?: Maybe<Scalars['DateTime']['output']>;
   /** Stripe subscription status; null on the free plan. */
   status?: Maybe<Scalars['String']['output']>;

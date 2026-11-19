@@ -238,13 +238,13 @@ Pin the previous image tag in `/opt/livekit/docker-compose.yml` on the EC2 insta
 | Component | Provider / Resource | Unit Cost | Cost per Minute |
 |---|---|---|---|
 | **STT** | Deepgram Nova-2 streaming | $0.0043 / min | $0.00430 |
-| **TTS** | Cartesia Sonic streaming | $0.075 / 1k chars (~500 chars/min) | $0.00375 |
+| **TTS** | Deepgram Aura-2 streaming | $0.030 / 1k chars (~500 chars/min) | $0.01500 |
 | **Dialogue LLM** | DeepSeek-V3 conversational | ~$0.20 / 1M tokens (~400 tok/min) | $0.00008 |
 | **Async Analysis** | DeepSeek-V3 post-room batch | ~$0.0005 / session (~10 min call) | $0.00005 |
 | **LiveKit EC2** | `t4g.medium` amortized capacity | $0.0336 / hour / concurrent slots | $0.00056 |
 | **Voice Agent Fargate** | 1 vCPU, 2GB task (3 calls/task) | $0.048 / hour / 3 slots | $0.00026 |
 | **Egress & Storage** | AWS S3 + Data Transfer | ~$0.09 / GB media data | $0.00010 |
-| **Total Variable** | | | **~$0.0091 / active min** |
+| **Total Variable** | | | **~$0.0204 / active min** |
 
 ### Fixed Monthly Baseline (AWS Infrastructure)
 | Resource | Specification | Estimated Monthly Cost |

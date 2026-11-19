@@ -8,10 +8,10 @@ use Carbon\CarbonImmutable;
 /**
  * What a learner may spend on voice practice right now.
  *
- * The free allowance is lifetime and has no reset date; a paid allowance is
- * monthly and resets on the subscription's anchor day, even when Stripe charges
- * yearly. Both are expressed the same way so the UI and the guard read one
- * shape.
+ * The free allowance and a paid allowance are both monthly: free resets on the
+ * learner's registration anniversary, paid on the subscription's anchor day,
+ * even when Stripe charges yearly. Both are expressed the same way so the UI and
+ * the guard read one shape.
  */
 final readonly class VoiceAllowance
 {

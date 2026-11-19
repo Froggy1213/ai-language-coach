@@ -9,7 +9,7 @@ lessons (`/lesson/{cardId}`) and role-play scenarios (`/talk/{code}`).
 - **WebRTC voice streaming** via LiveKit Server.
 - **STT**: Deepgram Nova-2 streaming speech-to-text.
 - **LLM**: DeepSeek-V3 or OpenAI conversational response generation tailored to the learner's CEFR level and the scene — a lesson's grammar point and task, or a scenario's role-play brief.
-- **TTS**: Cartesia Sonic or Deepgram Aura text-to-speech.
+- **TTS**: Deepgram Aura-2 text-to-speech, with Cartesia Sonic as the multilingual fallback.
 - **Backend lifecycle**:
   - Receives `job.metadata` from Laravel and selects the scene from `kind` (see [Session metadata and prompts](#session-metadata-and-prompts)).
   - Reports fatal stream errors to `POST /api/internal/sessions/{id}/fail` with `X-Internal-Secret`.

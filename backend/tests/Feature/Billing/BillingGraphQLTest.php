@@ -34,7 +34,7 @@ class BillingGraphQLTest extends TestCase
         config([
             'billing.secret' => 'sk_test_fake',
             'billing.frontend_url' => 'https://app.test',
-            'billing.free_seconds' => 900,
+            'billing.free_seconds' => 1800,
             'billing.plans.entry.prices.month.stripe_price' => 'price_entry_month',
             'billing.plans.entry.prices.year.stripe_price' => 'price_entry_year',
             'billing.plans.standard.prices.month.stripe_price' => 'price_standard_month',
@@ -76,7 +76,7 @@ class BillingGraphQLTest extends TestCase
         ')->assertGraphQLErrorMessage('Unauthenticated.');
     }
 
-    public function test_a_free_learner_sees_the_lifetime_allowance(): void
+    public function test_a_free_learner_sees_the_monthly_allowance(): void
     {
         Sanctum::actingAs(User::factory()->create());
 
@@ -84,10 +84,10 @@ class BillingGraphQLTest extends TestCase
 
         $response->assertGraphQLErrorFree();
         $this->assertSame('free', $response->json('data.billingOverview.planCode'));
-        $this->assertSame(15, $response->json('data.billingOverview.includedMinutes'));
+        $this->assertSame(30, $response->json('data.billingOverview.includedMinutes'));
         $this->assertSame(0, $response->json('data.billingOverview.usedMinutes'));
-        $this->assertSame(15, $response->json('data.billingOverview.remainingMinutes'));
-        $this->assertNull($response->json('data.billingOverview.resetsAt'));
+        $this->assertSame(30, $response->json('data.billingOverview.remainingMinutes'));
+        $this->assertNotNull($response->json('data.billingOverview.resetsAt'));
         $this->assertFalse($response->json('data.billingOverview.hasSubscription'));
         $this->assertFalse($response->json('data.billingOverview.canManage'));
     }

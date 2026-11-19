@@ -318,6 +318,19 @@ class TestTtsVoiceFollowsTheSessionLanguage(unittest.TestCase):
             started.start()
             self.addCleanup(started.stop)
 
+    def test_deepgram_wins_when_both_tts_keys_are_present(self):
+        # Deepgram is already the recogniser's vendor: one account, one key, one
+        # catalog. Cartesia stays as the multilingual fallback, not the default.
+        with patch.dict(
+            os.environ,
+            {"DEEPGRAM_API_KEY": "dg-key", "CARTESIA_API_KEY": "cart-key"},
+            clear=True,
+        ):
+            create_tts({"target_language": "en"})
+
+        self.deepgram.TTS.assert_called_once()
+        self.cartesia.TTS.assert_not_called()
+
     def test_cartesia_uses_one_multilingual_voice_for_every_language(self):
         with patch.dict(os.environ, {"CARTESIA_API_KEY": "cart-key"}, clear=True):
             create_tts({"target_language": "de"})

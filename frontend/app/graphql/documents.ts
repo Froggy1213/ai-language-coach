@@ -452,8 +452,8 @@ export const BILLING_PLANS_QUERY = /* GraphQL */ `
 `
 
 /**
- * The learner's plan and the current monthly allowance. `resetsAt` is null on
- * the lifetime free allowance, which is what the settings block keys on.
+ * The learner's plan and the current monthly allowance. Both the free and the
+ * paid allowance reset monthly, so `resetsAt` is always set.
  */
 export const BILLING_OVERVIEW_QUERY = /* GraphQL */ `
   query BillingOverview {

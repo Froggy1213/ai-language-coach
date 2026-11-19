@@ -74,13 +74,9 @@ const statusLabel = computed(() => {
   }
 })
 
-/**
- * Free minutes are a lifetime allowance, not a monthly one (the API leaves
- * `resetsAt` null); a subscriber's window resets monthly.
- */
-const usageLabel = computed(() =>
-  overview.value?.resetsAt ? copy.usageLabel : copy.usageLifetime,
-)
+// The free and the paid allowance are both monthly, so this number is always
+// this month's usage.
+const usageLabel = copy.usageLabel
 
 const paymentTrouble = computed(() =>
   overview.value?.status === 'past_due' || overview.value?.status === 'unpaid',

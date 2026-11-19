@@ -37,7 +37,7 @@ type BillingOverview {
 
     remainingMinutes: Int!
 
-    "When the monthly allowance resets; null on the lifetime free allowance."
+    "When the monthly allowance resets. Both the free and the paid allowance are monthly, so this is always set."
     resetsAt: DateTime
 
     "End of the period Stripe has already charged for."

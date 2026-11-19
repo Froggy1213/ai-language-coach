@@ -98,6 +98,12 @@ class TurnMetricsTracker:
         info = extract_metric_info(m)
         speech_id = info["speech_id"]
         if not speech_id:
+            # Deepgram's TTSMetrics carry no speech_id (Cartesia's do), so the
+            # first audio chunk of a reply cannot be correlated by id. Attach it
+            # to the newest turn still waiting for its first chunk — that is the
+            # reply it belongs to.
+            if info["tts_first_chunk_sec"] is not None:
+                self._attach_uncorrelated_tts(info["tts_first_chunk_sec"])
             return
 
         # Finding 5 & 6: If this turn has already completed and purged, ignore subsequent
@@ -164,6 +170,19 @@ class TurnMetricsTracker:
                 self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
             elif speech_id not in self._flush_tasks:
                 self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
+
+    def _attach_uncorrelated_tts(self, ttfb: float) -> None:
+        """Give a `speech_id`-less TTS metric to the newest turn awaiting audio."""
+        for turn in reversed(list(self.pending_turns.values())):
+            if turn["llm_first_token_sec"] is None:
+                continue
+            if turn["tts_first_chunk_sec"] is not None:
+                continue
+
+            turn["tts_first_chunk_sec"] = float(ttfb)
+            self._cancel_delayed_flush(turn["turn_id"])
+            self._create_background_task(self._dispatch_turn(turn["turn_id"]))
+            return
 
     def _schedule_delayed_flush(self, speech_id: str, delay: Optional[float] = None) -> None:
         if speech_id in self._flush_tasks:

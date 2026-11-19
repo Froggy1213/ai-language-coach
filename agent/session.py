@@ -315,6 +315,16 @@ def _subscribe_turn_metrics(session: Any, tracker: TurnMetricsTracker) -> None:
         session.on(event_name)(_on_user_speech_event)
 
 
+# A TTS provider reports `TTSMetrics` only after the reply has been synthesized,
+# not on its first audio chunk: Deepgram Aura lands about 3.3 s into a six-second
+# reply. The tracker's default two-second flush would send the turn before that
+# metric exists, and the TTS stage would silently drop out of the latency record.
+# Five seconds covers the observed synthesis; the drain gets the same headroom so
+# the last turn still leaves when the room closes.
+TURN_FLUSH_DELAY_SECONDS = 5.0
+TURN_DRAIN_TIMEOUT_SECONDS = 6.0
+
+
 async def entrypoint(ctx: JobContext):
     room_name = getattr(getattr(ctx, "room", None), "name", None) or "unknown"
     logger.info("Starting voice agent job for room: %s", room_name)
@@ -406,7 +416,9 @@ async def entrypoint(ctx: JobContext):
                     turn_handling=build_turn_handling(),
                 )
 
-                tracker = TurnMetricsTracker(session_id=session_id)
+                tracker = TurnMetricsTracker(
+                    session_id=session_id, flush_delay=TURN_FLUSH_DELAY_SECONDS
+                )
                 _subscribe_turn_metrics(session, tracker)
 
                 async def _cleanup_tracker() -> None:
@@ -416,7 +428,7 @@ async def entrypoint(ctx: JobContext):
                     # shutdown callbacks run, and the turn still in flight is the
                     # last thing the learner said.
                     try:
-                        await tracker.drain()
+                        await tracker.drain(timeout=TURN_DRAIN_TIMEOUT_SECONDS)
                     except Exception as exc:
                         logger.warning("Could not flush pending turn metrics: %s", exc)
                         tracker.close()

@@ -58,7 +58,12 @@ def create_stt(metadata: Dict[str, Any]):
 # the Deepgram ids below were read off the account's own `/v1/models` listing
 # rather than guessed.
 CARTESIA_VOICES: Dict[str, str] = {
-    "en": "248be419-c632-4f23-adf1-5324ed7dbf1d",
+    # "Jessica - Clear Communicator" from the account's own `GET /voices`
+    # listing. The previous id (248be419-…) was retired from the catalog:
+    # synthesis then fails with "Voice not found" and the learner hears nothing,
+    # because a failing TTS is a silent agent rather than a loud error. When the
+    # voice disappears again, read the replacement off that listing.
+    "en": "25d7abcb-4d6d-4aca-adce-8a1c85620c8b",
 }
 DEEPGRAM_AURA_VOICES: Dict[str, str] = {
     "en": "aura-2-thalia-en",
@@ -91,6 +96,20 @@ def create_tts(metadata: Optional[Dict[str, Any]] = None):
     deepgram_key = _env_str("DEEPGRAM_API_KEY", None)
     openai_key = _env_str("OPENAI_API_KEY", None)
 
+    # Deepgram comes first on purpose. It is already the recogniser's vendor, so
+    # the learner's speech runs through one account, one key and one catalog to
+    # keep valid; Cartesia brought a second of each and its voice catalog is the
+    # thing that silently deleted a voice out from under the agent. Aura voices
+    # are per language rather than one multilingual voice, which costs nothing
+    # while `config/languages.php` supports English only — Cartesia stays as the
+    # fallback for the day a second language needs the same voice.
+    if deepgram_key and HAS_PLUGINS and deepgram is not None:
+        return deepgram.TTS(
+            model=_env_per_language(
+                "DEEPGRAM_TTS_MODEL", language, DEEPGRAM_AURA_VOICES.get(language, DEEPGRAM_AURA_VOICES["en"])
+            )
+        )
+
     if cartesia_key and HAS_CARTESIA:
         return cartesia.TTS(
             # "sonic-3" is the plugin's current default; "sonic-english" was
@@ -101,13 +120,6 @@ def create_tts(metadata: Optional[Dict[str, Any]] = None):
                 "CARTESIA_VOICE", language, CARTESIA_VOICES.get(language, CARTESIA_VOICES["en"])
             ),
             api_key=cartesia_key,
-        )
-
-    if deepgram_key and HAS_PLUGINS and deepgram is not None:
-        return deepgram.TTS(
-            model=_env_per_language(
-                "DEEPGRAM_TTS_MODEL", language, DEEPGRAM_AURA_VOICES.get(language, DEEPGRAM_AURA_VOICES["en"])
-            )
         )
 
     if openai_key and HAS_OPENAI:
