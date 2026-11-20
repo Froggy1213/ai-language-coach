@@ -104,11 +104,11 @@ COPY . .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 4 — runtime: nginx + php-fpm under supervisord, listening on :8080.
+# Stage 4 — runtime-base: shared application filesystem for web and worker roles.
 # ---------------------------------------------------------------------------
-FROM php-base AS runtime
+FROM php-base AS runtime-base
 
-RUN apk add --no-cache nginx supervisor
+RUN apk add --no-cache nginx supervisor su-exec
 
 WORKDIR /var/www/html
 
@@ -127,6 +127,11 @@ COPY --from=assets /app/public/build /var/www/html/public/build
 # checkout can easily carry files that are unreadable to www-data (a 0600 file
 # makes Laravel fail to load that config file at boot). Normalising here keeps the
 # image identical no matter which machine or CI runner built it.
+#
+# The entrypoint keeps `supervisord` (which spawns php-fpm workers as www-data and
+# nginx workers as nginx) working as PID 1 while dropping privileges to `www-data`
+# whenever the image is invoked directly for a worker or CLI command (`horizon`,
+# `reverb:start`, `schedule:work`, `migrate`).
 RUN mkdir -p \
         storage/framework/cache/data \
         storage/framework/sessions \
@@ -142,7 +147,59 @@ RUN mkdir -p \
     && chmod -R a+rX /var/www/html \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R ug+rwX storage bootstrap/cache \
-    && chown -R nginx:nginx /var/lib/nginx
+    && chown -R nginx:nginx /var/lib/nginx \
+    && printf '%s\n' \
+        '#!/bin/sh' \
+        'set -e' \
+        'if [ "$(id -u)" -eq 0 ] && [ "${1:-}" != "supervisord" ]; then' \
+        '    exec su-exec www-data "$@"' \
+        'fi' \
+        'exec "$@"' \
+        > /usr/local/bin/docker-entrypoint.sh \
+    && chmod 755 /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# ---------------------------------------------------------------------------
+# Dedicated non-root worker targets (`--target horizon|reverb|scheduler`).
+# Placed before the final `runtime` stage so a default `docker build ./backend`
+# continues to produce the web/API image while both targeted builds and
+# single-image worker containers run as `www-data` instead of `root`.
+# ---------------------------------------------------------------------------
+FROM runtime-base AS horizon
+
+USER www-data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD php artisan horizon:status || exit 1
+
+CMD ["php", "artisan", "horizon"]
+
+FROM runtime-base AS reverb
+
+USER www-data
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD php -r 'exit(@fsockopen("127.0.0.1", 8081) ? 0 : 1);'
+
+CMD ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8081"]
+
+FROM runtime-base AS scheduler
+
+USER www-data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep -f 'artisan schedule:work' > /dev/null || exit 1
+
+CMD ["php", "artisan", "schedule:work"]
+
+# ---------------------------------------------------------------------------
+# Stage 5 — runtime (default build target): nginx + php-fpm under supervisord
+# on :8080, with automatic privilege drop to `www-data` for worker commands.
+# ---------------------------------------------------------------------------
+FROM runtime-base AS runtime
 
 EXPOSE 8080
 

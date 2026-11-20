@@ -4,6 +4,7 @@ namespace Tests\Feature\Support;
 
 use App\Providers\AppServiceProvider;
 use App\Support\ProductionSanityCheck;
+use Aws\S3\S3Client;
 use Nuwave\Lighthouse\Schema\TypeRegistry;
 use RuntimeException;
 use Tests\TestCase;
@@ -265,6 +266,73 @@ class ProductionSanityCheckTest extends TestCase
         $this->expectExceptionMessage('APP_DEBUG');
 
         $provider->boot($typeRegistry);
+    }
+
+    /**
+     * Verify that S3Client falls back to the AWS default credential chain when static keys are empty.
+     */
+    public function test_s3_client_uses_default_credential_chain_when_static_keys_are_empty(): void
+    {
+        $envVars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN'];
+        $previous = [];
+        foreach ($envVars as $var) {
+            $previous[$var] = [
+                'getenv' => getenv($var),
+                'env_exists' => array_key_exists($var, $_ENV),
+                'env' => $_ENV[$var] ?? null,
+                'server_exists' => array_key_exists($var, $_SERVER),
+                'server' => $_SERVER[$var] ?? null,
+            ];
+        }
+
+        config([
+            'filesystems.disks.s3.key' => '',
+            'filesystems.disks.s3.secret' => '',
+            'filesystems.disks.s3.region' => 'ap-northeast-1',
+        ]);
+
+        try {
+            putenv('AWS_ACCESS_KEY_ID=task-role-env-key');
+            putenv('AWS_SECRET_ACCESS_KEY=task-role-env-secret');
+            putenv('AWS_SESSION_TOKEN');
+            $_ENV['AWS_ACCESS_KEY_ID'] = 'task-role-env-key';
+            $_ENV['AWS_SECRET_ACCESS_KEY'] = 'task-role-env-secret';
+            $_SERVER['AWS_ACCESS_KEY_ID'] = 'task-role-env-key';
+            $_SERVER['AWS_SECRET_ACCESS_KEY'] = 'task-role-env-secret';
+            unset($_ENV['AWS_SESSION_TOKEN'], $_SERVER['AWS_SESSION_TOKEN']);
+
+            $this->app->forgetInstance(S3Client::class);
+
+            /** @var S3Client $client */
+            $client = $this->app->make(S3Client::class);
+            $credentials = $client->getCredentials()->wait();
+
+            $this->assertSame('task-role-env-key', $credentials->getAccessKeyId());
+            $this->assertSame('task-role-env-secret', $credentials->getSecretKey());
+        } finally {
+            foreach ($envVars as $var) {
+                $state = $previous[$var];
+                if ($state['getenv'] === false) {
+                    putenv($var);
+                } else {
+                    putenv($var.'='.$state['getenv']);
+                }
+
+                if ($state['env_exists']) {
+                    $_ENV[$var] = $state['env'];
+                } else {
+                    unset($_ENV[$var]);
+                }
+
+                if ($state['server_exists']) {
+                    $_SERVER[$var] = $state['server'];
+                } else {
+                    unset($_SERVER[$var]);
+                }
+            }
+
+            $this->app->forgetInstance(S3Client::class);
+        }
     }
 
     /**

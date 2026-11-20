@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { level as copy } from '~/constants/strings'
 import { formatClock } from '~/utils/format'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import type { Assessment } from '~/types/graphql'
 import type { LatestAssessment } from '~/types/view-models'
 
@@ -42,6 +43,7 @@ const stopping = ref(false)
 const pronunciation = ref<LatestAssessment['pronunciation']>(null)
 const storedPronunciation = computed(() => user.value?.latestAssessment?.pronunciation ?? null)
 const hasSubmittedNew = ref(false)
+const pendingAssessmentId = ref<string | null>(null)
 const displayedPronunciation = computed(() =>
   hasSubmittedNew.value ? pronunciation.value : (pronunciation.value ?? storedPronunciation.value),
 )
@@ -169,6 +171,22 @@ async function finishRecording(): Promise<void> {
   await upload(recording, contentType)
 }
 
+function applyAssessmentResult(assessment: Pick<Assessment, 'status' | 'cefrLevel' | 'pronunciation'>): void {
+  if (assessment.status === 'failed') {
+    waitingFailed.value = true
+    stopListening?.()
+    stopListening = null
+    return
+  }
+
+  assessedLevel.value = assessment.cefrLevel ?? null
+  pronunciation.value = assessment.pronunciation ?? null
+  stage.value = 'done'
+  stopListening?.()
+  stopListening = null
+  void refresh()
+}
+
 async function upload(recording: Blob, contentType: string): Promise<void> {
   if (aborted) {
     return
@@ -176,6 +194,7 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
 
   stage.value = 'uploading'
   hasSubmittedNew.value = true
+  pendingAssessmentId.value = null
   error.value = null
   waitingFailed.value = false
   // A re-recording replaces the previous result: leaving the old words on screen
@@ -189,29 +208,31 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       throw new Error(copy.sessionExpired)
     }
 
+    const previousAssessmentId = currentUser.latestAssessment?.id ?? null
+
     // Subscribe first: the analysis can finish before the mutation's response is
     // even rendered.
-    stopListening = await onReady(currentUser.id, (assessment: Assessment) => {
-      if (aborted) {
-        return
-      }
+    stopListening = await onReady(
+      currentUser.id,
+      (assessment: Assessment) => {
+        if (aborted) {
+          return
+        }
 
-      if (assessment.status === 'failed') {
-        waitingFailed.value = true
-        stopListening?.()
-        stopListening = null
-        return
-      }
+        if (pendingAssessmentId.value && assessment.id !== pendingAssessmentId.value) {
+          return
+        }
 
-      assessedLevel.value = assessment.cefrLevel ?? null
-      // `assessmentReady` selects the same block `me.latestAssessment` does, so
-      // the two shapes are the same one; only its optionality differs.
-      pronunciation.value = assessment.pronunciation ?? null
-      stage.value = 'done'
-      stopListening?.()
-      stopListening = null
-      void refresh()
-    })
+        if (!pendingAssessmentId.value && previousAssessmentId && assessment.id === previousAssessmentId) {
+          return
+        }
+
+        applyAssessmentResult(assessment)
+      },
+      {
+        onReconnect: () => checkNow(),
+      },
+    )
 
     if (aborted) {
       stopListening?.()
@@ -219,9 +240,15 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       return
     }
 
-    await submit(recording, contentType)
+    const created = await submit(recording, contentType)
+    pendingAssessmentId.value = created.id
 
     if (aborted) {
+      return
+    }
+
+    if (created.status === 'done' || created.status === 'failed') {
+      applyAssessmentResult(created)
       return
     }
 
@@ -236,22 +263,46 @@ async function upload(recording: Blob, contentType: string): Promise<void> {
       return
     }
 
-    error.value = failure instanceof Error ? failure.message : copy.sendFailed
+    error.value = graphQLErrorMessageFor(failure, {
+      messages: {
+        'An assessment is already being processed.': copy.alreadyProcessing,
+      },
+      fallback: copy.sendFailed,
+    })
     stage.value = 'ready'
   }
 }
 
 /** Manual fallback: the socket may be down, but the level may already be saved. */
-async function checkNow(): Promise<void> {
+async function checkNow(): Promise<boolean> {
   await refresh()
 
-  if (user.value?.latestAssessment?.status === 'done' && user.value.currentLevel) {
-    pronunciation.value = user.value.latestAssessment.pronunciation ?? null
-    assessedLevel.value = user.value.currentLevel
+  const latest = user.value?.latestAssessment
+  if (!latest) {
+    return false
+  }
+
+  if (pendingAssessmentId.value && latest.id !== pendingAssessmentId.value) {
+    return false
+  }
+
+  if (latest.status === 'failed') {
+    waitingFailed.value = true
+    stopListening?.()
+    stopListening = null
+    return true
+  }
+
+  if (latest.status === 'done' && (latest.cefrLevel || user.value?.currentLevel)) {
+    pronunciation.value = latest.pronunciation ?? null
+    assessedLevel.value = latest.cefrLevel ?? user.value?.currentLevel ?? null
     stage.value = 'done'
     stopListening?.()
     stopListening = null
+    return true
   }
+
+  return false
 }
 
 onBeforeUnmount(() => {
@@ -282,7 +333,7 @@ onBeforeUnmount(() => {
   chunks = []
 })
 
-const steps = ['録音の同意', '録音', '判定'] as const
+const steps = copy.steps
 
 const activeStep = computed(() => {
   if (stage.value === 'consent') {

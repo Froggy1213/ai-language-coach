@@ -250,7 +250,7 @@ export function useConversation(options: UseConversationOptions = {}) {
       syncTracks()
     }
 
-    if (status === 'ended' || status === 'error') {
+    if (status === 'ended' || status === 'error' || status === 'idle') {
       stopAnalysis()
     }
   })

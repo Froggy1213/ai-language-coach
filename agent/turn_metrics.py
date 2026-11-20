@@ -183,6 +183,19 @@ def build_cloudwatch_turn_log(
     }
 
 
+def _metric_started_at(m: Any) -> Optional[float]:
+    """Best-effort wall-clock start time (seconds) for a LiveKit metric, if present."""
+    ts = getattr(m, "timestamp", None)
+    dur = getattr(m, "duration", None)
+    if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+        return None
+    if not isinstance(dur, (int, float)) or isinstance(dur, bool):
+        return None
+    if ts <= 0 or dur < 0:
+        return None
+    return float(ts) - float(dur)
+
+
 def extract_metric_info(m: Any) -> Dict[str, Any]:
     """
     Defensively extracts latency numbers and identifiers from LiveKit metric objects
@@ -191,6 +204,8 @@ def extract_metric_info(m: Any) -> Dict[str, Any]:
     """
     metric_type = str(getattr(m, "type", "") or type(m).__name__).lower()
     speech_id = getattr(m, "speech_id", None)
+    raw_cancelled = getattr(m, "cancelled", False)
+    cancelled = bool(raw_cancelled) if isinstance(raw_cancelled, (bool, int)) else False
 
     info: Dict[str, Any] = {
         "metric_type": metric_type,
@@ -198,6 +213,8 @@ def extract_metric_info(m: Any) -> Dict[str, Any]:
         "stt_final_sec": None,
         "llm_first_token_sec": None,
         "tts_first_chunk_sec": None,
+        "cancelled": cancelled,
+        "started_at": _metric_started_at(m),
     }
 
     # EOU metrics / STT metrics
@@ -241,10 +258,13 @@ def extract_metric_info(m: Any) -> Dict[str, Any]:
             info["stt_final_sec"] = max(delays)
 
     # LLM metrics: ttft (time to first token)
+    # Preemptive generation cancels speculative LLM calls whenever the learner keeps
+    # talking; ignore cancelled LLMMetrics so they never create phantom turns.
     if "llm" in metric_type or hasattr(m, "ttft") or type(m).__name__ == "LLMMetrics":
-        ttft = getattr(m, "ttft", None)
-        if ttft is not None and ttft >= 0:
-            info["llm_first_token_sec"] = float(ttft)
+        if not cancelled:
+            ttft = getattr(m, "ttft", None)
+            if ttft is not None and ttft >= 0:
+                info["llm_first_token_sec"] = float(ttft)
 
     # TTS metrics: ttfb (time to first byte)
     if "tts" in metric_type or hasattr(m, "ttfb") or type(m).__name__ == "TTSMetrics":

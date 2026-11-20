@@ -10,6 +10,7 @@ policy for it.
 """
 
 import asyncio
+import inspect
 import json
 import os
 from typing import Any, Dict, NamedTuple, Optional
@@ -23,6 +24,60 @@ if __package__:  # imported as `agent.backend`
     from .observability import capture_exception, logger
 else:  # run as a flat script: `python agent.py`, the container layout, the tests
     from observability import capture_exception, logger
+
+
+TURN_REPORT_MAX_RETRIES = 2
+TURN_REPORT_RETRY_BASE_DELAY = 0.25
+
+_http_session: Optional[Any] = None
+_http_session_loop: Optional[asyncio.AbstractEventLoop] = None
+_http_session_aiohttp: Optional[Any] = None
+
+
+def _get_http_session() -> Any:
+    """
+    Return the process/session-wide shared `aiohttp.ClientSession`, creating a
+    new one when none exists, when it was closed, or when the event loop /
+    `aiohttp` reference changed (such as across unit tests).
+    """
+    global _http_session, _http_session_loop, _http_session_aiohttp
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if (
+        _http_session is None
+        or getattr(_http_session, "closed", False) is True
+        or _http_session_loop is not loop
+        or _http_session_aiohttp is not aiohttp
+    ):
+        _http_session = aiohttp.ClientSession()
+        _http_session_loop = loop
+        _http_session_aiohttp = aiohttp
+
+    return _http_session
+
+
+async def close_http_session() -> None:
+    """Close and clear the shared `aiohttp.ClientSession`, if one is open."""
+    global _http_session, _http_session_loop, _http_session_aiohttp
+    session = _http_session
+    _http_session = None
+    _http_session_loop = None
+    _http_session_aiohttp = None
+    if session is None:
+        return
+    if getattr(session, "closed", False) is True:
+        return
+    close_fn = getattr(session, "close", None)
+    if callable(close_fn):
+        try:
+            res = close_fn()
+            if inspect.isawaitable(res):
+                await res
+        except Exception as exc:
+            logger.debug("Error closing shared backend HTTP session: %s", exc)
 
 
 class _InternalResponse(NamedTuple):
@@ -89,39 +144,39 @@ async def _post_internal(
         "Accept": "application/json",
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            endpoint,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=5),
-        ) as response:
-            status = response.status
-            text = ""
-            data = None
+    session = _get_http_session()
+    async with session.post(
+        endpoint,
+        json=payload,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=5),
+    ) as response:
+        status = response.status
+        text = ""
+        data = None
+        try:
+            raw_text = await response.text()
+            text = raw_text if isinstance(raw_text, str) else str(raw_text)
+        except Exception:
+            pass
+
+        if hasattr(response, "json") and callable(response.json):
             try:
-                raw_text = await response.text()
-                text = raw_text if isinstance(raw_text, str) else str(raw_text)
+                raw_json = await response.json()
+                if isinstance(raw_json, dict):
+                    data = raw_json
             except Exception:
                 pass
 
-            if hasattr(response, "json") and callable(response.json):
-                try:
-                    raw_json = await response.json()
-                    if isinstance(raw_json, dict):
-                        data = raw_json
-                except Exception:
-                    pass
+        if data is None and text:
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except Exception:
+                pass
 
-            if data is None and text:
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict):
-                        data = parsed
-                except Exception:
-                    pass
-
-            return _InternalResponse(status=status, data=data, text=text)
+        return _InternalResponse(status=status, data=data, text=text)
 
 
 async def report_session_failure(session_id: Optional[int], reason: str) -> None:
@@ -207,46 +262,89 @@ async def report_session_turn(session_id: Optional[int], payload: Dict[str, Any]
     """
     Reports per-turn latency and transcript to Laravel backend (POST /api/internal/sessions/{id}/turns).
     Guarded by VOICE_INTERNAL_SECRET.
+    Retries transient 5xx and network/timeout errors with short bounded backoff; does not retry 4xx.
     Never raises exceptions: failures are logged as warnings and do not interrupt conversation.
     """
     if not session_id:
         return
 
     path = f"/api/internal/sessions/{session_id}/turns"
+    turn_id = payload.get("turn_id")
 
-    try:
-        response = await _post_internal(path, payload, log_context="turn metrics")
-        if response is None:
-            return
+    for attempt in range(TURN_REPORT_MAX_RETRIES + 1):
+        try:
+            response = await _post_internal(path, payload, log_context="turn metrics")
+            if response is None:
+                return
 
-        if response.status == 200:
-            logger.info(
-                "Turn %s latency reported to backend for session %s: HTTP %s",
-                payload.get("turn_id"),
-                session_id,
-                response.status,
-            )
-        else:
-            body = response.text
+            status = response.status
+            if 200 <= status < 300:
+                logger.info(
+                    "Turn %s latency reported to backend for session %s: HTTP %s",
+                    turn_id,
+                    session_id,
+                    status,
+                )
+                return
+
+            if status >= 500:
+                if attempt < TURN_REPORT_MAX_RETRIES:
+                    delay = TURN_REPORT_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "Backend error reporting turn %s for session %s: HTTP %s; retrying in %.2fs...",
+                        turn_id,
+                        session_id,
+                        status,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(
+                    "Backend rejected turn %s for session %s after %d attempts: HTTP %s: %s",
+                    turn_id,
+                    session_id,
+                    attempt + 1,
+                    status,
+                    response.text,
+                )
+                return
+
+            # 4xx or other non-5xx responses are deterministic rejections; do not retry.
             logger.warning(
                 "Backend rejected turn %s for session %s: HTTP %s: %s",
-                payload.get("turn_id"),
+                turn_id,
                 session_id,
-                response.status,
-                body,
+                status,
+                response.text,
             )
-    except Exception as exc:
-        logger.warning(
-            "Failed to report turn %s for session %s to backend: %s",
-            payload.get("turn_id"),
-            session_id,
-            exc,
-        )
+            return
+        except Exception as exc:
+            if attempt < TURN_REPORT_MAX_RETRIES:
+                delay = TURN_REPORT_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Retrying turn %s report for session %s (attempt %d/%d) after error: %s",
+                    turn_id,
+                    session_id,
+                    attempt + 1,
+                    TURN_REPORT_MAX_RETRIES + 1,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning(
+                "Failed to report turn %s for session %s to backend: %s",
+                turn_id,
+                session_id,
+                exc,
+            )
 
 
 __all__ = [
+    "TURN_REPORT_MAX_RETRIES",
+    "TURN_REPORT_RETRY_BASE_DELAY",
     "_InternalResponse",
     "_post_internal",
+    "close_http_session",
     "report_session_failure",
     "report_session_turn",
 ]

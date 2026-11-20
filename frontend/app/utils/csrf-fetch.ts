@@ -12,8 +12,8 @@ export function readCookie(name: string): string | null {
 
 let csrfCookieRequest: Promise<unknown> | null = null
 
-async function ensureCsrfCookie(backendUrl: string): Promise<void> {
-  if (readCookie(CSRF_COOKIE)) {
+async function ensureCsrfCookie(backendUrl: string, force = false): Promise<void> {
+  if (!force && readCookie(CSRF_COOKIE)) {
     return
   }
 
@@ -28,6 +28,19 @@ async function ensureCsrfCookie(backendUrl: string): Promise<void> {
   await csrfCookieRequest
 }
 
+function buildCsrfHeaders(initHeaders?: HeadersInit): Headers {
+  const headers = new Headers(initHeaders)
+  headers.set('Accept', 'application/json')
+
+  const token = readCookie(CSRF_COOKIE)
+
+  if (token) {
+    headers.set('X-XSRF-TOKEN', token)
+  }
+
+  return headers
+}
+
 /**
  * Sanctum guards the API with a session cookie, which turns every request into
  * a double submit: the browser has to hold the `XSRF-TOKEN` cookie first and
@@ -35,6 +48,10 @@ async function ensureCsrfCookie(backendUrl: string): Promise<void> {
  * request instead of being cached — `login` regenerates the session and
  * `logout` destroys it, and a cached header is what turns the next mutation
  * into a 419.
+ *
+ * On HTTP 419 (expired CSRF token or session rotated in another tab), the
+ * `/sanctum/csrf-cookie` handshake is force-refreshed and the request is
+ * replayed once with the newly issued token.
  *
  * Both the urql client and the subscription handshake go through here, so the
  * two can never drift apart.
@@ -46,14 +63,28 @@ export async function csrfAwareFetch(
 ): Promise<Response> {
   await ensureCsrfCookie(backendUrl)
 
-  const headers = new Headers(init.headers)
-  headers.set('Accept', 'application/json')
+  const response = await fetch(input, {
+    ...init,
+    headers: buildCsrfHeaders(init.headers),
+    credentials: 'include',
+  })
 
-  const token = readCookie(CSRF_COOKIE)
-
-  if (token) {
-    headers.set('X-XSRF-TOKEN', token)
+  if (response.status !== 419) {
+    return response
   }
 
-  return fetch(input, { ...init, headers, credentials: 'include' })
+  if (
+    (typeof Request !== 'undefined' && input instanceof Request && input.bodyUsed)
+    || (typeof ReadableStream !== 'undefined' && init.body instanceof ReadableStream)
+  ) {
+    return response
+  }
+
+  await ensureCsrfCookie(backendUrl, true)
+
+  return fetch(input, {
+    ...init,
+    headers: buildCsrfHeaders(init.headers),
+    credentials: 'include',
+  })
 }

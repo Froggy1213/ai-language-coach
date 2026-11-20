@@ -9,6 +9,14 @@ import {
 import type { BillingInterval, BillingOverview, BillingPlan } from '~/types/graphql'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
+function isSafeHttpsRedirect(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 /**
  * Billing state for the settings block and the pricing screen.
  *
@@ -65,7 +73,7 @@ export function useBilling() {
         .toPromise()
 
       if (failure) {
-        plansError.value = graphQLErrorMessageFor(failure, { fallback: pricingCopy.checkoutError })
+        plansError.value = graphQLErrorMessageFor(failure, { fallback: pricingCopy.loadError })
         return
       }
 
@@ -87,7 +95,8 @@ export function useBilling() {
         })
         .toPromise()
 
-      if (failure || !data?.createCheckoutSession.url) {
+      const url = data?.createCheckoutSession.url
+      if (failure || !url) {
         error.value = graphQLErrorMessageFor(failure, {
           codes: {
             BILLING_ALREADY_SUBSCRIBED: pricingCopy.alreadySubscribedError,
@@ -97,13 +106,22 @@ export function useBilling() {
           },
           fallback: pricingCopy.checkoutError,
         })
+        checkingOut.value = null
         return false
       }
 
-      window.location.assign(data.createCheckoutSession.url)
+      if (!isSafeHttpsRedirect(url)) {
+        error.value = pricingCopy.checkoutError
+        checkingOut.value = null
+        return false
+      }
+
+      window.location.assign(url)
       return true
-    } finally {
+    } catch {
+      error.value = pricingCopy.checkoutError
       checkingOut.value = null
+      return false
     }
   }
 
@@ -116,15 +134,32 @@ export function useBilling() {
         .mutation<{ createBillingPortalSession: { url: string } }>(CREATE_BILLING_PORTAL_SESSION_MUTATION, {})
         .toPromise()
 
-      if (failure || !data?.createBillingPortalSession.url) {
-        error.value = graphQLErrorMessageFor(failure, { fallback: copy.portalError })
+      const url = data?.createBillingPortalSession.url
+      if (failure || !url) {
+        error.value = graphQLErrorMessageFor(failure, {
+          codes: {
+            BILLING_NOT_CONFIGURED: copy.notConfigured,
+            BILLING_PROVIDER_ERROR: copy.providerError,
+            BILLING_NO_SUBSCRIPTION: copy.noSubscription,
+          },
+          fallback: copy.portalError,
+        })
+        openingPortal.value = false
         return false
       }
 
-      window.location.assign(data.createBillingPortalSession.url)
+      if (!isSafeHttpsRedirect(url)) {
+        error.value = copy.portalError
+        openingPortal.value = false
+        return false
+      }
+
+      window.location.assign(url)
       return true
-    } finally {
+    } catch {
+      error.value = copy.portalError
       openingPortal.value = false
+      return false
     }
   }
 

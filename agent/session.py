@@ -15,7 +15,7 @@ import json
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 if __package__:  # imported as `agent.session`
-    from .backend import report_session_failure
+    from .backend import close_http_session, report_session_failure
     from .dialogue import create_llm
     from .livekit_compat import (
         Agent,
@@ -30,14 +30,19 @@ if __package__:  # imported as `agent.session`
         silero,
     )
     from .observability import capture_exception, init_sentry, logger, set_session_tags
-    from .prompts import build_greeting, build_system_prompt
+    from .prompts import (
+        build_greeting,
+        build_system_prompt,
+        strip_markdown_for_tts,
+        strip_markdown_stream,
+    )
     from .settings import _env_float
     from .speech import create_stt, create_tts
     from .turn_handling import build_turn_handling
     from .turn_metrics import extract_user_transcript
     from .turn_tracker import TurnMetricsTracker
 else:  # run as a flat script: `python agent.py`, the container layout, the tests
-    from backend import report_session_failure
+    from backend import close_http_session, report_session_failure
     from dialogue import create_llm
     from livekit_compat import (
         Agent,
@@ -52,7 +57,12 @@ else:  # run as a flat script: `python agent.py`, the container layout, the test
         silero,
     )
     from observability import capture_exception, init_sentry, logger, set_session_tags
-    from prompts import build_greeting, build_system_prompt
+    from prompts import (
+        build_greeting,
+        build_system_prompt,
+        strip_markdown_for_tts,
+        strip_markdown_stream,
+    )
     from settings import _env_float
     from speech import create_stt, create_tts
     from turn_handling import build_turn_handling
@@ -62,6 +72,10 @@ else:  # run as a flat script: `python agent.py`, the container layout, the test
 
 # Maximum voice session duration in seconds (HIGH-04). Defaults to 15 minutes (900 seconds).
 VOICE_MAX_SESSION_SECONDS = _env_float("VOICE_MAX_SESSION_SECONDS", 900.0)
+
+# Grace window before shutting the job down after the last remote participant
+# disconnects, so brief mobile network blips can reconnect without losing the call.
+PARTICIPANT_DISCONNECT_GRACE_SECONDS = _env_float("PARTICIPANT_DISCONNECT_GRACE_SECONDS", 6.0)
 
 #: Returned by `_initialize` when a component's factory raised. The job has
 #: already been reported by then, and the caller must stop without an exception
@@ -197,6 +211,31 @@ async def _initialize(
         return _FAILED
 
 
+async def _shutdown_context(ctx: Any, reason: str) -> None:
+    """Terminate the job cleanly (or disconnect from the room if `ctx.shutdown` is absent)."""
+    try:
+        if hasattr(ctx, "shutdown") and callable(ctx.shutdown):
+            try:
+                res = ctx.shutdown(reason=reason)
+                if inspect.isawaitable(res):
+                    await res
+            except TypeError:
+                res = ctx.shutdown()
+                if inspect.isawaitable(res):
+                    await res
+        elif (
+            hasattr(ctx, "room")
+            and ctx.room
+            and hasattr(ctx.room, "disconnect")
+            and callable(ctx.room.disconnect)
+        ):
+            res = ctx.room.disconnect()
+            if inspect.isawaitable(res):
+                await res
+    except Exception as shutdown_exc:
+        logger.warning("Error during job shutdown (%s): %s", reason, shutdown_exc)
+
+
 async def _enforce_max_duration(
     ctx,
     max_session_seconds: float,
@@ -218,28 +257,21 @@ async def _enforce_max_duration(
             session_id,
             room_name,
         )
-        if hasattr(ctx, "shutdown") and callable(ctx.shutdown):
-            try:
-                res = ctx.shutdown(reason="max_session_duration_reached")
-                if asyncio.iscoroutine(res):
-                    await res
-            except TypeError:
-                res = ctx.shutdown()
-                if asyncio.iscoroutine(res):
-                    await res
-        elif hasattr(ctx, "room") and ctx.room and hasattr(ctx.room, "disconnect") and callable(ctx.room.disconnect):
-            res = ctx.room.disconnect()
-            if asyncio.iscoroutine(res):
-                await res
+        await _shutdown_context(ctx, reason="max_session_duration_reached")
     except asyncio.CancelledError:
         pass
     except Exception as dur_exc:
         logger.warning("Error during max session duration shutdown: %s", dur_exc)
 
 
-def _register_participant_disconnect(ctx, room_name: str) -> None:
+def _register_participant_disconnect(
+    ctx,
+    room_name: str,
+    grace_seconds: Optional[float] = None,
+) -> Callable[[], None]:
     """
-    Shut the job down when the last remote participant leaves the room.
+    Shut the job down after a short grace period when the last remote participant
+    leaves the room, cancelling the shutdown if the learner reconnects in time.
 
     livekit-agents' RoomIO closes the AgentSession on a client-initiated
     disconnect (`close_on_disconnect=True`), but that is all it does: the job and
@@ -247,25 +279,116 @@ def _register_participant_disconnect(ctx, room_name: str) -> None:
     backend then only learns the session ended from `room_finished`, after
     VOICE_MAX_SESSION_SECONDS (15 minutes) plus the room's empty timeout — a
     quarter of an hour in which the worker holds a process for nobody and the
-    learner's session stays open. Shutting the job down when the last remote
-    participant leaves makes the agent leave the room immediately instead.
+    learner's session stays open.
 
-    Registered before either start path so both branches get it, and safe before
-    anyone joins: a disconnect event cannot fire before the first participant has
-    connected, and `ctx.shutdown` may be called more than once.
+    A brief grace period (~6 s by default) lets a mobile learner survive a
+    momentary network handoff without killing the call, while still closing the
+    room promptly once they have actually left.
     """
     if not hasattr(ctx.room, "on"):
-        return
+        return lambda: None
 
-    @ctx.room.on("participant_disconnected")
-    def _on_participant_left(participant):
-        if not ctx.room.remote_participants:
+    resolved_grace = (
+        max(0.0, float(grace_seconds))
+        if grace_seconds is not None
+        else max(
+            0.0,
+            _env_float(
+                "PARTICIPANT_DISCONNECT_GRACE_SECONDS",
+                PARTICIPANT_DISCONNECT_GRACE_SECONDS,
+            ),
+        )
+    )
+    grace_task: Optional[asyncio.Task] = None
+
+    def cancel_grace_timer() -> None:
+        nonlocal grace_task
+        if grace_task and not grace_task.done() and grace_task is not asyncio.current_task():
+            grace_task.cancel()
+        grace_task = None
+
+    @ctx.room.on("participant_connected")
+    def _on_participant_joined(participant):
+        if grace_task and not grace_task.done():
             logger.info(
-                "Learner %s left room %s; shutting the agent job down",
+                "Learner %s reconnected to room %s; cancelling pending disconnect shutdown",
                 getattr(participant, "identity", "unknown"),
                 room_name,
             )
+            cancel_grace_timer()
+
+    @ctx.room.on("participant_disconnected")
+    def _on_participant_left(participant):
+        nonlocal grace_task
+        if ctx.room.remote_participants:
+            return
+
+        identity = getattr(participant, "identity", "unknown")
+        if resolved_grace <= 0:
+            logger.info(
+                "Learner %s left room %s; shutting the agent job down",
+                identity,
+                room_name,
+            )
             ctx.shutdown(reason="participant_disconnected")
+            return
+
+        if grace_task and not grace_task.done():
+            return
+
+        logger.info(
+            "Learner %s left room %s; waiting %.1fs grace period before shutdown",
+            identity,
+            room_name,
+            resolved_grace,
+        )
+
+        async def _delayed_shutdown() -> None:
+            nonlocal grace_task
+            try:
+                await asyncio.sleep(resolved_grace)
+                if not ctx.room.remote_participants:
+                    logger.info(
+                        "Learner %s did not reconnect to room %s within %.1fs; shutting the agent job down",
+                        identity,
+                        room_name,
+                        resolved_grace,
+                    )
+                    await _shutdown_context(ctx, reason="participant_disconnected")
+                else:
+                    logger.info(
+                        "Learner reconnected to room %s during grace period; keeping job alive",
+                        room_name,
+                    )
+            except asyncio.CancelledError:
+                logger.debug("Cancelled disconnect grace shutdown for room %s", room_name)
+            finally:
+                if grace_task is asyncio.current_task():
+                    grace_task = None
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            ctx.shutdown(reason="participant_disconnected")
+            return
+
+        grace_task = asyncio.create_task(_delayed_shutdown())
+
+    return cancel_grace_timer
+
+
+def _build_agent(instructions: str) -> Any:
+    """
+    Construct the LiveKit `Agent`, wrapping `tts_node` to strip simple Markdown
+    markers before TTS synthesis when `Agent` is a real SDK class.
+    """
+    if isinstance(Agent, type) and hasattr(Agent, "tts_node"):
+        class _MarkdownSanitizingAgent(Agent):  # type: ignore[misc,valid-type]
+            def tts_node(self, text: Any, model_settings: Any) -> Any:
+                return super().tts_node(strip_markdown_stream(text), model_settings)
+
+        return _MarkdownSanitizingAgent(instructions=instructions)
+    return Agent(instructions=instructions)
 
 
 def _subscribe_turn_metrics(session: Any, tracker: TurnMetricsTracker) -> None:
@@ -358,17 +481,22 @@ async def entrypoint(ctx: JobContext):
         capture_exception(exc, tags=session_tags)
         await report_session_failure(session_id, reason)
 
+    connected = False
+    cancel_disconnect_grace: Callable[[], None] = lambda: None
+
     try:
         # 2. Connect worker to LiveKit room
         # This announces participant kind=AGENT to the room, which unblocks StartVoiceSession
         try:
             auto_sub = getattr(AutoSubscribe, "AUDIO_ONLY", None)
             await ctx.connect(auto_subscribe=auto_sub)
+            connected = True
             logger.info("Agent successfully connected to room %s as AGENT", room_name)
         except Exception as exc:
             await _handle_session_error(
                 exc, "agent_error", "Failed to connect to LiveKit room %s: %s", room_name, exc
             )
+            await close_http_session()
             return
 
         # 3. Instantiate voice pipeline components
@@ -376,24 +504,32 @@ async def entrypoint(ctx: JobContext):
             lambda: _load_vad(ctx), "agent_error", "Failed to load VAD: %s", _handle_session_error
         )
         if vad is _FAILED:
+            await _shutdown_context(ctx, reason="agent_error")
+            await close_http_session()
             return
 
         stt = await _initialize(
             lambda: create_stt(metadata), "stt_failed", "Failed to initialize STT: %s", _handle_session_error
         )
         if stt is _FAILED:
+            await _shutdown_context(ctx, reason="stt_failed")
+            await close_http_session()
             return
 
         llm_instance = await _initialize(
             create_llm, "llm_failed", "Failed to initialize LLM: %s", _handle_session_error
         )
         if llm_instance is _FAILED:
+            await _shutdown_context(ctx, reason="llm_failed")
+            await close_http_session()
             return
 
         tts = await _initialize(
             lambda: create_tts(metadata), "tts_failed", "Failed to initialize TTS: %s", _handle_session_error
         )
         if tts is _FAILED:
+            await _shutdown_context(ctx, reason="tts_failed")
+            await close_http_session()
             return
 
         instructions = build_system_prompt(metadata)
@@ -403,11 +539,11 @@ async def entrypoint(ctx: JobContext):
         try:
             max_session_seconds = _env_float("VOICE_MAX_SESSION_SECONDS", VOICE_MAX_SESSION_SECONDS)
 
-            _register_participant_disconnect(ctx, room_name)
+            cancel_disconnect_grace = _register_participant_disconnect(ctx, room_name)
 
             if USE_AGENT_SESSION:
                 logger.info("Using LiveKit AgentSession interface")
-                agent_instance = Agent(instructions=instructions)
+                agent_instance = _build_agent(instructions=instructions)
                 session = AgentSession(
                     vad=vad,
                     stt=stt,
@@ -424,6 +560,7 @@ async def entrypoint(ctx: JobContext):
                 async def _cleanup_tracker() -> None:
                     if duration_task and not duration_task.done():
                         duration_task.cancel()
+                    cancel_disconnect_grace()
                     # Flush before closing: the room is already gone by the time
                     # shutdown callbacks run, and the turn still in flight is the
                     # last thing the learner said.
@@ -432,6 +569,7 @@ async def entrypoint(ctx: JobContext):
                     except Exception as exc:
                         logger.warning("Could not flush pending turn metrics: %s", exc)
                         tracker.close()
+                    await close_http_session()
 
                 if hasattr(ctx, "add_shutdown_callback"):
                     ctx.add_shutdown_callback(_cleanup_tracker)
@@ -444,7 +582,12 @@ async def entrypoint(ctx: JobContext):
                 await _wait_for_learner(ctx)
 
                 # One text-to-speech call, no model in the loop: see build_greeting.
-                await session.say(build_greeting(metadata), allow_interruptions=True)
+                greeting_text = strip_markdown_for_tts(build_greeting(metadata))
+                tracker.set_greeting_active(True)
+                try:
+                    await session.say(greeting_text, allow_interruptions=True)
+                finally:
+                    tracker.set_greeting_active(False)
             else:
                 logger.info("Using LiveKit VoicePipelineAgent interface")
                 pipeline_agent = VoicePipelineAgent(
@@ -457,6 +600,8 @@ async def entrypoint(ctx: JobContext):
                 async def _cleanup_pipeline() -> None:
                     if duration_task and not duration_task.done():
                         duration_task.cancel()
+                    cancel_disconnect_grace()
+                    await close_http_session()
 
                 if hasattr(ctx, "add_shutdown_callback"):
                     ctx.add_shutdown_callback(_cleanup_pipeline)
@@ -467,23 +612,34 @@ async def entrypoint(ctx: JobContext):
                 )
 
                 await _wait_for_learner(ctx)
-                await pipeline_agent.say(build_greeting(metadata), allow_interruptions=True)
+                await pipeline_agent.say(
+                    strip_markdown_for_tts(build_greeting(metadata)),
+                    allow_interruptions=True,
+                )
 
         except Exception as exc:
             if duration_task and not duration_task.done():
                 duration_task.cancel()
+            cancel_disconnect_grace()
             await _handle_session_error(
                 exc, "agent_error", "Runtime error in voice agent session: %s", exc, exc_info=True
             )
+            await _shutdown_context(ctx, reason="agent_error")
+            await close_http_session()
 
     except Exception as unhandled_exc:
         # Capture any unhandled exception inside a job before the worker disconnects
+        cancel_disconnect_grace()
         await _handle_session_error(
             unhandled_exc, "agent_error", "Unhandled exception in voice agent job: %s", unhandled_exc, exc_info=True
         )
+        if connected:
+            await _shutdown_context(ctx, reason="agent_error")
+        await close_http_session()
 
 
 __all__ = [
+    "PARTICIPANT_DISCONNECT_GRACE_SECONDS",
     "VOICE_MAX_SESSION_SECONDS",
     "_wait_for_learner",
     "entrypoint",

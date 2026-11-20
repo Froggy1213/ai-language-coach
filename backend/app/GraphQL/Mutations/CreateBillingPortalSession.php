@@ -4,6 +4,7 @@ namespace App\GraphQL\Mutations;
 
 use App\Billing\BillingCheckout;
 use App\Billing\BillingNotConfigured;
+use App\Billing\BillingPortalUnavailable;
 use App\Models\User;
 use GraphQL\Error\Error;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
@@ -30,6 +31,8 @@ final class CreateBillingPortalSession
 
         try {
             return ['url' => $this->checkout->portalUrl($user)];
+        } catch (BillingPortalUnavailable $exception) {
+            throw new Error($exception->getMessage(), extensions: ['code' => 'BILLING_NO_SUBSCRIPTION'], previous: $exception);
         } catch (BillingNotConfigured $exception) {
             throw new Error($exception->getMessage(), extensions: ['code' => 'BILLING_NOT_CONFIGURED'], previous: $exception);
         } catch (ApiErrorException $exception) {

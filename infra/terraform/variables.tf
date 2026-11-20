@@ -18,6 +18,12 @@ variable "name_prefix" {
   default     = "ai-language-coach"
 }
 
+variable "image_tag" {
+  type        = string
+  description = "Initial container image tag for ECS task definitions at bootstrap (CD deploys immutable sha-<commit> task definition revisions)"
+  default     = "latest"
+}
+
 # ------------------------------------------------------------------------------
 # Networking (VPC, Subnets) - Plan §0, §8
 # ------------------------------------------------------------------------------
@@ -78,6 +84,33 @@ variable "mail_mailer" {
 variable "mail_from_address" {
   type        = string
   description = "Sender address for transactional email (empty defaults to noreply@$${var.app_domain})"
+  default     = ""
+}
+
+# ------------------------------------------------------------------------------
+# Legal Disclosures (/tokushoho and /privacy, optional)
+# ------------------------------------------------------------------------------
+variable "legal_operator_name" {
+  type        = string
+  description = "Optional operator name override for /tokushoho (NUXT_PUBLIC_LEGAL_OPERATOR_NAME)"
+  default     = ""
+}
+
+variable "legal_address" {
+  type        = string
+  description = "Optional operator address override for /tokushoho (NUXT_PUBLIC_LEGAL_ADDRESS)"
+  default     = ""
+}
+
+variable "legal_phone" {
+  type        = string
+  description = "Optional operator phone override for /tokushoho (NUXT_PUBLIC_LEGAL_PHONE)"
+  default     = ""
+}
+
+variable "legal_email" {
+  type        = string
+  description = "Optional operator contact email override for /tokushoho (NUXT_PUBLIC_LEGAL_EMAIL)"
   default     = ""
 }
 
@@ -304,6 +337,18 @@ variable "log_retention_days" {
   type        = number
   description = "CloudWatch log retention in days"
   default     = 30
+}
+
+variable "cloudwatch_metrics_enabled" {
+  type        = bool
+  description = "Enable publishing custom voice telemetry metrics from Laravel to CloudWatch (AiLanguageCoach/Voice)"
+  default     = true
+}
+
+variable "alarm_sns_topic_arn" {
+  type        = string
+  description = "Optional existing SNS topic ARN for CloudWatch alarm notifications. When empty, Terraform creates a dedicated SNS topic subscribed by var.budget_alert_emails."
+  default     = ""
 }
 
 # ------------------------------------------------------------------------------

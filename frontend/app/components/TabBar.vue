@@ -64,7 +64,7 @@ const talkTarget = '/talk'
 <template>
   <nav
     class="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--line)] bg-[color-mix(in_oklab,var(--canvas)_93%,transparent)] backdrop-blur-xl md:hidden"
-    aria-label="メインナビゲーション"
+    :aria-label="nav.mainLabel"
   >
     <div class="mx-auto grid max-w-md grid-cols-5 items-end px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <NuxtLink

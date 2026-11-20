@@ -174,6 +174,71 @@ class StripeWebhookTest extends TestCase
         $this->assertSame(1, StripeEvent::query()->count());
     }
 
+    public function test_webhooks_for_a_deleted_or_missing_user_are_acknowledged_without_failing(): void
+    {
+        $user = User::factory()->create();
+        $payload = $this->subscriptionPayload($user);
+        $user->forceDelete();
+
+        $deletedEvent = $this->subscriptionEvent('evt_deleted_missing_user', [
+            ...$payload,
+            'status' => 'canceled',
+        ]);
+        $deletedEvent['type'] = 'customer.subscription.deleted';
+
+        $this->deliver($deletedEvent)
+            ->assertOk()
+            ->assertJson(['applied' => true]);
+
+        $createdEvent = $this->subscriptionEvent('evt_created_missing_user', [
+            ...$payload,
+            'id' => 'sub_missing_user_created',
+            'status' => 'active',
+        ]);
+        $createdEvent['type'] = 'customer.subscription.created';
+
+        $this->deliver($createdEvent)
+            ->assertOk()
+            ->assertJson(['applied' => true]);
+
+        $this->assertSame(0, Subscription::query()->count());
+        $this->assertSame(2, StripeEvent::query()->count());
+    }
+
+    public function test_out_of_order_webhooks_cannot_resurrect_terminal_or_downgrade_active_subscription(): void
+    {
+        $user = User::factory()->create(['stripe_customer_id' => 'cus_order']);
+
+        $terminal = Subscription::factory()->for($user)->forPlan('entry')->canceled()->create([
+            'stripe_subscription_id' => 'sub_terminal',
+        ]);
+        $resurrectPayload = $this->subscriptionPayload($user);
+        $resurrectPayload['id'] = 'sub_terminal';
+        $resurrectPayload['customer'] = 'cus_order';
+        $resurrectPayload['status'] = 'active';
+
+        $this->deliver($this->subscriptionEvent('evt_resurrect_attempt', $resurrectPayload))
+            ->assertOk();
+
+        $this->assertSame('canceled', $terminal->fresh()->status);
+
+        $active = Subscription::factory()->for($user)->forPlan('entry')->create([
+            'stripe_subscription_id' => 'sub_active_ooo',
+            'status' => 'active',
+        ]);
+        $downgradePayload = $this->subscriptionPayload($user);
+        $downgradePayload['id'] = 'sub_active_ooo';
+        $downgradePayload['customer'] = 'cus_order';
+        $downgradePayload['status'] = 'incomplete';
+
+        $createdDowngrade = $this->subscriptionEvent('evt_downgrade_incomplete', $downgradePayload);
+        $createdDowngrade['type'] = 'customer.subscription.created';
+
+        $this->deliver($createdDowngrade)->assertOk();
+
+        $this->assertSame('active', $active->fresh()->status);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>

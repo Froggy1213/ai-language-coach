@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Privacy;
 
+use App\Models\GrammarPoint;
+use App\Models\ReviewItem;
 use App\Models\User;
 use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -83,5 +85,62 @@ class DeleteAccountThrottleTest extends TestCase
         $response->assertGraphQLErrorFree();
         $this->assertTrue($response->json('data.deleteAccount'));
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
+    }
+
+    public function test_other_throttled_mutations_and_other_users_on_same_ip_do_not_consume_delete_account_bucket(): void
+    {
+        $s3Mock = Mockery::mock(S3Client::class);
+        $s3Mock->shouldReceive('deleteMatchingObjects')->once();
+        $this->app->instance(S3Client::class, $s3Mock);
+
+        $user1 = User::factory()->create();
+        $user2 = User::factory()->create();
+        $grammarPoint = GrammarPoint::factory()->create();
+        ReviewItem::factory()->for($user1)->create([
+            'grammar_point_id' => $grammarPoint->getKey(),
+        ]);
+
+        Sanctum::actingAs($user1);
+
+        // Hammer another throttled mutation first; deleteAccount must keep its own bucket.
+        for ($i = 0; $i < 10; $i++) {
+            $this->graphQL('
+                mutation ($grammarPointId: ID!, $quality: Int!) {
+                    submitReviewResult(grammarPointId: $grammarPointId, quality: $quality) {
+                        id
+                    }
+                }
+            ', [
+                'grammarPointId' => $grammarPoint->getKey(),
+                'quality' => 5,
+            ]);
+        }
+
+        $throttled = false;
+        for ($i = 0; $i < 15; $i++) {
+            $attempt = $this->graphQL(self::DELETE_ACCOUNT, [
+                'password' => 'wrong-password',
+                'confirmation' => 'DELETE',
+            ], [], self::SPA_HEADERS);
+
+            $message = (string) $attempt->json('errors.0.message');
+            if (str_contains($message, 'Rate limit')) {
+                $throttled = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($throttled, 'Expected user1 deleteAccount bucket to become rate limited after repeated wrong passwords.');
+
+        // A second authenticated user from the same IP has an independent bucket.
+        Sanctum::actingAs($user2);
+        $user2Response = $this->graphQL(self::DELETE_ACCOUNT, [
+            'password' => 'password',
+            'confirmation' => 'DELETE',
+        ], [], self::SPA_HEADERS);
+
+        $user2Response->assertGraphQLErrorFree();
+        $this->assertTrue($user2Response->json('data.deleteAccount'));
+        $this->assertDatabaseMissing('users', ['id' => $user2->id]);
     }
 }

@@ -1,7 +1,7 @@
 # ECR Repositories Configuration (Plan §8, README -> Production images)
 #
-# Three production container images:
-# 1. api:   backend/Dockerfile -> covers laravel-app (default), horizon-worker, reverb, migrations
+# Three production container images (immutable sha-<git-sha> tags deployed by CD):
+# 1. api:   backend/Dockerfile -> covers laravel-app (default), horizon-worker, reverb, scheduler, migrations
 # 2. web:   frontend/Dockerfile -> Nuxt 4 Nitro web application
 # 3. agent: agent/Dockerfile    -> Python livekit-agents voice worker
 

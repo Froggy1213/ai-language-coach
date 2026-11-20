@@ -29,7 +29,7 @@ final class BillingCheckout
             throw BillingNotConfigured::missingPrice($plan->code, $interval);
         }
 
-        if ($user->subscriptions()->whereIn('status', ['active', 'trialing', 'past_due'])->exists()) {
+        if ($user->subscriptions()->whereIn('status', ['active', 'trialing', 'past_due', 'unpaid'])->exists()) {
             throw BillingAlreadySubscribed::forUser();
         }
 
@@ -46,6 +46,10 @@ final class BillingCheckout
 
     public function portalUrl(User $user): string
     {
+        if (! filled($user->stripe_customer_id) && ! $user->subscriptions()->exists()) {
+            throw BillingPortalUnavailable::noCustomer();
+        }
+
         return $this->gateway->portalUrl($user, (string) config('billing.frontend_url').'/settings/billing');
     }
 }

@@ -18,14 +18,37 @@ const inactive = computed(() => props.limit.code === 'VOICE_SUBSCRIPTION_INACTIV
 
 const usedMinutes = computed(() => Math.floor((props.limit.usedSeconds ?? 0) / 60))
 const includedMinutes = computed(() => Math.floor((props.limit.includedSeconds ?? 0) / 60))
-const isFree = computed(() => props.limit.resetsAt === null)
+const isFree = computed(() =>
+  props.limit.hasSubscription === false
+  || props.limit.planCode === 'free'
+  || (props.limit.hasSubscription === null && props.limit.planCode === null && props.limit.resetsAt === null),
+)
 
 const resetDate = computed(() => {
   if (!props.limit.resetsAt) {
     return null
   }
 
-  return new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric' }).format(new Date(props.limit.resetsAt))
+  const date = new Date(props.limit.resetsAt)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric' }).format(date)
+})
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 

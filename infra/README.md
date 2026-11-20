@@ -177,12 +177,12 @@ Configure DNS records at your registrar or Route 53:
 1. `coach.example.com` -> CNAME to ALB DNS name (`terraform output alb_dns_name`).
 2. `livekit.example.com` -> A record pointing directly to the Elastic IP (`terraform output livekit_public_ip`).
 
-### Step 7: Issue LiveKit Let's Encrypt Certificate
-Once DNS for `livekit.example.com` resolves to the Elastic IP, SSH into the LiveKit node and run certbot:
+### Step 7: Issue LiveKit Let's Encrypt Certificate (if DNS propagated after boot)
+Once DNS for `livekit.example.com` resolves to the Elastic IP, SSH into the LiveKit node and run certbot via Caddy's HTTP-01 webroot on port 80:
 ```bash
 ssh -i ~/.ssh/deployer.pem ubuntu@<LIVEKIT_PUBLIC_IP>
-sudo certbot certonly --standalone -d livekit.example.com --non-interactive --agree-tos -m ops@example.com
-sudo systemctl restart livekit.service
+sudo certbot certonly --webroot -w /var/www/certbot -d livekit.example.com --non-interactive --agree-tos -m ops@example.com --deploy-hook /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh
+sudo /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh
 ```
 
 ### Step 8: Run Post-Deploy Smoke Verification
@@ -209,7 +209,7 @@ CloudWatch Log Metric Filter `ai-language-coach-turnaround-latency` consumes the
 ```text
 2026-10-06 12:00:00,000 [INFO] ai-language-coach-agent: TURN_LATENCY {"event": "voice_turn_latency", "session_id": 12, "turn_id": "speech_abc", "stt_final_ms": 280.0, "llm_first_token_ms": 320.0, "tts_first_chunk_ms": 210.0, "total_turnaround_ms": 810.0, "transcript": "I have lived here since three years."}
 ```
-**Metric Filter Expression**: `[..., marker = "TURN_LATENCY", payload]` extracts `$payload.total_turnaround_ms` into `AiLanguageCoach/Voice:TurnaroundLatencyMs`.
+**Metric Filter Expression**: `[date, time, level, logger, marker = "TURN_LATENCY", total_ms, stt_ms, llm_ms, tts_ms, ...]` extracts `$total_ms`, `$stt_ms`, `$llm_ms`, and `$tts_ms` into `AiLanguageCoach/Voice`.
 
 ---
 
@@ -285,8 +285,4 @@ Pin the previous image tag in `/opt/livekit/docker-compose.yml` on the EC2 insta
 2. **Single LiveKit EC2 Node**: There is no high availability or auto-scaling for WebRTC media. If the EC2 instance terminates, ongoing voice sessions drop and voice sessions are unavailable until the instance recovers. Web and GraphQL functionality continue uninterrupted.
 3. **Single Reverb Instance**: Reverb runs as a single instance. Scaled clustering via Redis multi-server broadcasting is supported by Reverb out of the box but is not deployed in V1.
 4. **Single RDS MySQL Instance**: No read replicas or Multi-AZ failover in V1 to keep monthly fixed costs under $120. Automated daily snapshots provide recovery.
-5. **TODO — LiveKit signaling is not encrypted**: the node terminates TLS for TURN only, where it serves `turn.tls_port: 5349` with the certbot certificate in `infra/livekit/livekit.yaml.tpl`, while its signaling port `7880` is plain HTTP/WebSocket, open to `0.0.0.0/0` in `security_groups.tf`. Two consequences, both open:
-   - **Backend → LiveKit is plaintext.** `LIVEKIT_URL` in `ecs.tf` is `ws://<elastic-ip>:7880`, so every Twirp call — including the short-lived admin bearer in the `Authorization` header, room creation and agent dispatch — crosses the public internet in the clear and can be read or replayed by anyone on the path.
-   - **Browser → LiveKit has no listener.** `LIVEKIT_PUBLIC_URL` is `wss://<livekit_domain>`, but nothing on the instance accepts TLS on that hostname, so the browser signaling path does not work as configured.
-
-   The fix (not done here, because it changes the deployed topology) is to terminate TLS in front of `7880` on the same instance — Caddy or nginx with a `certbot` certificate for `<livekit_domain>`, proxying to `127.0.0.1:7880`, with the existing HTTP-01 rule on port 80 left in place for renewal — and only then change `LIVEKIT_URL` to `https://<livekit_domain>` (a `wss://` value is also accepted: `LiveKitApi` maps `ws`/`wss` onto `http`/`https`). As an interim measure, restrict the `7880` ingress rule to `var.vpc_cidr` so only the ECS tasks can reach the Twirp API; that breaks nothing on the browser side, which is already broken until TLS exists. `infra/livekit/livekit.yaml.tpl` and `infra/livekit/user-data.sh` must be changed in the same commit as the proxy.
+5. **LiveKit Signaling Topology**: Browser WebRTC signaling (`LIVEKIT_PUBLIC_URL=wss://<livekit_domain>`) terminates TLS on port 443 via Caddy on the LiveKit node (using the same Let's Encrypt certificate as TURN/TLS on 5349) and proxies to `127.0.0.1:7880`, while internal backend and voice-agent Twirp/signaling calls (`LIVEKIT_URL=ws://<private-ip>:7880`) stay strictly inside the VPC CIDR.

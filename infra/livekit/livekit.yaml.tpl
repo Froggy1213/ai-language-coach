@@ -17,8 +17,8 @@ rtc:
 turn:
   enabled: true
   domain: "${LIVEKIT_DOMAIN}"
-  cert_file: "/etc/letsencrypt/live/${LIVEKIT_DOMAIN}/fullchain.pem"
-  key_file: "/etc/letsencrypt/live/${LIVEKIT_DOMAIN}/privkey.pem"
+  cert_file: "/etc/livekit-certs/fullchain.pem"
+  key_file: "/etc/livekit-certs/privkey.pem"
   tls_port: 5349
   udp_port: 3478
 

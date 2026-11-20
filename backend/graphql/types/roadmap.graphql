@@ -10,7 +10,7 @@ type Roadmap {
     status: RoadmapStatus!
 
     "Lesson cards in the order they should be studied."
-    lessonCards: [LessonCard!]! @hasMany @orderBy(column: "order_index")
+    lessonCards: [LessonCard!]! @field(resolver: "App\\GraphQL\\Resolvers\\RoadmapLessonCards")
 }
 
 "One grammar point to practise, with its cheat sheet."

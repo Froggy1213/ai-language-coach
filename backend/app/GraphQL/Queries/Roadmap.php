@@ -22,7 +22,11 @@ final class Roadmap
         assert($user instanceof User);
 
         $roadmap = $user->roadmap()
-            ->with(['lessonCards.grammarPoint.prerequisites'])
+            ->with([
+                'lessonCards' => static fn ($query) => $query
+                    ->orderBy('order_index')
+                    ->with('grammarPoint.prerequisites'),
+            ])
             ->first();
 
         if ($roadmap instanceof RoadmapModel) {

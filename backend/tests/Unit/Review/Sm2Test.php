@@ -207,4 +207,28 @@ class Sm2Test extends TestCase
             repetitionNumber: 0,
         );
     }
+
+    public function test_repeated_perfect_reviews_clamp_interval_at_max_interval_days(): void
+    {
+        $easeFactor = 2.50;
+        $intervalDays = 1;
+        $repetitionNumber = 0;
+
+        for ($i = 0; $i < 15; $i++) {
+            $result = $this->sm2->calculate(
+                quality: 5,
+                easeFactor: $easeFactor,
+                intervalDays: $intervalDays,
+                repetitionNumber: $repetitionNumber,
+            );
+
+            $this->assertLessThanOrEqual(Sm2::MAX_INTERVAL_DAYS, $result->intervalDays);
+            $easeFactor = $result->easeFactor;
+            $intervalDays = $result->intervalDays;
+            $repetitionNumber = $result->repetitionNumber;
+        }
+
+        $this->assertSame(Sm2::MAX_INTERVAL_DAYS, $intervalDays);
+        $this->assertSame(365, $intervalDays);
+    }
 }

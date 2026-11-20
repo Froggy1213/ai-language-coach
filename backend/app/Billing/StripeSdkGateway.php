@@ -4,6 +4,8 @@ namespace App\Billing;
 
 use App\Enums\BillingInterval;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
+use Stripe\Exception\InvalidRequestException;
 use Stripe\StripeClient;
 
 /**
@@ -72,10 +74,25 @@ final class StripeSdkGateway implements StripeGateway
     public function cancelSubscription(string $stripeSubscriptionId): void
     {
         // Idempotent: a second delete after a retry returns the same cancelled
-        // subscription instead of creating a second cancellation.
-        $this->client()->subscriptions->cancel($stripeSubscriptionId, [], [
-            'idempotency_key' => "kirie-cancel-{$stripeSubscriptionId}",
-        ]);
+        // subscription instead of creating a second cancellation, and a
+        // subscription already cancelled in the portal is treated as stopped.
+        try {
+            $this->client()->subscriptions->cancel($stripeSubscriptionId, [], [
+                'idempotency_key' => "kirie-cancel-{$stripeSubscriptionId}",
+            ]);
+        } catch (InvalidRequestException $exception) {
+            $alreadyGone = $exception->getHttpStatus() === 404
+                || $exception->getStripeCode() === 'resource_missing'
+                || str_contains(strtolower($exception->getMessage()), 'already canceled');
+
+            if (! $alreadyGone) {
+                throw $exception;
+            }
+
+            Log::info('Stripe subscription was already canceled or missing during cancellation.', [
+                'stripe_subscription_id' => $stripeSubscriptionId,
+            ]);
+        }
     }
 
     /**

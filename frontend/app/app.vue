@@ -2,7 +2,7 @@
 import { useQuery } from '@urql/vue'
 import { DUE_REVIEWS_QUERY } from '~/graphql/documents'
 import type { ReviewItem } from '~/types/graphql'
-import { nav } from '~/constants/strings'
+import { app, common, nav } from '~/constants/strings'
 
 /**
  * Application shell.
@@ -25,11 +25,30 @@ const isLandingView = computed(
   () => route.name === 'index' && (!user.value || route.query.preview === 'landing'),
 )
 
-const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
+const { data: reviewsData, executeQuery: refreshDueReviews } = useQuery<{ dueReviews: ReviewItem[] }>({
   query: DUE_REVIEWS_QUERY,
   pause: computed(() => !user.value),
   requestPolicy: 'cache-and-network',
+  context: {
+    additionalTypenames: ['ReviewItem'],
+  },
 })
+
+watch(
+  () => [route.path, user.value?.id] as const,
+  ([, userId], [, prevUserId]) => {
+    if (!userId) {
+      return
+    }
+
+    if (prevUserId !== undefined) {
+      void refreshDueReviews({
+        requestPolicy: 'network-only',
+        additionalTypenames: ['ReviewItem'],
+      })
+    }
+  },
+)
 
 const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
 </script>
@@ -41,7 +60,7 @@ const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
       <div class="mx-auto flex h-16 max-w-5xl items-center gap-8 px-6">
         <NuxtLink to="/" class="group flex items-center gap-2.5">
           <span class="size-1.5 rounded-full bg-[var(--accent)] transition group-hover:scale-150" />
-          <span class="display text-[1.0625rem] tracking-tight">Kirie</span>
+          <span class="display text-[1.0625rem] tracking-tight">{{ app.name }}</span>
         </NuxtLink>
 
         <nav class="flex items-center gap-1 text-[0.9375rem]">
@@ -55,7 +74,7 @@ const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
           <button
             type="button"
             class="grid size-9 place-items-center rounded-full text-[var(--ink-faint)] transition hover:bg-[var(--surface)] hover:text-[var(--ink)]"
-            :aria-label="theme === 'dark' ? 'ライトテーマに切り替える' : 'ダークテーマに切り替える'"
+            :aria-label="theme === 'dark' ? common.switchToLightTheme : common.switchToDarkTheme"
             @click="toggleTheme"
           >
             <ThemeIcon :theme="theme" />

@@ -3,8 +3,12 @@ import {
   CREATE_ASSESSMENT_UPLOAD_URL_MUTATION,
   SUBMIT_ASSESSMENT_MUTATION,
 } from '~/graphql/documents'
+import { level as levelCopy } from '~/constants/strings'
 import type { Assessment, PresignedUpload } from '~/types/graphql'
-import { openLighthouseSubscription } from '~/composables/useLighthouseSubscription'
+import {
+  useLighthouseSubscription,
+  type LighthouseSubscriptionHandle,
+} from '~/composables/useLighthouseSubscription'
 
 /**
  * The onboarding assessment, from the browser's side (plan §5).
@@ -16,6 +20,7 @@ import { openLighthouseSubscription } from '~/composables/useLighthouseSubscript
  */
 export function useAssessment() {
   const { $urql } = useNuxtApp()
+  const lighthouse = useLighthouseSubscription()
 
   async function submit(recording: Blob, contentType: string): Promise<Assessment> {
     const presigned = await $urql
@@ -23,7 +28,7 @@ export function useAssessment() {
       .toPromise()
 
     if (presigned.error || !presigned.data) {
-      throw presigned.error ?? new Error('アップロードの許可を取得できませんでした。')
+      throw presigned.error ?? new Error(levelCopy.uploadAuthFailed)
     }
 
     const upload = presigned.data.createAssessmentUploadUrl
@@ -36,10 +41,15 @@ export function useAssessment() {
     // The bucket requires the file to be the last part of the form.
     body.append('file', recording, 'recording')
 
-    const uploaded = await fetch(upload.uploadUrl, { method: 'POST', body })
+    let uploaded: Response
+    try {
+      uploaded = await fetch(upload.uploadUrl, { method: 'POST', body })
+    } catch {
+      throw new Error(levelCopy.uploadNetworkFailed)
+    }
 
     if (!uploaded.ok) {
-      throw new Error(`録音をアップロードできませんでした（${uploaded.status}）。`)
+      throw new Error(levelCopy.uploadStatusFailed(uploaded.status))
     }
 
     const submitted = await $urql
@@ -47,7 +57,7 @@ export function useAssessment() {
       .toPromise()
 
     if (submitted.error || !submitted.data) {
-      throw submitted.error ?? new Error('録音を解析に送信できませんでした。')
+      throw submitted.error ?? new Error(levelCopy.submitFailed)
     }
 
     return submitted.data.submitAssessment
@@ -56,21 +66,86 @@ export function useAssessment() {
   /**
    * Wait for the analysis to finish.
    *
-   * Delegates subscription opening, socket ID resolution, and channel handshake
-   * confirmation to `openLighthouseSubscription`.
+   * Opens the subscription through `useLighthouseSubscription` and watches for
+   * Pusher reconnects so a dropped WebSocket re-checks the assessment status
+   * and re-registers the subscription against the new socket ID if still pending.
    */
-  async function onReady(userId: string, handler: (assessment: Assessment) => void): Promise<() => void> {
-    const handle = await openLighthouseSubscription<Assessment>({
-      query: ASSESSMENT_READY_SUBSCRIPTION,
-      variables: { userId },
-      event: 'assessmentReady',
-      onEvent: handler,
+  async function onReady(
+    userId: string,
+    handler: (assessment: Assessment) => void,
+    options?: {
+      onReconnect?: () => Promise<boolean> | boolean | void
+    },
+  ): Promise<() => void> {
+    let stopped = false
+    let rechecking = false
+    let currentHandle: LighthouseSubscriptionHandle | null = null
+    let stopReconnectWatcher: (() => void) | null = null
+
+    const teardown = () => {
+      if (stopped) {
+        return
+      }
+      stopped = true
+      currentHandle?.stop()
+      currentHandle = null
+      stopReconnectWatcher?.()
+      stopReconnectWatcher = null
+    }
+
+    const openSubscription = async (): Promise<void> => {
+      currentHandle?.stop()
+      currentHandle = null
+
+      const handle = await lighthouse.open<Assessment>({
+        query: ASSESSMENT_READY_SUBSCRIPTION,
+        variables: { userId },
+        event: 'assessmentReady',
+        onEvent: (assessment) => {
+          if (!stopped) {
+            handler(assessment)
+          }
+        },
+      })
+
+      if (stopped) {
+        handle.stop()
+        return
+      }
+
+      currentHandle = handle
+    }
+
+    await openSubscription()
+
+    stopReconnectWatcher = lighthouse.onReconnect(() => {
+      if (stopped || rechecking) {
+        return
+      }
+
+      rechecking = true
+      void (async () => {
+        try {
+          const settled = await options?.onReconnect?.()
+          if (stopped || settled) {
+            return
+          }
+
+          await openSubscription()
+        } catch {
+          // Non-fatal: manual check remains available on the screen.
+        } finally {
+          rechecking = false
+        }
+      })()
     })
 
-    return () => {
-      handle.stop()
-    }
+    return teardown
   }
 
-  return { submit, onReady }
+  return {
+    submit,
+    onReady,
+    onReconnect: lighthouse.onReconnect,
+  }
 }

@@ -64,12 +64,29 @@ const {
   energy,
   start,
   leave,
+  reset,
 } = useConversation({ audioElement })
 
 watch(limit, (value) => {
   if (value) {
     limitOpen.value = true
   }
+})
+
+// Navigating between scenarios (`/talk/a -> /talk/b`) reuses the same component
+// instance; leave any active session and reset state for the new scenario.
+watch(code, (next, prev) => {
+  if (next === prev) {
+    return
+  }
+
+  consentOpen.value = false
+  limitOpen.value = false
+  editingCustom.value = false
+  deletingCustom.value = false
+  customError.value = null
+  finishPending.value = false
+  void reset()
 })
 
 const finishVoiceMutation = useMutation(FINISH_VOICE_SESSION_MUTATION)
@@ -81,13 +98,14 @@ async function finish(): Promise<void> {
   }
 
   finishPending.value = true
+  const finishingSessionId = sessionId.value
 
   try {
     // Best effort, like the lesson screen: the webhook finishes the session
     // afterwards if this call fails, and the ended state must still appear.
-    if (sessionId.value) {
+    if (finishingSessionId) {
       try {
-        await finishVoiceMutation.executeMutation({ id: sessionId.value })
+        await finishVoiceMutation.executeMutation({ id: finishingSessionId })
       } catch {
         // Ignored on purpose: see above, the webhook is the backstop.
       }
@@ -311,6 +329,7 @@ const notFound = computed(() => !fetching.value && !queryError.value && !scenari
             :elapsed-seconds="elapsedSeconds"
             :agent-present="agentPresent"
             :error="voiceError"
+            :finishing="finishPending"
             @start="begin"
             @finish="finish"
           />

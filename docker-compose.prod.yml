@@ -7,7 +7,7 @@
 #   docker compose --env-file .env.production \
 #     -f docker-compose.yml -f docker-compose.prod.yml \
 #     --profile full up -d \
-#     mysql redis api horizon reverb web proxy
+#     mysql redis api horizon reverb scheduler web proxy
 #
 # The explicit service list is deliberate: `livekit` and `voice-agent` are the two
 # services a single host usually should not run (see "LiveKit" below), and naming
@@ -117,6 +117,7 @@ x-prod-laravel-environment: &prod-laravel-environment
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
   AWS_BUCKET: ${AWS_BUCKET:?set AWS_BUCKET}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
   AWS_USE_PATH_STYLE_ENDPOINT: ${AWS_USE_PATH_STYLE_ENDPOINT:-false}
 
   # Speech and analysis providers. The API needs Deepgram for the batch
@@ -142,6 +143,7 @@ x-prod-laravel-environment: &prod-laravel-environment
 
   LIGHTHOUSE_BROADCASTER: reverb
   LIGHTHOUSE_SUBSCRIPTION_STORAGE: redis
+  LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL: ${LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL:-3600}
   LIGHTHOUSE_QUERY_CACHE_MODE: opcache
 
   # Error tracking and metrics: inert while the DSN is empty.
@@ -149,6 +151,8 @@ x-prod-laravel-environment: &prod-laravel-environment
   SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
   SENTRY_RELEASE: ${SENTRY_RELEASE:-}
   CLOUDWATCH_METRICS_ENABLED: ${CLOUDWATCH_METRICS_ENABLED:-false}
+  CLOUDWATCH_METRICS_REGION: ${CLOUDWATCH_METRICS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
+  CLOUDWATCH_METRICS_ENVIRONMENT: ${CLOUDWATCH_METRICS_ENVIRONMENT:-production}
 
   # Retention windows for the scheduled purges (plan §5, §7).
   PRIVACY_TRANSCRIPT_RETENTION_DAYS: ${PRIVACY_TRANSCRIPT_RETENTION_DAYS:-90}
@@ -198,6 +202,10 @@ services:
       NUXT_PUBLIC_REVERB_HOST: ${APP_DOMAIN}
       NUXT_PUBLIC_REVERB_PORT: "443"
       NUXT_PUBLIC_REVERB_SCHEME: https
+      NUXT_PUBLIC_LEGAL_OPERATOR_NAME: ${NUXT_PUBLIC_LEGAL_OPERATOR_NAME:-}
+      NUXT_PUBLIC_LEGAL_ADDRESS: ${NUXT_PUBLIC_LEGAL_ADDRESS:-}
+      NUXT_PUBLIC_LEGAL_PHONE: ${NUXT_PUBLIC_LEGAL_PHONE:-}
+      NUXT_PUBLIC_LEGAL_EMAIL: ${NUXT_PUBLIC_LEGAL_EMAIL:-}
 
   # ---------------------------------------------------------------------------
   # LiveKit.
@@ -230,6 +238,11 @@ services:
       - "7882:7882/udp"
 
   voice-agent:
+    # Override the base file's `depends_on: livekit`: in production, LIVEKIT_URL
+    # normally points at the dedicated external LiveKit node, so starting
+    # voice-agent must not pull up a local bundled LiveKit container.
+    depends_on: !override
+      - api
     environment:
       LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
@@ -239,8 +252,11 @@ services:
       BACKEND_INTERNAL_URL: http://api:8080
       VOICE_INTERNAL_SECRET: ${VOICE_INTERNAL_SECRET:?set VOICE_INTERNAL_SECRET}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set DEEPGRAM_API_KEY}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
-      CARTESIA_API_KEY: ${CARTESIA_API_KEY:?set CARTESIA_API_KEY}
+      # DeepSeek is blocked for live dialogue by Law #5 (used only for async
+      # backend jobs), and Cartesia is an optional TTS fallback (primary TTS is
+      # Deepgram Aura via DEEPGRAM_API_KEY), so neither is required on the agent.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
@@ -253,8 +269,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # TLS termination and path routing. Everything the browser needs is served from
-  # one origin: /graphql, /api, /sanctum and /up to the API, /app and /apps to
-  # Reverb, everything else to the SPA.
+  # one origin: /graphql, /api, /sanctum and /up to the API, /app/* to Reverb,
+  # everything else to the SPA.
   # ---------------------------------------------------------------------------
   proxy:
     image: caddy:2.10-alpine

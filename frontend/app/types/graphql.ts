@@ -192,9 +192,9 @@ export type Mistake = {
 export type Mutation = {
   __typename?: 'Mutation';
   /**
-   * Mark a lesson card as completed and unlock the next card in sequence (order_index + 1)
-   * inside a database transaction under pessimistic locking. Idempotent: repeating on
-   * an already completed card leaves it completed and returns it.
+   * Mark a lesson card as completed and unlock any dependent cards in the
+   * grammar prerequisite DAG inside a database transaction under pessimistic locking.
+   * Idempotent: repeating on an already completed card leaves it completed and returns it.
    */
   completeLessonCard: LessonCard;
   /**

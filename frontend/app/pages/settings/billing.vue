@@ -18,6 +18,7 @@ const router = useRouter()
 
 const {
   overview,
+  fetching,
   error,
   refresh,
   openPortal,
@@ -25,6 +26,29 @@ const {
 } = useBilling()
 
 const checkoutState = ref('')
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let disposed = false
+
+function clearPollTimer(): void {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
+
+function scheduleCheckoutPoll(attemptsLeft: number): void {
+  if (disposed || attemptsLeft <= 0 || overview.value?.hasSubscription) {
+    return
+  }
+
+  pollTimer = setTimeout(async () => {
+    if (disposed) {
+      return
+    }
+    await refresh()
+    scheduleCheckoutPoll(attemptsLeft - 1)
+  }, 2000)
+}
 
 onMounted(async () => {
   const state = String(route.query.checkout ?? '')
@@ -37,6 +61,15 @@ onMounted(async () => {
   }
 
   await refresh()
+
+  if (checkoutState.value === 'success' && !overview.value?.hasSubscription) {
+    scheduleCheckoutPoll(5)
+  }
+})
+
+onBeforeUnmount(() => {
+  disposed = true
+  clearPollTimer()
 })
 
 const planLabel = computed(() => planDisplayName(overview.value?.planCode))
@@ -96,6 +129,12 @@ const usedPercent = computed(() => {
 
     <UiNotice v-if="error" :message="error" />
 
+    <div v-if="error && !overview">
+      <UiButton :loading="fetching" @click="refresh">
+        {{ copy.refresh }}
+      </UiButton>
+    </div>
+
     <p v-if="!overview && !error" class="flex items-center gap-3 text-[0.9375rem] text-[var(--ink-muted)]">
       <UiSpinner />
       {{ copy.title }}…
@@ -144,10 +183,10 @@ const usedPercent = computed(() => {
       <p v-if="overview.resetsAt" class="text-[0.75rem] text-[var(--ink-faint)]">
         {{ copy.resetsLabel }}: {{ formatDate(overview.resetsAt) }}
       </p>
-      <p v-else-if="overview.currentPeriodEnd" class="text-[0.75rem] text-[var(--ink-faint)]">
+      <p v-if="overview.hasSubscription && overview.currentPeriodEnd" class="text-[0.75rem] text-[var(--ink-faint)]">
         {{ copy.currentPeriodEnd }}: {{ formatDate(overview.currentPeriodEnd) }}
       </p>
-      <p v-else-if="!overview.hasSubscription" class="text-[0.75rem] leading-relaxed text-[var(--ink-faint)]">
+      <p v-if="!overview.hasSubscription" class="text-[0.75rem] leading-relaxed text-[var(--ink-faint)]">
         {{ copy.freeNote }}
       </p>
 
@@ -167,6 +206,13 @@ const usedPercent = computed(() => {
           @click="openPortal"
         >
           {{ copy.manage }}
+        </UiButton>
+        <UiButton
+          v-if="checkoutState === 'success' && !overview.hasSubscription"
+          :loading="fetching"
+          @click="refresh"
+        >
+          {{ copy.refresh }}
         </UiButton>
       </div>
     </div>

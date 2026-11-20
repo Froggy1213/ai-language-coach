@@ -56,7 +56,7 @@ function percent(confidence?: number | null): number {
 
 <template>
   <section
-    v-if="feedback && (bandLabel || feedback.uncertainWords.length > 0)"
+    v-if="feedback && (bandLabel || feedback.isThinSample || feedback.uncertainWords.length > 0)"
     class="space-y-3 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-6"
   >
     <div class="space-y-1">

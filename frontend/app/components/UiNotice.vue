@@ -36,7 +36,7 @@ const TONE_CLASSES: Record<'error' | 'warn' | 'info' | 'success', string> = {
     v-if="message || $slots.default"
     class="rounded-2xl border px-4 py-3 text-[0.9375rem] leading-relaxed"
     :class="TONE_CLASSES[tone]"
-    role="status"
+    :role="tone === 'error' ? 'alert' : 'status'"
   >
     <p v-if="title" class="mb-1 font-semibold">{{ title }}</p>
     <slot>{{ message }}</slot>

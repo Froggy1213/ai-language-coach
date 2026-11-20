@@ -1,12 +1,13 @@
 import type { CombinedError } from '@urql/vue'
 import { computed, onMounted, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { errors as errorsCopy, reflect as reflectCopy } from '~/constants/strings'
 import {
   SESSION_FEEDBACK_READY_SUBSCRIPTION,
   VOICE_SESSION_QUERY,
 } from '~/graphql/documents'
 import type { Mistake } from '~/types/graphql'
 import type { VoiceSessionDetail } from '~/types/view-models'
-import { AUTH_EXPIRED_MESSAGE, graphQLErrorMessageFor } from '~/utils/graphql-error'
+import { AUTH_EXPIRED_MESSAGE, graphQLErrorCode, graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { useLighthouseSubscription } from '~/composables/useLighthouseSubscription'
 
 /**
@@ -43,11 +44,11 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
   function mapSessionError(failure: CombinedError | null | undefined): string {
     return graphQLErrorMessageFor(failure, {
       codes: {
-        VOICE_SESSION_NOT_FOUND: '会話セッションが見つかりません。',
-        LESSON_CARD_NOT_FOUND: 'このレッスンはロードマップにありません。',
+        VOICE_SESSION_NOT_FOUND: reflectCopy.notFoundError,
+        LESSON_CARD_NOT_FOUND: errorsCopy.lessonCardNotFound,
         UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
       },
-      fallback: 'セッションを読み込めませんでした。',
+      fallback: reflectCopy.loadError,
     })
   }
 
@@ -83,7 +84,7 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
       }
     } catch (subErr: any) {
       // Failed handshake: report on screen instead of waiting forever
-      error.value = subErr?.message ?? '分析の更新を購読できませんでした。'
+      error.value = graphQLErrorMessageFor(subErr, { fallback: reflectCopy.subscribeError })
       analyzing.value = false
       teardownSubscription()
     }
@@ -116,9 +117,18 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
       }
 
       if (result.error) {
+        if (graphQLErrorCode(result.error) === 'VOICE_SESSION_NOT_FOUND') {
+          session.value = null
+          error.value = null
+          analyzing.value = false
+          return
+        }
+
         error.value = mapSessionError(result.error)
-        session.value = null
-        analyzing.value = false
+        if (session.value?.id !== id) {
+          session.value = null
+          analyzing.value = false
+        }
         return
       }
 
@@ -167,8 +177,11 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
       }
     } catch {
       if (!disposed) {
-        error.value = 'セッションを読み込めませんでした。'
-        analyzing.value = false
+        error.value = reflectCopy.loadError
+        if (session.value?.id !== id) {
+          session.value = null
+          analyzing.value = false
+        }
       }
     } finally {
       if (!disposed) {
@@ -232,8 +245,10 @@ export function useSessionFeedback(sessionId: MaybeRefOrGetter<string>) {
     () => toValue(sessionId),
     () => {
       teardownSubscription()
+      session.value = null
       error.value = null
       loading.value = true
+      analyzing.value = false
       void loadSession()
     },
   )

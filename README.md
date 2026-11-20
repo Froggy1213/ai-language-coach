@@ -1,6 +1,6 @@
 # AI Language Coach — “Kirie”
 
-Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking learners: onboarding level assessment, a personalized grammar roadmap, two conversation modes with a real-time voice agent (a lesson focused on a grammar topic with in-line correction, and a role-play scenario with a post-conversation review), spaced repetition (SM-2) based on mistakes, and paid plans that meter voice minutes (15 free minutes, then a monthly allowance).
+Voice AI coach for learning **English** (CEFR A1–C1) for Japanese-speaking learners: onboarding level assessment, a personalized grammar roadmap, two conversation modes with a real-time voice agent (a lesson focused on a grammar topic with in-line correction, and a role-play scenario with a post-conversation review), spaced repetition (SM-2) based on mistakes, and paid plans that meter voice minutes (30 free minutes per month, then a monthly allowance).
 
 - **Interface:** Japanese (`frontend/app/constants/strings.ts`); learning content — English (from the API).
 - **Brand:** **Kirie** (`APP_NAME=Kirie` in the backend and `app.name` in the frontend).
@@ -170,7 +170,7 @@ Quick check for built images:
   - The `requestVoiceToken(lessonCardId | scenarioCode)` call accepts exactly one subject (lesson or scenario), checks the daily limit (`VOICE_DAILY_SESSION_LIMIT`, 10 sessions/day by default in UTC under `lockForUpdate()`), creates a LiveKit room, dispatches the agent, and waits for it to join until `VOICE_AGENT_JOIN_TIMEOUT`.
   - Session lifecycle is managed idempotently through `App\Voice\VoiceSessionLifecycle` (webhooks at `/api/webhooks/livekit` and internal agent endpoints `/api/internal/sessions/{id}/fail` and `/turns`, protected by `X-Internal-Secret`).
 - **Privacy and data retention (`PRIVACY.md`):**
-  - Consent is recorded server-side in `users.voice_consent_at` when a recording is first submitted or a call is started.
+  - Consent for audio recording and speech processing is recorded explicitly server-side in `users.voice_consent_at` via the `recordVoiceConsent` mutation; `submitAssessment` and `requestVoiceToken` refuse with `VOICE_CONSENT_REQUIRED` while `voice_consent_at` is null.
   - Account deletion (`deleteAccount` / `php artisan privacy:delete-user`) cascades across the database, active Redis subscriptions, and S3 objects.
   - Daily jobs `privacy:purge-transcripts` (90 days) and `privacy:purge-orphan-audio` (7 days) remove stale data.
 

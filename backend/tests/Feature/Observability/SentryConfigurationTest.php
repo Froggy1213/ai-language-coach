@@ -194,4 +194,59 @@ class SentryConfigurationTest extends TestCase
         $this->assertStringContainsString('"transcript":"[REDACTED]"', $exceptionMessage);
         $this->assertStringContainsString('"correction":"[REDACTED]"', $exceptionMessage);
     }
+
+    public function test_scrubber_redacts_escaped_quotes_breadcrumbs_request_json_and_credential_keys(): void
+    {
+        $event = Event::createEvent();
+        $event->setExceptions([
+            new ExceptionDataBag(new RuntimeException(
+                'Failure payload {"transcript":"He said \\"hello\\" to me","userPrompt":"My \\"secret\\" prompt"}'
+            )),
+        ]);
+        $event->setBreadcrumb([
+            new Breadcrumb(
+                Breadcrumb::LEVEL_INFO,
+                Breadcrumb::TYPE_DEFAULT,
+                'voice',
+                'Breadcrumb payload {"transcript":"private breadcrumb transcript","livekitToken":"lk-secret-jwt"}'
+            ),
+        ]);
+        $event->setRequest([
+            'headers' => [
+                'authorization' => 'Bearer secret-bearer',
+                'x_internal_secret' => 'internal-secret-value',
+            ],
+            'data' => '{"currentPassword":"old-password-1","newPassword":"new-password-2","token":"reset-tok","signature":"stripe-sig"}',
+        ]);
+
+        $scrubbed = SentryEventScrubber::scrubEvent($event);
+
+        $this->assertNotNull($scrubbed);
+
+        $exceptionMessage = $scrubbed->getExceptions()[0]->getValue();
+        $this->assertStringNotContainsString('He said', $exceptionMessage);
+        $this->assertStringNotContainsString('secret', strtolower($exceptionMessage));
+        $this->assertStringContainsString('"transcript":"[REDACTED]"', $exceptionMessage);
+        $this->assertStringContainsString('"userPrompt":"[REDACTED]"', $exceptionMessage);
+
+        $breadcrumbMessage = (string) $scrubbed->getBreadcrumbs()[0]->getMessage();
+        $this->assertStringNotContainsString('private breadcrumb transcript', $breadcrumbMessage);
+        $this->assertStringNotContainsString('lk-secret-jwt', $breadcrumbMessage);
+        $this->assertStringContainsString('"transcript":"[REDACTED]"', $breadcrumbMessage);
+        $this->assertStringContainsString('"livekitToken":"[REDACTED]"', $breadcrumbMessage);
+
+        $request = $scrubbed->getRequest();
+        $this->assertSame('[REDACTED]', $request['headers']['authorization']);
+        $this->assertSame('[REDACTED]', $request['headers']['x_internal_secret']);
+
+        $requestData = (string) $request['data'];
+        $this->assertStringNotContainsString('old-password-1', $requestData);
+        $this->assertStringNotContainsString('new-password-2', $requestData);
+        $this->assertStringNotContainsString('reset-tok', $requestData);
+        $this->assertStringNotContainsString('stripe-sig', $requestData);
+        $this->assertStringContainsString('"currentPassword":"[REDACTED]"', $requestData);
+        $this->assertStringContainsString('"newPassword":"[REDACTED]"', $requestData);
+        $this->assertStringContainsString('"token":"[REDACTED]"', $requestData);
+        $this->assertStringContainsString('"signature":"[REDACTED]"', $requestData);
+    }
 }

@@ -158,6 +158,44 @@ class FailVoiceSessionTest extends TestCase
         $this->assertSame($reason, $session->fresh()->fail_reason);
     }
 
+    public function test_failing_active_session_records_and_caps_duration_while_pending_stays_null(): void
+    {
+        $reason = 'agent_error';
+        foreach (self::allowedReasons() as $case) {
+            $reason = $case[0];
+            break;
+        }
+
+        $this->freezeTime();
+        $maxSeconds = (int) config('voice.max_session_seconds');
+
+        $active = $this->sessionWithStatus(VoiceSessionStatus::Active);
+        $active->forceFill([
+            'created_at' => now()->subSeconds(120),
+            'duration_sec' => null,
+        ])->save();
+
+        $this->reportFailure($active->getKey(), $reason)->assertOk();
+        $this->assertSame(120, $active->fresh()->duration_sec);
+
+        $overMax = $this->sessionWithStatus(VoiceSessionStatus::Active);
+        $overMax->forceFill([
+            'created_at' => now()->subSeconds($maxSeconds + 500),
+            'duration_sec' => null,
+        ])->save();
+
+        $this->reportFailure($overMax->getKey(), $reason)->assertOk();
+        $this->assertSame($maxSeconds, $overMax->fresh()->duration_sec);
+
+        $pending = $this->sessionWithStatus(VoiceSessionStatus::Pending);
+        $pending->forceFill([
+            'duration_sec' => null,
+        ])->save();
+
+        $this->reportFailure($pending->getKey(), $reason)->assertOk();
+        $this->assertNull($pending->fresh()->duration_sec);
+    }
+
     private function reportFailure(int $sessionId, mixed $reason): TestResponse
     {
         return $this->postJson(

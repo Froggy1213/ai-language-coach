@@ -1,5 +1,5 @@
 import type { CombinedError } from '@urql/vue'
-import { lesson, paywall, talk } from '~/constants/strings'
+import { errors as errorsCopy, lesson, paywall, talk } from '~/constants/strings'
 import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 /**
@@ -14,22 +14,22 @@ export function mapVoiceError(failure: CombinedError): string {
   return graphQLErrorMessageFor(failure, {
     codes: {
       VOICE_FLEET_BUSY: lesson.fleetBusy,
-      VOICE_START_FAILED: 'サーバーで会話セッションを開始できませんでした。しばらくしてからお試しください。',
-      VOICE_DAILY_LIMIT_REACHED: '本日の会話セッションの上限に達しました。明日また試してください。',
+      VOICE_START_FAILED: errorsCopy.voiceStartFailed,
+      VOICE_DAILY_LIMIT_REACHED: errorsCopy.voiceDailyLimitReached,
       VOICE_MINUTES_EXHAUSTED: paywall.title,
       VOICE_SUBSCRIPTION_INACTIVE: paywall.inactiveTitle,
-      LESSON_CARD_NOT_FOUND: 'このレッスンはロードマップにありません。',
-      LESSON_CARD_LOCKED: 'このレッスンはまだ開いていません。',
+      LESSON_CARD_NOT_FOUND: errorsCopy.lessonCardNotFound,
+      LESSON_CARD_LOCKED: errorsCopy.lessonCardLocked,
       // The catalogue can change between the picker render and the tap.
       SCENARIO_NOT_FOUND: talk.notFoundBody,
-      PRACTICE_SUBJECT_INVALID: '会話を開始できませんでした。画面を読み直して、もう一度お試しください。',
-      REVIEW_ITEM_NOT_FOUND: '復習する項目が見つかりません。',
-      GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
+      PRACTICE_SUBJECT_INVALID: errorsCopy.practiceSubjectInvalid,
+      REVIEW_ITEM_NOT_FOUND: errorsCopy.reviewItemNotFound,
+      GRAMMAR_POINT_NOT_FOUND: errorsCopy.grammarPointNotFound,
     },
     messages: {
-      'This lesson card does not exist.': 'このレッスンはロードマップにありません。',
-      'This lesson card is not ready to practise yet.': 'このレッスンはまだ練習できません。',
+      'This lesson card does not exist.': errorsCopy.lessonCardNotFound,
+      'This lesson card is not ready to practise yet.': errorsCopy.lessonCardNotReady,
     },
-    fallback: '会話セッションを開始できませんでした。',
+    fallback: errorsCopy.voiceStartFallback,
   })
 }

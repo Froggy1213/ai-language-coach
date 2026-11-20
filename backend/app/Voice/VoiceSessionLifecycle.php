@@ -9,6 +9,7 @@ use App\Models\VoiceSession;
 use App\Observability\PublishSessionMetrics;
 use App\Observability\PublishTurnMetrics;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -27,6 +28,19 @@ use Illuminate\Support\Facades\Log;
  */
 final class VoiceSessionLifecycle
 {
+    /**
+     * The agent joined the room during start-up, so the reserved session is
+     * ready for the learner.
+     */
+    public function activate(int $sessionId): bool
+    {
+        return $this->transitionById(
+            $sessionId,
+            from: [VoiceSessionStatus::Pending],
+            to: VoiceSessionStatus::Active,
+        );
+    }
+
     /**
      * The learner or the agent actually entered the room, so the conversation
      * is live and the session is no longer merely reserved.
@@ -238,6 +252,17 @@ final class VoiceSessionLifecycle
 
             if (! $session instanceof VoiceSession || ! in_array($session->status, $from, true)) {
                 return false;
+            }
+
+            if (
+                $session->status === VoiceSessionStatus::Active
+                && in_array($to, [VoiceSessionStatus::Failed, VoiceSessionStatus::Abandoned], true)
+                && $session->duration_sec === null
+                && ! array_key_exists('duration_sec', $attributes)
+            ) {
+                $maxSeconds = (int) config('voice.max_session_seconds', 900);
+                $elapsed = max(0, (int) ($session->created_at?->diffInSeconds(Carbon::now()) ?? 0));
+                $attributes['duration_sec'] = min($maxSeconds, $elapsed);
             }
 
             $session->fill($attributes);

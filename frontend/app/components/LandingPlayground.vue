@@ -41,7 +41,7 @@ function onEnergyInput(event: Event): void {
         </div>
 
         <!-- State selector buttons -->
-        <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4" role="group" aria-label="オーブの状態を選択">
+        <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4" role="group" :aria-label="landing.playground.stateSelectorLabel">
           <button
             v-for="item in landing.playground.states"
             :key="item.state"

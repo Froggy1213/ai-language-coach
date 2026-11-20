@@ -11,6 +11,7 @@ use App\Models\Roadmap;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\VoiceSession;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
@@ -180,6 +181,154 @@ class VoiceAllowanceTest extends TestCase
         Subscription::factory()->for($this->user)->create(['plan_code' => 'retired-tier']);
 
         $this->assertSame('free', $this->allowance()->planCode);
+    }
+
+    public function test_end_of_month_anchors_preserve_future_resets_and_count_in_window_sessions(): void
+    {
+        $janAnchor = CarbonImmutable::parse('2026-01-31 08:00:00', 'UTC');
+        $this->user->forceFill([
+            'created_at' => $janAnchor,
+            'updated_at' => $janAnchor,
+        ])->saveQuietly();
+
+        // Outside the Feb 28..Mar 31 window (before Feb 28 08:00), inside Feb window.
+        VoiceSession::factory()->for($this->user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => '2026-02-15 12:00:00',
+            'duration_sec' => 300,
+        ]);
+        // Inside [2026-02-28 08:00, 2026-03-31 08:00).
+        VoiceSession::factory()->for($this->user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => '2026-02-28 09:00:00',
+            'duration_sec' => 420,
+        ]);
+        // Inside [2026-03-31 08:00, 2026-04-30 08:00).
+        VoiceSession::factory()->for($this->user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => '2026-03-31 10:00:00',
+            'duration_sec' => 180,
+        ]);
+
+        // 2026-02-28 12:00 UTC: after Feb 28 08:00 -> resets 2026-03-31 08:00 UTC.
+        $this->travelTo(CarbonImmutable::parse('2026-02-28 12:00:00', 'UTC'));
+        $feb = $this->allowance();
+        $this->assertTrue($feb->resetsAt->greaterThan(now()));
+        $this->assertSame('2026-03-31 08:00:00', $feb->resetsAt->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame(420, $feb->usedSeconds);
+
+        // 2026-03-30 12:00 UTC: still inside [2026-02-28 08:00, 2026-03-31 08:00).
+        $this->travelTo(CarbonImmutable::parse('2026-03-30 12:00:00', 'UTC'));
+        $mar30 = $this->allowance();
+        $this->assertTrue($mar30->resetsAt->greaterThan(now()));
+        $this->assertSame('2026-03-31 08:00:00', $mar30->resetsAt->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame(420, $mar30->usedSeconds);
+
+        // 2026-03-31 12:00 UTC: moved into [2026-03-31 08:00, 2026-04-30 08:00).
+        $this->travelTo(CarbonImmutable::parse('2026-03-31 12:00:00', 'UTC'));
+        $mar31 = $this->allowance();
+        $this->assertTrue($mar31->resetsAt->greaterThan(now()));
+        $this->assertSame('2026-04-30 08:00:00', $mar31->resetsAt->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame(180, $mar31->usedSeconds);
+
+        // 2026-03-31 anchor evaluated at 2026-05-30 12:00 UTC -> resets 2026-05-31 08:00 UTC.
+        $marAnchor = CarbonImmutable::parse('2026-03-31 08:00:00', 'UTC');
+        $this->user->forceFill([
+            'created_at' => $marAnchor,
+            'updated_at' => $marAnchor,
+        ])->saveQuietly();
+        VoiceSession::factory()->for($this->user)->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => '2026-05-15 12:00:00',
+            'duration_sec' => 240,
+        ]);
+
+        $this->travelTo(CarbonImmutable::parse('2026-05-30 12:00:00', 'UTC'));
+        $may30 = $this->allowance();
+        $this->assertTrue($may30->resetsAt->greaterThan(now()));
+        $this->assertSame('2026-05-31 08:00:00', $may30->resetsAt->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame(240, $may30->usedSeconds);
+    }
+
+    public function test_terminal_subscriptions_fall_back_to_free_and_active_beats_newer_inactive_row(): void
+    {
+        Subscription::factory()->for($this->user)->forPlan('entry')->canceled()->create([
+            'stripe_subscription_id' => 'sub_canceled',
+        ]);
+
+        $canceledAllowance = $this->allowance();
+        $this->assertSame('free', $canceledAllowance->planCode);
+        $this->assertSame(1800, $canceledAllowance->includedSeconds);
+        $this->assertFalse($canceledAllowance->hasSubscription);
+
+        Subscription::factory()->for($this->user)->forPlan('entry')->create([
+            'stripe_subscription_id' => 'sub_expired',
+            'status' => 'incomplete_expired',
+        ]);
+
+        $expiredAllowance = $this->allowance();
+        $this->assertSame('free', $expiredAllowance->planCode);
+        $this->assertSame(1800, $expiredAllowance->includedSeconds);
+        $this->assertFalse($expiredAllowance->hasSubscription);
+
+        // An older active subscription must not be shadowed by a newer canceled/incomplete row.
+        $active = Subscription::factory()->for($this->user)->forPlan('standard')->create([
+            'stripe_subscription_id' => 'sub_active',
+            'status' => 'active',
+            'created_at' => now()->subDays(5),
+        ]);
+        Subscription::factory()->for($this->user)->forPlan('entry')->canceled()->create([
+            'stripe_subscription_id' => 'sub_newer_canceled',
+            'created_at' => now()->subMinute(),
+        ]);
+
+        $resolved = $this->allowance();
+        $this->assertSame('standard', $resolved->planCode);
+        $this->assertTrue($resolved->hasSubscription);
+        $this->assertNotSame('free', $resolved->planCode);
+        $this->assertSame($active->plan_code, $resolved->planCode);
+    }
+
+    public function test_unpaid_subscription_is_rejected_as_inactive_when_starting_voice_session(): void
+    {
+        Subscription::factory()->for($this->user)->forPlan('entry')->create([
+            'status' => 'unpaid',
+        ]);
+
+        Sanctum::actingAs($this->user);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $this->card->getKey()]);
+        $this->assertSame('VOICE_SUBSCRIPTION_INACTIVE', $response->json('errors.0.extensions.code'));
+    }
+
+    public function test_exhausted_error_extensions_include_plan_code_and_subscription_flag(): void
+    {
+        $this->sessions(2, 900);
+
+        Sanctum::actingAs($this->user);
+
+        $freeResponse = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $this->card->getKey()]);
+        $this->assertSame('VOICE_MINUTES_EXHAUSTED', $freeResponse->json('errors.0.extensions.code'));
+        $this->assertSame('free', $freeResponse->json('errors.0.extensions.planCode'));
+        $this->assertFalse($freeResponse->json('errors.0.extensions.hasSubscription'));
+
+        $limitSeconds = (int) config('billing.plans.entry.monthly_seconds');
+        Subscription::factory()->for($this->user)->forPlan('entry')->create([
+            'status' => 'active',
+            'usage_anchor_at' => now()->subDay(),
+            'current_period_start' => now()->subDay(),
+            'current_period_end' => now()->addDays(29),
+        ]);
+        VoiceSession::factory()->for($this->user)->for($this->card, 'lessonCard')->create([
+            'status' => VoiceSessionStatus::Completed,
+            'created_at' => now(),
+            'duration_sec' => $limitSeconds,
+        ]);
+
+        $paidResponse = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $this->card->getKey()]);
+        $this->assertSame('VOICE_MINUTES_EXHAUSTED', $paidResponse->json('errors.0.extensions.code'));
+        $this->assertSame('entry', $paidResponse->json('errors.0.extensions.planCode'));
+        $this->assertTrue($paidResponse->json('errors.0.extensions.hasSubscription'));
     }
 
     private function allowance(): VoiceAllowance

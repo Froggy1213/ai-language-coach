@@ -11,14 +11,20 @@ import { lesson } from '~/constants/strings'
  * tapping it starts the session, which is one fewer thing to find than a button
  * that duplicates it.
  */
-const props = defineProps<{
-  state: OrbState
-  energy: number
-  status: 'idle' | 'requesting' | 'connecting' | 'connected' | 'ended' | 'error'
-  elapsedSeconds: number
-  agentPresent: boolean
-  error: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    state: OrbState
+    energy: number
+    status: 'idle' | 'requesting' | 'connecting' | 'connected' | 'ended' | 'error'
+    elapsedSeconds: number
+    agentPresent: boolean
+    error: string | null
+    finishing?: boolean
+  }>(),
+  {
+    finishing: false,
+  },
+)
 
 const emit = defineEmits<{ start: []; finish: [] }>()
 
@@ -33,9 +39,15 @@ const STATE_COPY: Record<OrbState, { label: string; hint: string }> = {
 const copy = computed(() => STATE_COPY[props.state])
 
 const sessionLive = computed(() => props.status === 'connected')
-const busy = computed(() => props.status === 'requesting' || props.status === 'connecting')
+const busy = computed(
+  () => props.status === 'requesting' || props.status === 'connecting' || props.finishing,
+)
 
 const controlLabel = computed(() => {
+  if (props.finishing) {
+    return lesson.finishing
+  }
+
   if (props.status === 'requesting') {
     return lesson.requesting
   }
@@ -59,6 +71,9 @@ const connectionNote = computed(() => {
 })
 
 function onOrbActivate(): void {
+  if (props.finishing) {
+    return
+  }
   if (props.status === 'idle' || props.status === 'ended' || props.status === 'error') {
     emit('start')
   }

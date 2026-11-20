@@ -127,7 +127,9 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
     # quietly falling back to the slow provider.
     GROQ_API_KEY          = ""
     CEREBRAS_API_KEY      = ""
-    SENTRY_DSN            = "placeholder-replace-with-real-sentry-dsn"
+    # Empty disables Sentry cleanly; a non-empty placeholder crashes
+    # Sentry\Dsn::createFromString() during Laravel boot.
+    SENTRY_DSN = ""
     # Transactional email via Resend. Empty until a real key is added; when
     # MAIL_MAILER=resend is active, sending mail requires a valid key and a
     # verified sending domain matching MAIL_FROM_ADDRESS.

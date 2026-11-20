@@ -66,6 +66,7 @@ const {
   energy,
   start,
   leave,
+  reset,
 } = useConversation({ audioElement })
 
 // A refused start is not just an error string: the paywall needs the numbers
@@ -74,6 +75,19 @@ watch(limit, (value) => {
   if (value) {
     limitOpen.value = true
   }
+})
+
+// Navigating between lesson cards (`/lesson/1 -> /lesson/2`) reuses the same
+// component instance; leave any active session and reset state for the new card.
+watch(cardId, (next, prev) => {
+  if (next === prev) {
+    return
+  }
+
+  consentOpen.value = false
+  limitOpen.value = false
+  finishPending.value = false
+  void reset()
 })
 
 const completeLessonMutation = useMutation(COMPLETE_LESSON_CARD_MUTATION)
@@ -86,6 +100,8 @@ async function finish(): Promise<void> {
   }
 
   finishPending.value = true
+  const finishingSessionId = sessionId.value
+  const finishingCardId = card.value?.status === 'ready' ? card.value.id : null
 
   try {
     // Tell the backend the session is over before dropping the room. Without
@@ -94,18 +110,18 @@ async function finish(): Promise<void> {
     // until then `/reflect/:id` shows "in progress" and no mistakes. Best
     // effort: if the mutation fails, `leave()` and the ended state below must
     // still happen, and the webhook finishes the session afterwards.
-    if (sessionId.value) {
+    if (finishingSessionId) {
       try {
-        await finishVoiceMutation.executeMutation({ id: sessionId.value })
+        await finishVoiceMutation.executeMutation({ id: finishingSessionId })
       } catch {
         // Ignored on purpose: see above, the webhook is the backstop.
       }
     }
 
     await leave()
-    if (card.value && card.value.status === 'ready') {
+    if (finishingCardId) {
       try {
-        await completeLessonMutation.executeMutation({ lessonCardId: card.value.id })
+        await completeLessonMutation.executeMutation({ lessonCardId: finishingCardId })
       } catch {
         // Non-fatal: the reflect link is shown regardless.
       }
@@ -213,6 +229,7 @@ const ended = computed(() => status.value === 'ended')
             :elapsed-seconds="elapsedSeconds"
             :agent-present="agentPresent"
             :error="error"
+            :finishing="finishPending"
             @start="begin"
             @finish="finish"
           />

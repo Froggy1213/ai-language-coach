@@ -37,6 +37,9 @@ const { data: reviewsData } = useQuery<{ dueReviews: ReviewItem[] }>({
   query: DUE_REVIEWS_QUERY,
   pause: showLanding,
   requestPolicy: 'cache-and-network',
+  context: {
+    additionalTypenames: ['ReviewItem'],
+  },
 })
 
 const dueCount = computed(() => reviewsData.value?.dueReviews?.length ?? 0)
@@ -62,7 +65,7 @@ const firstName = computed(() => user.value?.name?.split(/\s+/)[0] ?? '')
       <header class="space-y-1.5">
         <p class="label">{{ dateLabel }}</p>
         <h1 class="display text-[1.75rem] leading-[1.25] tracking-[0.02em] sm:text-[2rem]">
-          {{ greeting }}<template v-if="firstName">、{{ firstName }}さん</template>
+          {{ firstName ? today.greetingWithName(greeting, firstName) : greeting }}
         </h1>
       </header>
 
@@ -170,7 +173,7 @@ const firstName = computed(() => user.value?.name?.split(/\s+/)[0] ?? '')
           {{ dueCount }}<span class="ml-1 text-[0.875rem] text-[var(--ink-faint)]">{{ COUNTER.items }}</span>
         </p>
         <p class="text-[0.8125rem] text-[var(--ink-faint)]">
-          {{ dueCount > 0 ? '復習できます' : 'すべて完了' }}
+          {{ dueCount > 0 ? today.stats.dueReady : today.stats.dueEmpty }}
         </p>
       </NuxtLink>
 
@@ -183,7 +186,7 @@ const firstName = computed(() => user.value?.name?.split(/\s+/)[0] ?? '')
           to="/level"
           class="relative inline-block text-[0.8125rem] text-[var(--ink-faint)] transition-colors after:absolute after:-inset-3 after:content-[''] hover:text-[var(--accent)]"
         >
-          判定を受け直す
+          {{ today.stats.retakeLevel }}
         </NuxtLink>
       </div>
     </section>

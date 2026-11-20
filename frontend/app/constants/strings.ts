@@ -20,16 +20,70 @@ export const nav = {
   talk: '会話',
   review: '復習',
   settings: '設定',
+  mainLabel: 'メインナビゲーション',
 } as const
 
 export const common = {
   retryShort: '再試行',
   refresh: '更新',
   refreshing: '更新中…',
+  loading: '読み込み中',
   backToRoadmap: 'ロードマップへ',
   theme: 'テーマ',
   themeDark: 'ダーク',
   themeLight: 'ライト',
+  switchToLightTheme: 'ライトテーマに切り替える',
+  switchToDarkTheme: 'ダークテーマに切り替える',
+} as const
+
+export const redirects = {
+  toLevel: 'レベル判定へ移動しています…',
+  toLesson: 'レッスン画面へ移動しています…',
+  toReflect: '振り返りへ移動しています…',
+} as const
+
+export const errors = {
+  authExpired: 'セッションの有効期限が切れました。もう一度ログインしてください。',
+  network: 'サーバーに接続できませんでした。通信状況を確認して、もう一度お試しください。',
+  serverError: 'サーバーで一時的なエラーが発生しました。しばらくしてからもう一度お試しください。',
+  rateLimited: '操作が短時間に集中しています。少し時間を置いてからもう一度お試しください。',
+  fallback: 'リクエストを完了できませんでした。しばらくしてからお試しください。',
+  reviewItemNotFound: '復習する項目が見つかりません。',
+  grammarPointNotFound: '文法項目が見つかりません。',
+  confirmationRequired: '削除を確定するには DELETE と入力してください。',
+  passwordMismatch: 'パスワードが正しくありません。',
+  passwordResetInvalid: '再設定リンクが無効か、有効期限が切れています。もう一度リクエストしてください。',
+  emailVerificationInvalid: '確認リンクが無効です。設定画面から確認メールを再送してください。',
+  emailVerificationExpired: '確認リンクの有効期限が切れています。設定画面から確認メールを再送してください。',
+  voiceConsentRequired: '音声の録音と処理への同意が必要です。',
+  scenarioDraftFailed: 'AIがお題を組み立てられませんでした。もう一度お試しください。',
+  scenarioNotFound: '指定されたお題が見つかりません。',
+  billingCancelFailed: 'サブスクリプションを解約できませんでした。通信状況を確認して、もう一度お試しください。',
+  voiceStartFailed: 'サーバーで会話セッションを開始できませんでした。しばらくしてからお試しください。',
+  voiceDailyLimitReached: '本日の会話セッションの上限に達しました。明日また試してください。',
+  lessonCardNotFound: 'このレッスンはロードマップにありません。',
+  lessonCardLocked: 'このレッスンはまだ開いていません。',
+  lessonCardNotReady: 'このレッスンはまだ練習できません。',
+  practiceSubjectInvalid: '会話を開始できませんでした。画面を読み直して、もう一度お試しください。',
+  voiceStartFallback: '会話セッションを開始できませんでした。',
+} as const
+
+export const voice = {
+  reconnecting: '接続が切れました。会話ルームに再接続しています…',
+  missingToken: 'サーバーが会話ルームのトークンを返しませんでした。',
+  micDenied: 'マイクの使用がブラウザで拒否されました。ブラウザの設定でマイクを許可してください。',
+  micEnableFailed: (detail?: string) => `マイクを有効にできませんでした：${detail || '利用できません'}。`,
+  mediaDevicesError: (detail?: string) => `音声デバイスのエラー：${detail || 'マイクを利用できません'}。`,
+  connectFailed: (detail?: string) => `音声ルームに接続できませんでした：${detail || '接続エラー'}。`,
+} as const
+
+export const realtime = {
+  socketUnreachable: 'リアルタイム接続を確立できませんでした。しばらくしてからもう一度お試しください。',
+  channelAuthFailed: 'チャンネルの認証に失敗しました。',
+  channelAuthStatusFailed: (status: number) => `チャンネルの認証に失敗しました（${status}）。`,
+  subscribeRejected: (status: number) => `サブスクリプションの登録がサーバーに拒否されました（${status}）。`,
+  subscribeFailed: 'サブスクリプションを登録できませんでした。',
+  missingChannel: 'サーバーがサブスクリプションのチャンネルを返しませんでした。',
 } as const
 
 export const login = {
@@ -102,6 +156,7 @@ export const register = {
 
 export const today = {
   greeting: 'こんにちは',
+  greetingWithName: (greeting: string, name: string) => `${greeting}、${name}さん`,
   continueLabel: '次のレッスン',
   weakSpotLabel: '弱点ピックアップ',
   weakSpotHint: '最近の会話で間違いが見られたため、優先しておすすめしています。',
@@ -116,7 +171,10 @@ export const today = {
   stats: {
     progress: '進捗',
     due: '復習待ち',
+    dueReady: '復習できます',
+    dueEmpty: 'すべて完了',
     level: 'CEFRレベル',
+    retakeLevel: '判定を受け直す',
     minutes: '会話した時間',
   },
   streakHint: '毎日少しずつ話すのが、いちばん早い上達です。',
@@ -303,7 +361,9 @@ export const reflect = {
   statusCompleted: '完了',
   statusFailed: 'エラー',
   statusAbandoned: '中断',
+  notFoundError: '会話セッションが見つかりません。',
   loadError: 'セッションを読み込めませんでした。',
+  subscribeError: '分析の更新を購読できませんでした。',
   failVoiceBusy: 'AI講師のワーカーが混み合っています。しばらくしてからお試しください。',
   failVoiceStart: '会話ルームを開始できませんでした。',
   failLivekitShutdown: '通話中に音声サーバーが再起動しました。',
@@ -389,11 +449,14 @@ export const review = {
   lastAt: '最後',
   loadError: '復習キューを読み込めませんでした。',
   submitError: '復習の結果を保存できませんでした。',
+  sendError: '復習の結果を送信できませんでした。',
+  qualityRangeError: '評価は0から5の範囲で指定してください。',
 } as const
 
 export const level = {
   title: 'レベル判定',
   subtitle: '1分ほど英語で話してください。CEFRレベルを判定し、ロードマップを組み直します。',
+  steps: ['録音の同意', '録音', '判定'] as const,
   consentTitle: '録音の前に',
   consentPoints: [
     '録音は安全なストレージに直接送られ、文字起こしの直後に削除されます。',
@@ -444,6 +507,11 @@ export const level = {
   recorderFailed: 'このブラウザで録音を開始できませんでした。',
   emptyRecording: '録音が空でした。もう一度お試しください。',
   sendFailed: '録音を送信できませんでした。',
+  alreadyProcessing: '前回のレベル判定を処理しています。完了するまで少しお待ちください。',
+  uploadAuthFailed: 'アップロードの許可を取得できませんでした。',
+  uploadNetworkFailed: '録音をアップロードできませんでした。通信状況を確認して、もう一度お試しください。',
+  uploadStatusFailed: (status: number) => `録音をアップロードできませんでした（${status}）。`,
+  submitFailed: '録音を解析に送信できませんでした。',
   sessionExpired: 'セッションが切れました。もう一度ログインしてください。',
 } as const
 
@@ -548,6 +616,7 @@ export const settings = {
   logout: 'ログアウト',
   loggingOut: 'ログアウトしています…',
   logoutHint: '次に使うときは、もう一度ログインしてください。',
+  logoutError: 'ログアウトできませんでした。通信状況を確認して、もう一度お試しください。',
 } as const
 
 
@@ -573,11 +642,14 @@ export const pricing = {
   freeAllowance: '30分 / 月',
   minutesPerMonth: (minutes: number) => `${minutes}分 / 月`,
   choose: 'このプランにする',
-  loginToChoose: 'ログインして申し込む',
+  changePlan: 'プランを変更',
+  manageCurrent: '現在のプランを管理',
+  loginToChoose: '無料登録して申し込む',
   current: '現在のプラン',
   taxNote: '表示価格は税込です。いつでも解約できます。',
   loginPrompt: 'すでにアカウントをお持ちの方は',
   loginLink: 'ログイン',
+  loadError: '料金プランを読み込めませんでした。しばらくしてからお試しください。',
   checkoutError: 'お支払いの画面を開けませんでした。しばらくしてからお試しください。',
   checkoutCancelled: 'お支払いはキャンセルされました。プランを選び直せます。',
   alreadySubscribedError: 'すでにプランをご契約中です。設定画面からプランを変更してください。',
@@ -625,7 +697,9 @@ export const billing = {
   checkoutSuccess: 'お支払いが完了しました。反映まで少し時間がかかることがあります。',
   pastDue: 'お支払いに失敗しています。支払い方法を確認してください。',
   loadError: 'プラン情報を読み込めませんでした。',
+  refresh: '最新の状態を確認',
   portalError: '支払い画面を開けませんでした。しばらくしてからお試しください。',
+  noSubscription: '管理できる有料プランがありません。',
   notConfigured: 'このプランは現在お申し込みいただけません。',
   providerError: '決済画面を開けませんでした。しばらくしてからお試しください。',
 } as const
@@ -645,6 +719,7 @@ export const paywall = {
 
 export const landing = {
   nav: {
+    ariaLabel: 'ランディングナビゲーション',
     story: 'ストーリー',
     method: 'メソッド',
     interactive: '体験する',
@@ -662,6 +737,7 @@ export const landing = {
     scrollHint: 'スクロールして体験を再生',
     autoplayStart: 'ストーリーを自動再生',
     autoplayStop: '自動再生を停止',
+    telemetryValue: 'B1 · 明瞭度 94%',
   },
   chapters: [
     {
@@ -712,6 +788,11 @@ export const landing = {
   ],
   stage: {
     liveIndicator: 'SCROLL CINEMA · INTERACTIVE PREVIEW',
+    prologueHeading: 'あなたの声に反応する光のコア',
+    pronunciationTitle: '発音の目安',
+    uncertainWordsTitle: '聞き取りにくかった語',
+    currentBadge: 'いまここ',
+    chapterListLabel: 'ストーリーチャプター',
     userTranscript: '“Last weekend I went to a small coffee shop in Shibuya and talked with the barista in English...”',
     detectedLevel: 'B1 Intermediate',
     clarityLabel: 'はっきり聞き取れた語 94%',
@@ -726,11 +807,15 @@ export const landing = {
       { index: 4, category: 'Clauses', title: 'Relative Clauses in Spoken Narrative', status: 'locked', prompt: null },
     ],
     dialogue: {
+      status: 'AI講師が参加中 · Second Conditional',
       aiPrompt: '“If you had two extra hours every day, how would you spend them?”',
       userReply: '“If I have more time, I will probably practice cooking and read novels.”',
       aiFollowup: '“Nice idea! Let’s refine that conditional together after our chat.”',
     },
     reflection: {
+      youSaidLabel: 'あなたの発話',
+      correctionLabel: '正しい形',
+      scheduleTitle: 'SM-2 間隔反復スケジュール',
       youSaid: 'If I have more time, I will probably practice cooking.',
       correction: 'If I had more time, I would probably practice cooking.',
       explanation: '現在の事実に反する仮定（「もし今もっと時間があったら」）を話すときは、Second Conditional（if + 過去形, would + 動詞の原形）を使うと自然な響きになります。',
@@ -775,6 +860,7 @@ export const landing = {
     eyebrow: 'INTERACTIVE ORB ENGINE',
     title: '生きているような、光の対話インターフェース。',
     subtitle: 'Kirieの象徴であるオーブは、単なるアニメーションではありません。音声エネルギーとAIの思考状態を60fpsのCanvas光のレイヤーで表現します。下のボタンを押して反応を試してみてください。',
+    stateSelectorLabel: 'オーブの状態を選択',
     energyLabel: '声のエネルギー（音量・抑揚）',
     states: [
       { state: 'idle' as const, label: '待機中', desc: '静かな呼吸のリズムで、あなたが話し始めるのを待っています。' },
@@ -847,9 +933,10 @@ export const legal = {
         body: 'リアルタイムの音声対話および学習フィードバックを生成するため、以下の外部プロバイダに必要なデータを送信します。また、エラー監視（Sentry）では発話テキストやプロンプト等の個人情報を送信前にスクラビング（除去）しています。',
         items: [
           '音声認識（STT）：Deepgram',
-          '音声合成（TTS）：Cartesia / OpenAI',
+          '音声合成（TTS）：Deepgram（フォールバック：Cartesia）',
           '対話生成および文法・レベル解析（LLM）：Groq / Cerebras / OpenAI / DeepSeek',
           'リアルタイム音声通信基盤（WebRTC）：LiveKit',
+          'トランザクションメール配信（確認メール・パスワード再設定）：Resend',
           '決済処理：Stripe',
         ],
       },
@@ -898,7 +985,7 @@ export const legal = {
         items: [
           '法令または公序良俗に違反する行為、違法・有害なコンテンツを音声またはテキストで送信する行為',
           '自動化ツールやスクリプト等による大量リクエスト、リバースエンジニアリング、またはサーバー・音声基盤に過度な負荷をかける行為',
-          '第三者のになりすまし、または不正な決済手段を使用する行為',
+          '第三者へのなりすまし、または不正な決済手段を使用する行為',
         ],
       },
       {

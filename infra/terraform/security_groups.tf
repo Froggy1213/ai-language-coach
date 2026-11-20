@@ -213,6 +213,14 @@ resource "aws_security_group" "livekit" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    description = "LiveKit WebRTC single-port UDP mux (matches rtc.udp_port: 7882 in user-data.sh)"
+    from_port   = 7882
+    to_port     = 7882
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # TURN / STUN
   ingress {
     description = "LiveKit built-in TURN/TLS over TCP (Plan section 5, section 8: Lets Encrypt cert on EC2)"
@@ -367,6 +375,44 @@ resource "aws_security_group_rule" "reverb_from_alb" {
   source_security_group_id = aws_security_group.alb.id
 }
 
+# laravel_app -> reverb (8081 internal HTTP event publishing via service discovery)
+resource "aws_security_group_rule" "laravel_to_reverb" {
+  type                     = "egress"
+  security_group_id        = aws_security_group.laravel_app.id
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.reverb.id
+}
+
+resource "aws_security_group_rule" "reverb_from_laravel" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.reverb.id
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.laravel_app.id
+}
+
+# horizon_worker -> reverb (8081 internal HTTP event publishing from queued broadcasts)
+resource "aws_security_group_rule" "horizon_to_reverb" {
+  type                     = "egress"
+  security_group_id        = aws_security_group.horizon_worker.id
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.reverb.id
+}
+
+resource "aws_security_group_rule" "reverb_from_horizon" {
+  type                     = "ingress"
+  security_group_id        = aws_security_group.reverb.id
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.horizon_worker.id
+}
+
 # laravel_app -> rds (3306)
 resource "aws_security_group_rule" "laravel_to_rds" {
   type                     = "egress"
@@ -472,7 +518,7 @@ resource "aws_security_group_rule" "laravel_to_livekit" {
   source_security_group_id = aws_security_group.livekit.id
 }
 
-# voice_agent_worker -> livekit (7880 Signaling, 7881 TCP fallback, 50000-60000 UDP RTC)
+# voice_agent_worker -> livekit (7880 Signaling, 7881 TCP fallback, 7882 UDP mux, 50000-60000 UDP RTC)
 resource "aws_security_group_rule" "voice_agent_to_livekit_signaling" {
   type                     = "egress"
   security_group_id        = aws_security_group.voice_agent_worker.id
@@ -488,6 +534,15 @@ resource "aws_security_group_rule" "voice_agent_to_livekit_tcp" {
   from_port                = 7881
   to_port                  = 7881
   protocol                 = "tcp"
+  source_security_group_id = aws_security_group.livekit.id
+}
+
+resource "aws_security_group_rule" "voice_agent_to_livekit_udp_mux" {
+  type                     = "egress"
+  security_group_id        = aws_security_group.voice_agent_worker.id
+  from_port                = 7882
+  to_port                  = 7882
+  protocol                 = "udp"
   source_security_group_id = aws_security_group.livekit.id
 }
 

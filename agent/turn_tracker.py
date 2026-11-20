@@ -55,10 +55,22 @@ class TurnMetricsTracker:
         self.last_user_transcript: Optional[str] = None
         self._flush_tasks: Dict[str, asyncio.Task] = {}
         self._background_tasks: set[asyncio.Task] = set()
+        self._dispatching_turn_ids: set[str] = set()
+        self._greeting_active: bool = False
         # Keep a bounded set of completed turn IDs to ignore duplicate/late TTS metrics
         # across multi-sentence replies and prevent memory leaks.
         self._completed_turn_ids: set = set()
         self._completed_turn_order: deque = deque()
+
+    def set_greeting_active(self, active: bool) -> None:
+        """Mark whether the initial standalone greeting TTS is currently running."""
+        self._greeting_active = bool(active)
+
+    def _enqueue_dispatch(self, speech_id: str) -> Optional[asyncio.Task]:
+        if speech_id in self._dispatching_turn_ids:
+            return None
+        self._dispatching_turn_ids.add(speech_id)
+        return self._create_background_task(self._dispatch_turn(speech_id))
 
     def _create_background_task(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -97,18 +109,32 @@ class TurnMetricsTracker:
     def handle_metric(self, m: Any) -> None:
         info = extract_metric_info(m)
         speech_id = info["speech_id"]
+        cancelled = bool(info.get("cancelled", False))
         if not speech_id:
             # Deepgram's TTSMetrics carry no speech_id (Cartesia's do), so the
             # first audio chunk of a reply cannot be correlated by id. Attach it
             # to the newest turn still waiting for its first chunk — that is the
             # reply it belongs to.
             if info["tts_first_chunk_sec"] is not None:
-                self._attach_uncorrelated_tts(info["tts_first_chunk_sec"])
+                self._attach_uncorrelated_tts(
+                    info["tts_first_chunk_sec"],
+                    cancelled=cancelled,
+                    started_at=info.get("started_at"),
+                )
             return
 
         # Finding 5 & 6: If this turn has already completed and purged, ignore subsequent
         # metrics (e.g. subsequent TTSMetrics for multi-sentence replies or late metrics).
         if speech_id in self._completed_turn_ids:
+            return
+
+        has_eou = info["stt_final_sec"] is not None
+        has_llm = info["llm_first_token_sec"] is not None
+        has_tts = info["tts_first_chunk_sec"] is not None
+
+        # Ignore metrics that carry no stage latency (e.g. cancelled preemptive
+        # LLMMetrics or raw STTMetrics) so they never create phantom turns.
+        if not has_eou and not has_llm and not has_tts:
             return
 
         is_new_turn = speech_id not in self.pending_turns
@@ -118,8 +144,6 @@ class TurnMetricsTracker:
         # A turn is the learner's conversational turn. We ignore standalone agent speech
         # that no learner utterance preceded.
         if is_new_turn:
-            has_eou = info["stt_final_sec"] is not None
-            has_llm = info["llm_first_token_sec"] is not None
             has_transcript = self.last_user_transcript is not None
 
             # If purely TTS with no preceding EOU, LLM, or user transcript, drop it.
@@ -136,6 +160,7 @@ class TurnMetricsTracker:
                 "llm_first_token_sec": None,
                 "tts_first_chunk_sec": None,
                 "transcript": self.last_user_transcript,
+                "llm_started_at": None,
             }
 
         turn = self.pending_turns[speech_id]
@@ -144,6 +169,8 @@ class TurnMetricsTracker:
             turn["stt_final_sec"] = info["stt_final_sec"]
         if info["llm_first_token_sec"] is not None:
             turn["llm_first_token_sec"] = info["llm_first_token_sec"]
+            if info.get("started_at") is not None:
+                turn["llm_started_at"] = info["started_at"]
 
         # Ensure transcript is populated if it arrived after turn creation
         if turn.get("transcript") is None and self.last_user_transcript is not None:
@@ -158,7 +185,7 @@ class TurnMetricsTracker:
                 turn["tts_first_chunk_sec"] = info["tts_first_chunk_sec"]
                 # When TTS first chunk arrives, the turnaround cycle is complete.
                 self._cancel_delayed_flush(speech_id)
-                self._create_background_task(self._dispatch_turn(speech_id))
+                self._enqueue_dispatch(speech_id)
             else:
                 logger.debug(
                     "Ignoring subsequent TTS chunk for speech_id=%s (first TTFB wins)",
@@ -171,17 +198,51 @@ class TurnMetricsTracker:
             elif speech_id not in self._flush_tasks:
                 self._schedule_delayed_flush(speech_id, delay=self.flush_delay)
 
-    def _attach_uncorrelated_tts(self, ttfb: float) -> None:
-        """Give a `speech_id`-less TTS metric to the newest turn awaiting audio."""
+    def _attach_uncorrelated_tts(
+        self,
+        ttfb: float,
+        *,
+        cancelled: bool = False,
+        started_at: Optional[float] = None,
+    ) -> None:
+        """
+        Give a `speech_id`-less TTS metric to the newest turn awaiting audio.
+
+        Only attaches when:
+        - the TTS metric itself was not cancelled (e.g. an interrupted greeting),
+        - the standalone greeting is not currently active, and
+        - the turn has both learner speech (EOU or transcript) and an LLM reply
+          awaiting its first TTS chunk, and did not start after this TTS stream.
+        """
+        if cancelled:
+            logger.debug("Ignoring cancelled uncorrelated TTS metric")
+            return
+
+        if self._greeting_active:
+            logger.debug("Ignoring uncorrelated TTS metric while greeting is active")
+            return
+
         for turn in reversed(list(self.pending_turns.values())):
+            turn_id = turn["turn_id"]
+            if turn_id in self._dispatching_turn_ids:
+                continue
             if turn["llm_first_token_sec"] is None:
+                continue
+            if turn["stt_final_sec"] is None and turn.get("transcript") is None:
                 continue
             if turn["tts_first_chunk_sec"] is not None:
                 continue
+            llm_started_at = turn.get("llm_started_at")
+            if (
+                started_at is not None
+                and llm_started_at is not None
+                and started_at < llm_started_at - 0.05
+            ):
+                continue
 
             turn["tts_first_chunk_sec"] = float(ttfb)
-            self._cancel_delayed_flush(turn["turn_id"])
-            self._create_background_task(self._dispatch_turn(turn["turn_id"]))
+            self._cancel_delayed_flush(turn_id)
+            self._enqueue_dispatch(turn_id)
             return
 
     def _schedule_delayed_flush(self, speech_id: str, delay: Optional[float] = None) -> None:
@@ -193,6 +254,9 @@ class TurnMetricsTracker:
         async def _flush_after_delay() -> None:
             try:
                 await asyncio.sleep(flush_delay)
+                if speech_id in self._dispatching_turn_ids:
+                    return
+                self._dispatching_turn_ids.add(speech_id)
                 await self._dispatch_turn(speech_id)
             except asyncio.CancelledError:
                 raise
@@ -207,75 +271,97 @@ class TurnMetricsTracker:
 
     async def drain(self, timeout: float = 3.0) -> None:
         """
-        Let the turns already scheduled for reporting reach the backend, then close.
+        Flush pending turns immediately and await in-flight turn dispatches, then close.
 
-        A session now ends as soon as the learner leaves the room, and shutdown
-        used to cancel whatever flush was in flight. That flush carries the last
-        learner utterance — the one the mistake analysis is about to read — so
-        cancelling it silently shortened the transcript. Waiting for the scheduled
-        flushes, bounded so a hung backend cannot hold the job, keeps that turn.
+        Cancels any sleeping delayed-flush timers right away so shutdown does not
+        wait out `flush_delay` (e.g. 5.0 s), enqueues immediate dispatches for all
+        remaining pending turns, and awaits every in-flight `_background_tasks`
+        (including dispatches already triggered just before shutdown) within `timeout`.
         """
-        pending = [task for task in self._flush_tasks.values() if not task.done()]
-        if pending:
-            await asyncio.wait(pending, timeout=timeout)
+        current = asyncio.current_task()
+        cancelled_timers: set[asyncio.Task] = set()
+        for task in list(self._flush_tasks.values()):
+            if not task.done() and task is not current:
+                task.cancel()
+            cancelled_timers.add(task)
+        self._flush_tasks.clear()
+
+        for speech_id in list(self.pending_turns.keys()):
+            self._enqueue_dispatch(speech_id)
+
+        in_flight = [
+            task
+            for task in list(self._background_tasks)
+            if not task.done() and task is not current and task not in cancelled_timers
+        ]
+        if in_flight:
+            await asyncio.wait(in_flight, timeout=timeout)
         self.close()
 
     def close(self) -> None:
-        """Cancel all active flush tasks and clear pending timers."""
+        """Cancel all active flush tasks and any remaining background tasks."""
+        current = asyncio.current_task()
         for task in list(self._flush_tasks.values()):
-            if not task.done() and task is not asyncio.current_task():
+            if not task.done() and task is not current:
                 task.cancel()
         self._flush_tasks.clear()
 
+        for task in list(self._background_tasks):
+            if not task.done() and task is not current:
+                task.cancel()
+
     async def _dispatch_turn(self, speech_id: str) -> None:
-        self._cancel_delayed_flush(speech_id)
+        try:
+            self._cancel_delayed_flush(speech_id)
 
-        # Finding 6: Purge completed turn from pending_turns to prevent unbounded memory growth.
-        turn = self.pending_turns.pop(speech_id, None)
-        if not turn:
-            return
+            # Finding 6: Purge completed turn from pending_turns to prevent unbounded memory growth.
+            turn = self.pending_turns.pop(speech_id, None)
+            if not turn:
+                return
 
-        self._record_completed_turn_id(speech_id)
+            self._record_completed_turn_id(speech_id)
 
-        # If this turn consumed last_user_transcript, clear it so subsequent
-        # unprompted agent speech cannot reuse stale transcript data.
-        if self.last_user_transcript == turn.get("transcript"):
-            self.last_user_transcript = None
+            # If this turn consumed last_user_transcript, clear it so subsequent
+            # unprompted agent speech cannot reuse stale transcript data.
+            if self.last_user_transcript == turn.get("transcript"):
+                self.last_user_transcript = None
 
-        total_sec = compute_total_turnaround(
-            turn["stt_final_sec"],
-            turn["llm_first_token_sec"],
-            turn["tts_first_chunk_sec"],
-        )
+            total_sec = compute_total_turnaround(
+                turn["stt_final_sec"],
+                turn["llm_first_token_sec"],
+                turn["tts_first_chunk_sec"],
+            )
 
-        payload = build_turn_payload(
-            turn_id=speech_id,
-            stt_final_sec=turn["stt_final_sec"],
-            llm_first_token_sec=turn["llm_first_token_sec"],
-            tts_first_chunk_sec=turn["tts_first_chunk_sec"],
-            total_turnaround_sec=total_sec,
-            transcript=turn.get("transcript"),
-        )
+            payload = build_turn_payload(
+                turn_id=speech_id,
+                stt_final_sec=turn["stt_final_sec"],
+                llm_first_token_sec=turn["llm_first_token_sec"],
+                tts_first_chunk_sec=turn["tts_first_chunk_sec"],
+                total_turnaround_sec=total_sec,
+                transcript=turn.get("transcript"),
+            )
 
-        cloudwatch_log = build_cloudwatch_turn_log(
-            session_id=self.session_id,
-            turn_id=speech_id,
-            stt_final_sec=turn["stt_final_sec"],
-            llm_first_token_sec=turn["llm_first_token_sec"],
-            tts_first_chunk_sec=turn["tts_first_chunk_sec"],
-            total_turnaround_sec=total_sec,
-        )
+            cloudwatch_log = build_cloudwatch_turn_log(
+                session_id=self.session_id,
+                turn_id=speech_id,
+                stt_final_sec=turn["stt_final_sec"],
+                llm_first_token_sec=turn["llm_first_token_sec"],
+                tts_first_chunk_sec=turn["tts_first_chunk_sec"],
+                total_turnaround_sec=total_sec,
+            )
 
-        logger.info(
-            "TURN_LATENCY %s %s %s %s %s",
-            _ms_or_zero(total_sec),
-            _ms_or_zero(turn["stt_final_sec"]),
-            _ms_or_zero(turn["llm_first_token_sec"]),
-            _ms_or_zero(turn["tts_first_chunk_sec"]),
-            json.dumps(cloudwatch_log, separators=(",", ":")),
-        )
+            logger.info(
+                "TURN_LATENCY %s %s %s %s %s",
+                _ms_or_zero(total_sec),
+                _ms_or_zero(turn["stt_final_sec"]),
+                _ms_or_zero(turn["llm_first_token_sec"]),
+                _ms_or_zero(turn["tts_first_chunk_sec"]),
+                json.dumps(cloudwatch_log, separators=(",", ":")),
+            )
 
-        await report_session_turn(self.session_id, payload)
+            await report_session_turn(self.session_id, payload)
+        finally:
+            self._dispatching_turn_ids.discard(speech_id)
 
 
 __all__ = ["TurnMetricsTracker"]

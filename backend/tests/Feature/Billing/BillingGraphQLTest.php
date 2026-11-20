@@ -214,6 +214,43 @@ class BillingGraphQLTest extends TestCase
         $this->assertSame('https://app.test/settings/billing', $this->stripe->portals[0]['returnUrl']);
     }
 
+    public function test_unpaid_subscriber_is_rejected_with_already_subscribed_on_checkout(): void
+    {
+        $user = User::factory()->create(['stripe_customer_id' => 'cus_unpaid']);
+        Subscription::factory()->for($user)->forPlan('entry')->create([
+            'status' => 'unpaid',
+        ]);
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL('
+            mutation {
+                createCheckoutSession(planCode: "standard", interval: month) {
+                    url
+                }
+            }
+        ');
+
+        $this->assertSame('BILLING_ALREADY_SUBSCRIBED', $response->json('errors.0.extensions.code'));
+        $this->assertSame([], $this->stripe->checkouts);
+    }
+
+    public function test_free_user_without_stripe_customer_or_subscription_gets_billing_no_subscription_for_portal(): void
+    {
+        $user = User::factory()->create(['stripe_customer_id' => null]);
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL('
+            mutation {
+                createBillingPortalSession {
+                    url
+                }
+            }
+        ');
+
+        $this->assertSame('BILLING_NO_SUBSCRIPTION', $response->json('errors.0.extensions.code'));
+        $this->assertSame([], $this->stripe->portals);
+    }
+
     private function overview(): TestResponse
     {
         return $this->graphQL(/** @lang GraphQL */ '

@@ -52,47 +52,72 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
 
 # ------------------------------------------------------------------------------
-# 2. TLS Certificates (Let's Encrypt / Certbot)
+# 2. TLS Certificates & Renewal Hook (Let's Encrypt / Certbot)
 # ------------------------------------------------------------------------------
-# LiveKit built-in TURN requires raw certificate and private key files on disk.
-# If DNS is already pointed at $LIVEKIT_NODE_IP, certbot succeeds immediately.
-# If DNS is still propagating, generate a temporary self-signed certificate so
-# LiveKit boots without crashing, and schedule certbot standalone to acquire
-# the real Let's Encrypt certificate.
-CERT_DIR="/etc/letsencrypt/live/$LIVEKIT_DOMAIN"
-mkdir -p "$CERT_DIR"
+# Both the Caddy HTTPS/WSS signaling proxy (:443 -> 127.0.0.1:7880) and LiveKit's
+# built-in TURN/TLS server (:5349) read raw certificate files from
+# /opt/livekit/certs/{fullchain,privkey}.pem (mounted at /etc/livekit-certs).
+#
+# A bootstrap self-signed certificate is created in /opt/livekit/certs (never in
+# /etc/letsencrypt/live/$LIVEKIT_DOMAIN, which belongs to certbot) so both
+# containers boot immediately even before DNS propagates. Once Caddy is serving
+# /.well-known/acme-challenge/* on :80 from /var/www/certbot, certbot acquires
+# the real certificate via --webroot with zero port-80 conflict during issuance
+# or automated renewals.
+ACTIVE_CERT_DIR="/opt/livekit/certs"
+mkdir -p /opt/livekit "$ACTIVE_CERT_DIR" /var/www/certbot /opt/livekit/caddy_data /opt/livekit/caddy_config
+chmod 700 /opt/livekit "$ACTIVE_CERT_DIR"
 
-if certbot certonly --standalone \
-    -d "$LIVEKIT_DOMAIN" \
-    --agree-tos \
-    -m "$ADMIN_EMAIL" \
-    --non-interactive \
-    --preferred-challenges http; then
-    echo "Let's Encrypt certificate obtained successfully for $LIVEKIT_DOMAIN"
-else
-    echo "Certbot failed (DNS may not have propagated yet). Generating bootstrap self-signed certificate..."
-    if [[ ! -f "$CERT_DIR/privkey.pem" ]]; then
-        openssl req -x509 -nodes -days 30 -newkey rsa:2048 \
-            -keyout "$CERT_DIR/privkey.pem" \
-            -out "$CERT_DIR/fullchain.pem" \
-            -subj "/CN=$LIVEKIT_DOMAIN"
-        chmod 600 "$CERT_DIR/privkey.pem"
-    fi
+if [[ ! -f "$ACTIVE_CERT_DIR/privkey.pem" ]]; then
+    openssl req -x509 -nodes -days 30 -newkey rsa:2048 \
+        -keyout "$ACTIVE_CERT_DIR/privkey.pem" \
+        -out "$ACTIVE_CERT_DIR/fullchain.pem" \
+        -subj "/CN=$LIVEKIT_DOMAIN"
+    chmod 600 "$ACTIVE_CERT_DIR/privkey.pem"
+    chmod 644 "$ACTIVE_CERT_DIR/fullchain.pem"
 fi
 
-# Set up automated renewal hook
-mkdir -p /etc/letsencrypt/renewal-hooks/post
-cat << 'HOOK' > /etc/letsencrypt/renewal-hooks/post/livekit-restart.sh
+# Automated deploy hook: copies renewed certbot files into /opt/livekit/certs,
+# reloads Caddy on :443 without dropping connections, and restarts LiveKit TURN.
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+cat << EOF > /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh
 #!/usr/bin/env bash
-systemctl try-restart livekit.service || true
-HOOK
-chmod +x /etc/letsencrypt/renewal-hooks/post/livekit-restart.sh
+set -euo pipefail
+if [[ -f "/etc/letsencrypt/live/$LIVEKIT_DOMAIN/fullchain.pem" ]]; then
+    cp -L "/etc/letsencrypt/live/$LIVEKIT_DOMAIN/fullchain.pem" /opt/livekit/certs/fullchain.pem
+    cp -L "/etc/letsencrypt/live/$LIVEKIT_DOMAIN/privkey.pem" /opt/livekit/certs/privkey.pem
+    chmod 644 /opt/livekit/certs/fullchain.pem
+    chmod 600 /opt/livekit/certs/privkey.pem
+    docker exec livekit-tls-proxy caddy reload --config /etc/caddy/Caddyfile || true
+    systemctl try-restart livekit.service || true
+fi
+EOF
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh
 
 # ------------------------------------------------------------------------------
-# 3. LiveKit Server Configuration (/opt/livekit/livekit.yaml)
+# 3. LiveKit Server & Caddy TLS Proxy Configuration (/opt/livekit/*)
 # ------------------------------------------------------------------------------
-mkdir -p /opt/livekit
-chmod 700 /opt/livekit
+cat << EOF > /opt/livekit/Caddyfile
+{
+	auto_https off
+}
+
+:80 {
+	handle /.well-known/acme-challenge/* {
+		root * /var/www/certbot
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+:443 {
+	tls /etc/livekit-certs/fullchain.pem /etc/livekit-certs/privkey.pem
+	reverse_proxy 127.0.0.1:7880
+}
+EOF
+chmod 644 /opt/livekit/Caddyfile
 
 cat << EOF > /opt/livekit/livekit.yaml
 port: 7880
@@ -110,8 +135,8 @@ rtc:
 turn:
   enabled: true
   domain: "${LIVEKIT_DOMAIN}"
-  cert_file: "/etc/letsencrypt/live/${LIVEKIT_DOMAIN}/fullchain.pem"
-  key_file: "/etc/letsencrypt/live/${LIVEKIT_DOMAIN}/privkey.pem"
+  cert_file: "/etc/livekit-certs/fullchain.pem"
+  key_file: "/etc/livekit-certs/privkey.pem"
   tls_port: 5349
   udp_port: 3478
 
@@ -126,7 +151,7 @@ EOF
 chmod 600 /opt/livekit/livekit.yaml
 
 # ------------------------------------------------------------------------------
-# 4. LiveKit Docker Compose (/opt/livekit/docker-compose.yml)
+# 4. LiveKit + Caddy TLS Proxy Docker Compose (/opt/livekit/docker-compose.yml)
 # ------------------------------------------------------------------------------
 cat << EOF > /opt/livekit/docker-compose.yml
 services:
@@ -138,8 +163,20 @@ services:
     stop_grace_period: ${STOP_GRACE_PERIOD}
     volumes:
       - /opt/livekit/livekit.yaml:/etc/livekit.yaml:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /opt/livekit/certs:/etc/livekit-certs:ro
     command: ["--config", "/etc/livekit.yaml"]
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: livekit-tls-proxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/livekit/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/livekit/certs:/etc/livekit-certs:ro
+      - /var/www/certbot:/var/www/certbot:ro
+      - /opt/livekit/caddy_data:/data
+      - /opt/livekit/caddy_config:/config
 EOF
 chmod 600 /opt/livekit/docker-compose.yml
 
@@ -201,5 +238,20 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now livekit.service
+
+# Obtain real Let's Encrypt certificate via Caddy's HTTP-01 webroot on :80 if DNS is ready
+if certbot certonly --webroot \
+    -w /var/www/certbot \
+    -d "$LIVEKIT_DOMAIN" \
+    --agree-tos \
+    -m "$ADMIN_EMAIL" \
+    --non-interactive \
+    --deploy-hook /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh; then
+    echo "Let's Encrypt certificate obtained and active for $LIVEKIT_DOMAIN"
+    /etc/letsencrypt/renewal-hooks/deploy/livekit-sync-certs.sh
+else
+    echo "Certbot webroot challenge skipped/failed (DNS for $LIVEKIT_DOMAIN may not point to $LIVEKIT_NODE_IP yet)."
+    echo "Running on bootstrap self-signed certificate until certbot is run."
+fi
 
 echo "=== LiveKit Server Node Bootstrap Complete $(date -u) ==="

@@ -21,7 +21,11 @@ final class VoiceAllowanceResolver
 
     public function for(User $user): VoiceAllowance
     {
-        $subscription = $user->subscriptions()->latest('id')->first();
+        $subscription = $user->subscriptions()
+            ->whereNotIn('status', ['canceled', 'incomplete_expired'])
+            ->orderByRaw("CASE WHEN status IN ('active', 'trialing') THEN 0 ELSE 1 END")
+            ->latest('id')
+            ->first();
 
         if (! $subscription instanceof Subscription) {
             return $this->freeAllowance($user);
@@ -117,19 +121,35 @@ final class VoiceAllowanceResolver
     /**
      * The monthly window that contains "now", anchored on one day.
      *
+     * Both bounds are computed directly from `$anchor` (rather than stepping
+     * `$start->addMonthsNoOverflow(1)`) so an end-of-month anchor (29th–31st)
+     * recovers its original day in longer months and `$start <= $now < $end`
+     * always holds across short months.
+     *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
      */
     private function monthlyWindow(CarbonImmutable $anchor): array
     {
         $now = CarbonImmutable::now();
 
-        $months = $now->greaterThan($anchor)
-            ? (int) floor($anchor->diffInMonths($now))
-            : 0;
+        if ($now->lessThanOrEqualTo($anchor)) {
+            return [$anchor, $anchor->addMonthsNoOverflow(1)];
+        }
 
-        $start = $anchor->addMonthsNoOverflow(max(0, $months));
+        $months = max(0, (int) floor($anchor->diffInMonths($now)));
 
-        return [$start, $start->addMonthsNoOverflow(1)];
+        while ($anchor->addMonthsNoOverflow($months + 1)->lessThanOrEqualTo($now)) {
+            $months++;
+        }
+
+        while ($months > 0 && $anchor->addMonthsNoOverflow($months)->greaterThan($now)) {
+            $months--;
+        }
+
+        return [
+            $anchor->addMonthsNoOverflow($months),
+            $anchor->addMonthsNoOverflow($months + 1),
+        ];
     }
 
     /**

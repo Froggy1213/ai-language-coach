@@ -47,7 +47,7 @@ final class LiveKitApi
      */
     public function deleteRoom(string $roomName): void
     {
-        $this->call('livekit.RoomService/DeleteRoom', ['room' => $roomName], room: $roomName);
+        $this->call('livekit.RoomService/DeleteRoom', ['room' => $roomName], room: $roomName, allowNotFound: true);
     }
 
     /**
@@ -80,7 +80,12 @@ final class LiveKitApi
      */
     public function participants(string $roomName): array
     {
-        $response = $this->call('livekit.RoomService/ListParticipants', ['room' => $roomName], room: $roomName);
+        $response = $this->call(
+            'livekit.RoomService/ListParticipants',
+            ['room' => $roomName],
+            room: $roomName,
+            allowNotFound: true,
+        );
 
         /** @var list<array<string, mixed>> $participants */
         $participants = $response['participants'] ?? [];
@@ -97,7 +102,7 @@ final class LiveKitApi
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function call(string $method, array $payload, ?string $room = null): array
+    private function call(string $method, array $payload, ?string $room = null, bool $allowNotFound = false): array
     {
         $apiKey = (string) config('voice.livekit.api_key');
         $apiSecret = (string) config('voice.livekit.api_secret');
@@ -109,6 +114,10 @@ final class LiveKitApi
 
         $response = $this->request($room)
             ->post($this->httpEndpoint($url).'/twirp/'.$method, $payload);
+
+        if ($allowNotFound && $response->status() === 404) {
+            return [];
+        }
 
         if ($response->status() === 429) {
             // LiveKit answers 429 when no worker could be assigned at all, which

@@ -5,6 +5,7 @@ namespace Tests\Feature\Review;
 use App\Models\GrammarPoint;
 use App\Models\ReviewItem;
 use App\Models\User;
+use App\Review\Sm2;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -217,5 +218,35 @@ class SubmitReviewResultTest extends TestCase
             'grammarPointId' => $gp->getKey(),
             'quality' => -1,
         ])->assertGraphQLValidationError('quality', 'The quality field must be between 0 and 5.');
+    }
+
+    public function test_twelve_consecutive_perfect_reviews_succeed_without_datetime_overflow_and_cap_at_365_days(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+
+        $user = User::factory()->create();
+        $gp = GrammarPoint::factory()->create();
+        $item = ReviewItem::factory()->for($user)->create([
+            'grammar_point_id' => $gp->getKey(),
+            'ease_factor' => 2.50,
+            'interval_days' => 1,
+            'repetition_number' => 0,
+            'next_review_at' => now()->subHour(),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        for ($i = 0; $i < 12; $i++) {
+            $response = $this->graphQL(self::SUBMIT_REVIEW, [
+                'grammarPointId' => $gp->getKey(),
+                'quality' => 5,
+            ]);
+
+            $response->assertGraphQLErrorFree();
+        }
+
+        $item->refresh();
+        $this->assertSame(Sm2::MAX_INTERVAL_DAYS, $item->interval_days);
+        $this->assertTrue($item->next_review_at->equalTo(now()->addDays(365)));
     }
 }

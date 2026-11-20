@@ -1,6 +1,7 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
 import type { ChannelAuthorizationCallback } from 'pusher-js'
+import { realtime as realtimeCopy } from '~/constants/strings'
 import { csrfAwareFetch } from '~/utils/csrf-fetch'
 
 declare global {
@@ -67,7 +68,7 @@ export default defineNuxtPlugin(() => {
           })
 
           if (!response.ok) {
-            throw new Error(`チャンネルの認証に失敗しました（${response.status}）。`)
+            throw new Error(realtimeCopy.channelAuthStatusFailed(response.status))
           }
 
           callback(null, await response.json())

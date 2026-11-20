@@ -11,7 +11,9 @@
 # - CloudWatch Dashboard aggregating P95 latency, stage breakdown, and task metrics.
 
 locals {
-  service_names = ["laravel-app", "horizon-worker", "reverb", "voice-agent-worker", "web"]
+  service_names = ["laravel-app", "horizon-worker", "reverb", "scheduler", "voice-agent-worker", "web"]
+
+  alarm_sns_topic_arn = var.alarm_sns_topic_arn != "" ? var.alarm_sns_topic_arn : aws_sns_topic.alarms[0].arn
 
   voice_latency_metric_filters = {
     turnaround-latency = {
@@ -60,22 +62,44 @@ resource "aws_cloudwatch_log_group" "livekit" {
 # ------------------------------------------------------------------------------
 # Metric Filter: Voice Turn Latency from stdout logs (Plan §5, §7, decision 32)
 #
-# Exact log shape emitted by agent/turn_tracker.py:
-# `YYYY-MM-DD HH:MM:SS,mmm [INFO] ai-language-coach-agent: TURN_LATENCY total_ms stt_ms llm_ms tts_ms {"event": "voice_turn_latency", ...}`
+# Exact log shape emitted by agent/turn_tracker.py + agent/observability.py:
+# `YYYY-MM-DD HH:MM:SS,mmm [INFO] ai-language-coach-agent: TURN_LATENCY total_ms stt_ms llm_ms tts_ms {"event":"voice_turn_latency",...}`
+#
+# Note: CloudWatch Logs space-delimited filter patterns permit at most ONE `...`
+# wildcard, and `default_value` must NOT be set (emitting synthetic 0s on every
+# non-matching log line artificially drags down P95 and average latency).
 # ------------------------------------------------------------------------------
 resource "aws_cloudwatch_log_metric_filter" "voice_latency" {
   for_each       = local.voice_latency_metric_filters
   name           = "${var.name_prefix}-${each.key}"
   log_group_name = aws_cloudwatch_log_group.services["voice-agent-worker"].name
-  pattern        = "[..., marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
+  pattern        = "[date, time, level, logger, marker = \"TURN_LATENCY\", total_ms, stt_ms, llm_ms, tts_ms, ...]"
 
   metric_transformation {
-    name          = each.value.metric_name
-    namespace     = "AiLanguageCoach/Voice"
-    value         = each.value.value
-    unit          = "Milliseconds"
-    default_value = "0"
+    name      = each.value.metric_name
+    namespace = "AiLanguageCoach/Voice"
+    value     = each.value.value
+    unit      = "Milliseconds"
   }
+}
+
+# ------------------------------------------------------------------------------
+# Alarm Notifications (SNS Topic & Email Subscriptions)
+# ------------------------------------------------------------------------------
+resource "aws_sns_topic" "alarms" {
+  count = var.alarm_sns_topic_arn == "" ? 1 : 0
+  name  = "${var.name_prefix}-alarms"
+
+  tags = {
+    Name = "${var.name_prefix}-alarms"
+  }
+}
+
+resource "aws_sns_topic_subscription" "alarm_emails" {
+  for_each  = var.alarm_sns_topic_arn == "" ? toset(var.budget_alert_emails) : toset([])
+  topic_arn = aws_sns_topic.alarms[0].arn
+  protocol  = "email"
+  endpoint  = each.value
 }
 
 # ------------------------------------------------------------------------------
@@ -95,6 +119,9 @@ resource "aws_cloudwatch_metric_alarm" "turn_p95_latency" {
   period             = 300
   extended_statistic = "p95"
 
+  alarm_actions = [local.alarm_sns_topic_arn]
+  ok_actions    = [local.alarm_sns_topic_arn]
+
   depends_on = [aws_cloudwatch_log_metric_filter.voice_latency]
 }
 
@@ -110,6 +137,9 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx_errors" {
   threshold           = 10
   alarm_description   = "ALB target 5XX error count is elevated (> 10 in 5m)"
   treat_missing_data  = "notBreaching"
+
+  alarm_actions = [local.alarm_sns_topic_arn]
+  ok_actions    = [local.alarm_sns_topic_arn]
 
   dimensions = {
     LoadBalancer = aws_lb.main.arn_suffix
@@ -128,6 +158,9 @@ resource "aws_cloudwatch_metric_alarm" "voice_agent_task_count" {
   threshold           = 1
   alarm_description   = "Voice agent worker Fargate service has 0 reporting tasks"
   treat_missing_data  = "breaching"
+
+  alarm_actions = [local.alarm_sns_topic_arn]
+  ok_actions    = [local.alarm_sns_topic_arn]
 
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
@@ -209,6 +242,7 @@ resource "aws_cloudwatch_dashboard" "main" {
             ["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.laravel_app.name, { stat = "Average", label = "laravel-app" }],
             ["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.horizon_worker.name, { stat = "Average", label = "horizon-worker" }],
             ["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.reverb.name, { stat = "Average", label = "reverb" }],
+            ["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.scheduler.name, { stat = "Average", label = "scheduler" }],
             ["AWS/ECS", "CPUUtilization", "ClusterName", aws_ecs_cluster.main.name, "ServiceName", aws_ecs_service.voice_agent_worker.name, { stat = "Average", label = "voice-agent-worker" }]
           ]
           yAxis = { left = { min = 0, max = 100, label = "Percent" } }

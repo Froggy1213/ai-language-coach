@@ -16,6 +16,8 @@ use RuntimeException;
 final class VoiceMinutesExhausted extends RuntimeException implements ClientAware
 {
     private function __construct(
+        public readonly string $planCode,
+        public readonly bool $hasSubscription,
         public readonly int $usedSeconds,
         public readonly int $includedSeconds,
         public readonly ?CarbonImmutable $resetsAt,
@@ -27,6 +29,8 @@ final class VoiceMinutesExhausted extends RuntimeException implements ClientAwar
     public static function fromAllowance(VoiceAllowance $allowance): self
     {
         return new self(
+            planCode: $allowance->planCode,
+            hasSubscription: $allowance->hasSubscription,
             usedSeconds: $allowance->usedSeconds,
             includedSeconds: $allowance->includedSeconds,
             resetsAt: $allowance->resetsAt,

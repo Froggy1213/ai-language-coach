@@ -242,4 +242,24 @@ class CompleteLessonCardTest extends TestCase
         $response->assertGraphQLErrorMessage('This lesson card does not exist.');
         $this->assertSame('LESSON_CARD_NOT_FOUND', $response->json('errors.0.extensions.code'));
     }
+
+    public function test_refuses_card_on_archived_roadmap_and_keeps_roadmap_archived(): void
+    {
+        $user = User::factory()->create();
+        $archivedRoadmap = Roadmap::factory()->for($user)->create([
+            'status' => RoadmapStatus::Archived,
+        ]);
+        $card = LessonCard::factory()->for($archivedRoadmap)->create([
+            'status' => LessonCardStatus::Ready,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(self::COMPLETE_CARD, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLErrorMessage('This lesson card does not exist.');
+        $this->assertSame('LESSON_CARD_NOT_FOUND', $response->json('errors.0.extensions.code'));
+        $this->assertSame(RoadmapStatus::Archived, $archivedRoadmap->fresh()->status);
+        $this->assertSame(LessonCardStatus::Ready, $card->fresh()->status);
+    }
 }

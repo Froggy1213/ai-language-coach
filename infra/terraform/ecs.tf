@@ -126,6 +126,65 @@ resource "aws_iam_role_policy_attachment" "ecs_task_s3" {
   policy_arn = aws_iam_policy.ecs_task_s3_policy.arn
 }
 
+# Task role policy allowing Laravel to publish custom voice telemetry metrics to CloudWatch
+resource "aws_iam_policy" "ecs_task_cloudwatch_metrics" {
+  name        = "${var.name_prefix}-ecs-task-cloudwatch-metrics-policy"
+  description = "Allows ECS tasks to publish custom application metrics to CloudWatch"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "AiLanguageCoach/Voice"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_cloudwatch_metrics" {
+  role       = aws_iam_role.ecs_task_role.name
+  policy_arn = aws_iam_policy.ecs_task_cloudwatch_metrics.arn
+}
+
+# ------------------------------------------------------------------------------
+# Private Service Discovery (Cloud Map) for Internal Task-to-Task Communication
+# ------------------------------------------------------------------------------
+# Laravel and Horizon publish broadcast events to Reverb over HTTP on :8081
+# (`/apps/<app_id>/events`), while the public ALB exposes only the browser
+# WebSocket path `/app/*`. Cloud Map gives Reverb a stable private A record
+# inside the VPC (`reverb.<name_prefix>.internal`).
+resource "aws_service_discovery_private_dns_namespace" "internal" {
+  name        = "${var.name_prefix}.internal"
+  description = "Private DNS namespace for internal ECS service-to-service discovery"
+  vpc         = aws_vpc.main.id
+}
+
+resource "aws_service_discovery_service" "reverb" {
+  name = "reverb"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.internal.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
 # ------------------------------------------------------------------------------
 # Common Environment & Secrets Helpers
 # ------------------------------------------------------------------------------
@@ -168,20 +227,27 @@ locals {
     { name = "LIGHTHOUSE_QUERY_CACHE_MODE", value = "opcache" },
     { name = "LIGHTHOUSE_MAX_QUERY_DEPTH", value = "10" },
     { name = "LIGHTHOUSE_MAX_QUERY_COMPLEXITY", value = "50" },
-    { name = "REVERB_HOST", value = "127.0.0.1" },
+    # Internal task-to-task target for publishing Pusher/Reverb events (`/apps/*`).
+    # Resolved inside the VPC via AWS Cloud Map; the browser connects through the
+    # public ALB on wss://<app_domain>/app/<key> (configured on the web service).
+    { name = "REVERB_HOST", value = "reverb.${aws_service_discovery_private_dns_namespace.internal.name}" },
     { name = "REVERB_PORT", value = "8081" },
-    { name = "REVERB_SCHEME", value = "https" },
+    { name = "REVERB_SCHEME", value = "http" },
     { name = "CORS_ALLOWED_ORIGINS", value = "https://${var.app_domain}" },
     { name = "TRUSTED_PROXIES", value = var.vpc_cidr },
     { name = "SANCTUM_STATEFUL_DOMAINS", value = "${var.app_domain},www.${var.app_domain}" },
     { name = "AWS_DEFAULT_REGION", value = var.aws_region },
     { name = "AWS_BUCKET", value = aws_s3_bucket.storage.bucket },
     { name = "AWS_USE_PATH_STYLE_ENDPOINT", value = "false" },
-    # TODO(livekit-tls): the LiveKit node terminates TLS for TURN only (5349); its
-    # signaling port 7880 is plaintext. The backend's LiveKit admin bearer, the
+    # Application-level CloudWatch metrics (App\Observability\CloudWatchMetricPublisher).
+    { name = "CLOUDWATCH_METRICS_ENABLED", value = var.cloudwatch_metrics_enabled ? "true" : "false" },
+    { name = "CLOUDWATCH_METRICS_NAMESPACE", value = "AiLanguageCoach/Voice" },
+    { name = "CLOUDWATCH_METRICS_REGION", value = var.aws_region },
+    { name = "CLOUDWATCH_METRICS_ENVIRONMENT", value = var.environment },
     # Internal LiveKit communication dials the private IP inside the VPC so
     # Twirp admin bearer tokens never traverse the public internet.
-    # Public browser connections use LIVEKIT_PUBLIC_URL (wss://<livekit_domain>).
+    # Public browser connections use LIVEKIT_PUBLIC_URL (wss://<livekit_domain>),
+    # where Caddy on the LiveKit node terminates TLS on :443.
     { name = "LIVEKIT_URL", value = "ws://${aws_instance.livekit.private_ip}:7880" },
     { name = "LIVEKIT_PUBLIC_URL", value = "wss://${var.livekit_domain}" },
     { name = "LIVEKIT_SERVER_TOKEN_TTL_SECONDS", value = "60" },
@@ -281,7 +347,7 @@ resource "aws_ecs_task_definition" "laravel_app" {
   container_definitions = jsonencode([
     {
       name        = "api"
-      image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
+      image       = "${aws_ecr_repository.repos["api"].repository_url}:${var.image_tag}"
       essential   = true
       stopTimeout = 60
       portMappings = [
@@ -341,8 +407,9 @@ resource "aws_ecs_task_definition" "horizon_worker" {
   container_definitions = jsonencode([
     {
       name        = "horizon"
-      image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
+      image       = "${aws_ecr_repository.repos["api"].repository_url}:${var.image_tag}"
       essential   = true
+      user        = "www-data"
       command     = ["php", "artisan", "horizon"]
       stopTimeout = 120 # Fargate caps stopTimeout at 120s; the 300s job timeout cannot be drained on this launch type, so an in-flight job is retried instead (see the note at the top of this file)
       environment = local.laravel_common_env
@@ -388,8 +455,9 @@ resource "aws_ecs_task_definition" "reverb" {
   container_definitions = jsonencode([
     {
       name        = "reverb"
-      image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
+      image       = "${aws_ecr_repository.repos["api"].repository_url}:${var.image_tag}"
       essential   = true
+      user        = "www-data"
       command     = ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8081"]
       stopTimeout = 60
       portMappings = [
@@ -432,7 +500,65 @@ resource "aws_ecs_service" "reverb" {
     container_port   = 8081
   }
 
+  service_registries {
+    registry_arn = aws_service_discovery_service.reverb.arn
+  }
+
   depends_on = [aws_lb_listener.https]
+}
+
+# ------------------------------------------------------------------------------
+# 3b. Service: scheduler (Laravel Schedule Worker for Daily Privacy Purges)
+# ------------------------------------------------------------------------------
+# Runs `php artisan schedule:work` continuously so daily retention purges
+# (`privacy:purge-transcripts`, `privacy:purge-orphan-audio`) in
+# `backend/routes/console.php` execute reliably without Fargate cold-start
+# minute-boundary misses.
+resource "aws_ecs_task_definition" "scheduler" {
+  family                   = "${var.name_prefix}-scheduler"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name        = "scheduler"
+      image       = "${aws_ecr_repository.repos["api"].repository_url}:${var.image_tag}"
+      essential   = true
+      user        = "www-data"
+      command     = ["php", "artisan", "schedule:work"]
+      stopTimeout = 60
+      environment = local.laravel_common_env
+      secrets     = local.laravel_secrets
+      healthCheck = {
+        command     = ["CMD-SHELL", "pgrep -f 'artisan schedule:work' > /dev/null || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 10
+      }
+      logConfiguration = local.log_configs["scheduler"]
+    }
+  ])
+}
+
+resource "aws_ecs_service" "scheduler" {
+  name                               = "scheduler"
+  cluster                            = aws_ecs_cluster.main.id
+  task_definition                    = aws_ecs_task_definition.scheduler.arn
+  desired_count                      = 1
+  launch_type                        = "FARGATE"
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  network_configuration {
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.horizon_worker.id]
+    assign_public_ip = true # Plan §0, §8: Public subnet, no NAT
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -450,7 +576,7 @@ resource "aws_ecs_task_definition" "voice_agent_worker" {
   container_definitions = jsonencode([
     {
       name        = "voice-agent"
-      image       = "${aws_ecr_repository.repos["agent"].repository_url}:latest"
+      image       = "${aws_ecr_repository.repos["agent"].repository_url}:${var.image_tag}"
       essential   = true
       command     = ["python", "agent.py", "start"]
       stopTimeout = var.voice_agent_stop_timeout # Fargate cap; DRAIN_TIMEOUT_SECONDS is set below it so the worker exits before the SIGKILL
@@ -520,6 +646,10 @@ resource "aws_ecs_service" "voice_agent_worker" {
     security_groups  = [aws_security_group.voice_agent_worker.id]
     assign_public_ip = true # Plan §0, §8: Public subnet, no NAT
   }
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -565,7 +695,7 @@ resource "aws_ecs_task_definition" "web" {
   container_definitions = jsonencode([
     {
       name      = "web"
-      image     = "${aws_ecr_repository.repos["web"].repository_url}:latest"
+      image     = "${aws_ecr_repository.repos["web"].repository_url}:${var.image_tag}"
       essential = true
       portMappings = [
         {
@@ -580,7 +710,11 @@ resource "aws_ecs_task_definition" "web" {
         { name = "NUXT_PUBLIC_BACKEND_URL", value = "https://${var.app_domain}" },
         { name = "NUXT_PUBLIC_REVERB_HOST", value = var.app_domain },
         { name = "NUXT_PUBLIC_REVERB_PORT", value = "443" },
-        { name = "NUXT_PUBLIC_REVERB_SCHEME", value = "https" }
+        { name = "NUXT_PUBLIC_REVERB_SCHEME", value = "https" },
+        { name = "NUXT_PUBLIC_LEGAL_OPERATOR_NAME", value = var.legal_operator_name },
+        { name = "NUXT_PUBLIC_LEGAL_ADDRESS", value = var.legal_address },
+        { name = "NUXT_PUBLIC_LEGAL_PHONE", value = var.legal_phone },
+        { name = "NUXT_PUBLIC_LEGAL_EMAIL", value = var.legal_email }
       ]
       secrets = local.web_secrets
       healthCheck = {
@@ -631,9 +765,10 @@ resource "aws_ecs_task_definition" "migration" {
 
   container_definitions = jsonencode([
     {
-      name        = "migration"
-      image       = "${aws_ecr_repository.repos["api"].repository_url}:latest"
-      essential   = true
+      name             = "migration"
+      image            = "${aws_ecr_repository.repos["api"].repository_url}:${var.image_tag}"
+      essential        = true
+      user             = "www-data"
       command          = ["php", "artisan", "migrate", "--force"]
       environment      = local.laravel_common_env
       secrets          = local.laravel_secrets

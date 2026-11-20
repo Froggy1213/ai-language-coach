@@ -15,5 +15,17 @@ services:
     stop_grace_period: ${STOP_GRACE_PERIOD:-15m}
     volumes:
       - /opt/livekit/livekit.yaml:/etc/livekit.yaml:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /opt/livekit/certs:/etc/livekit-certs:ro
     command: ["--config", "/etc/livekit.yaml"]
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: livekit-tls-proxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/livekit/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/livekit/certs:/etc/livekit-certs:ro
+      - /var/www/certbot:/var/www/certbot:ro
+      - /opt/livekit/caddy_data:/data
+      - /opt/livekit/caddy_config:/config

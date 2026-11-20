@@ -159,7 +159,7 @@ return [
          * - opcache: store parsed queries in PHP files on the local filesystem to leverage OPcache
          * - hybrid: leverage OPcache, but use a shared cache store when local files are not found
          */
-        'mode' => env('LIGHTHOUSE_QUERY_CACHE_MODE', 'store'),
+        'mode' => env('LIGHTHOUSE_QUERY_CACHE_MODE', 'opcache'),
 
         /*
          * Specifies the path where the PHP files are stored when using opcache or hybrid mode.
@@ -467,7 +467,7 @@ return [
          * Setting this to `null` means the subscriptions are stored forever. This may cause
          * stale subscriptions to linger indefinitely in case cleanup fails for any reason.
          */
-        'storage_ttl' => env('LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL', null),
+        'storage_ttl' => env('LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL', 3600),
 
         /*
          * Encrypt subscription channels by prefixing their names with "private-encrypted-"?

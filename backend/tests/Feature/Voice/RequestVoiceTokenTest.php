@@ -3,6 +3,7 @@
 namespace Tests\Feature\GraphQL;
 
 use App\Enums\LessonCardStatus;
+use App\Enums\RoadmapStatus;
 use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
 use App\Models\Roadmap;
@@ -711,6 +712,60 @@ class RequestVoiceTokenTest extends TestCase
         $newDayResponse = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
         $newDayResponse->assertGraphQLErrorFree();
         $this->assertSame(5, $user->voiceSessions()->count());
+    }
+
+    public function test_stale_active_session_whose_room_returns_404_is_abandoned_with_duration_and_opens_fresh_room(): void
+    {
+        $user = User::factory()->create();
+        $card = $this->readyCardFor($user);
+
+        $this->freezeTime();
+        $staleSession = VoiceSession::factory()->for($user)->create([
+            'lesson_card_id' => $card->getKey(),
+            'status' => VoiceSessionStatus::Active,
+            'room_name' => 'stale-room-404',
+            'created_at' => now()->subSeconds(95),
+            'duration_sec' => null,
+        ]);
+
+        Http::fake([
+            'livekit.test/twirp/livekit.RoomService/CreateRoom' => Http::response(['sid' => 'RM_1']),
+            'livekit.test/twirp/livekit.AgentDispatchService/CreateDispatch' => Http::response(['id' => 'dispatch-1']),
+            'livekit.test/twirp/livekit.RoomService/ListParticipants' => static fn ($request) => ($request->data()['room'] ?? null) === 'stale-room-404'
+                ? Http::response(['code' => 'not_found', 'msg' => 'room does not exist'], 404)
+                : Http::response(['participants' => [['identity' => 'agent-1', 'kind' => 'AGENT']]]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+        $response->assertGraphQLErrorFree();
+
+        $staleSession->refresh();
+        $this->assertSame(VoiceSessionStatus::Abandoned, $staleSession->status);
+        $this->assertSame(95, $staleSession->duration_sec);
+
+        $newSessionId = (int) $response->json('data.requestVoiceToken.id');
+        $this->assertNotSame($staleSession->getKey(), $newSessionId);
+        $this->assertSame(2, $user->voiceSessions()->count());
+    }
+
+    public function test_request_voice_token_rejects_lesson_card_from_archived_roadmap(): void
+    {
+        $user = User::factory()->create();
+        $archivedRoadmap = Roadmap::factory()->for($user)->create([
+            'status' => RoadmapStatus::Archived,
+        ]);
+        $card = LessonCard::factory()->for($archivedRoadmap)->create([
+            'status' => LessonCardStatus::Ready,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->graphQL(self::REQUEST_TOKEN, ['lessonCardId' => $card->getKey()]);
+
+        $response->assertGraphQLValidationError('lessonCardId', 'This lesson card does not exist.');
+        $this->assertSame(0, $user->voiceSessions()->count());
     }
 
     /**

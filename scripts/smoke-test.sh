@@ -20,7 +20,7 @@ Verifies deployed AWS infrastructure against Plan §7 checklist:
   - ALB /up health route (Laravel API, port 8080)
   - Nuxt web frontend (port 3000)
   - Reverb WebSocket port / handshake
-  - LiveKit WebRTC signaling (port 7880) and TURN/TLS (port 5349)
+  - LiveKit WebRTC signaling (HTTPS/WSS on port 443) and TURN/TLS (port 5349)
   - LiveKit webhook signature verification endpoint
 
 Options:
@@ -56,6 +56,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Normalize LIVEKIT_HOST in case a caller passed a scheme or trailing slash
+LIVEKIT_HOST="${LIVEKIT_HOST#https://}"
+LIVEKIT_HOST="${LIVEKIT_HOST#http://}"
+LIVEKIT_HOST="${LIVEKIT_HOST#wss://}"
+LIVEKIT_HOST="${LIVEKIT_HOST#ws://}"
+LIVEKIT_HOST="${LIVEKIT_HOST%/}"
+
 echo "=== Running Milestone 2 Smoke Tests ==="
 echo "App URL:      $APP_URL"
 echo "LiveKit Host: $LIVEKIT_HOST"
@@ -81,8 +88,9 @@ check "ALB -> Laravel API (/up)" curl -fsS --max-time "$TIMEOUT" "$APP_URL/up"
 # 2. Check Nuxt 4 web root
 check "ALB -> Nuxt Web Frontend (/)" curl -fsS --max-time "$TIMEOUT" "$APP_URL/"
 
-# 3. Check LiveKit signaling HTTP port 7880
-check "LiveKit Server Signaling (:7880)" curl -fsS --max-time "$TIMEOUT" "http://$LIVEKIT_HOST:7880/"
+# 3. Check LiveKit public HTTPS/WSS signaling endpoint (:443 TLS proxy -> 127.0.0.1:7880)
+# Port 7880 is restricted strictly to the VPC CIDR; public browsers connect over 443.
+check "LiveKit Server Signaling (https://$LIVEKIT_HOST/)" curl -fsS --max-time "$TIMEOUT" "https://$LIVEKIT_HOST/"
 
 # 4. Check LiveKit TURN/TLS port 5349
 check "LiveKit TURN/TLS Port (:5349)" nc -z -w "$TIMEOUT" "$LIVEKIT_HOST" 5349

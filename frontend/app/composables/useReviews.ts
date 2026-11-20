@@ -1,5 +1,6 @@
 import type { CombinedError } from '@urql/vue'
 import { computed, onMounted, ref } from 'vue'
+import { review as reviewCopy } from '~/constants/strings'
 import {
   DUE_REVIEWS_QUERY,
   RECURRING_MISTAKES_QUERY,
@@ -30,14 +31,21 @@ export function useReviews() {
 
   function mapReviewError(failure: CombinedError | null | undefined): string {
     return graphQLErrorMessageFor(failure, {
-      fallback: '復習の結果を保存できませんでした。',
+      fallback: reviewCopy.submitError,
     })
   }
 
   async function fetchDueReviews(): Promise<void> {
     try {
       const result = await $urql
-        .query<{ dueReviews: ReviewItem[] }>(DUE_REVIEWS_QUERY, {}, { requestPolicy: 'network-only' })
+        .query<{ dueReviews: ReviewItem[] }>(
+          DUE_REVIEWS_QUERY,
+          {},
+          {
+            requestPolicy: 'network-only',
+            additionalTypenames: ['ReviewItem'],
+          },
+        )
         .toPromise()
 
       if (result.error) {
@@ -48,7 +56,7 @@ export function useReviews() {
 
       dueReviews.value = result.data?.dueReviews ?? []
     } catch {
-      error.value = '復習キューを読み込めませんでした。'
+      error.value = reviewCopy.loadError
       dueReviews.value = []
     }
   }
@@ -98,7 +106,7 @@ export function useReviews() {
    */
   async function submitReview(grammarPointId: string, quality: number): Promise<ReviewItem | null> {
     if (quality < 0 || quality > 5) {
-      itemErrors.value[grammarPointId] = '評価は0から5の範囲で指定してください。'
+      itemErrors.value[grammarPointId] = reviewCopy.qualityRangeError
       return null
     }
 
@@ -132,7 +140,7 @@ export function useReviews() {
 
       return updated
     } catch {
-      itemErrors.value[grammarPointId] = '復習の結果を送信できませんでした。'
+      itemErrors.value[grammarPointId] = reviewCopy.sendError
       return null
     } finally {
       submittingId.value = null

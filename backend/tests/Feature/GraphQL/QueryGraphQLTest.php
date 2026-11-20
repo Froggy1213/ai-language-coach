@@ -13,6 +13,7 @@ use App\Models\Roadmap;
 use App\Models\User;
 use App\Models\VoiceSession;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
 use Tests\TestCase;
@@ -528,5 +529,69 @@ class QueryGraphQLTest extends TestCase
             ->assertJsonPath('data.roadmap.lessonCards.1.recentMistakeCount', 0)
             ->assertJsonPath('data.roadmap.lessonCards.1.needsPractice', false)
             ->assertJsonPath('data.roadmap.lessonCards.1.grammarPoint.prerequisites.0.code', 'present_simple');
+    }
+
+    public function test_roadmap_lesson_cards_resolve_without_n_plus_one_queries(): void
+    {
+        $user = User::factory()->create();
+        $roadmap = Roadmap::factory()->for($user)->create();
+
+        $previousGrammarPointId = null;
+        foreach (range(1, 10) as $index) {
+            $card = LessonCard::factory()->for($roadmap)->create([
+                'order_index' => $index,
+            ]);
+
+            if ($previousGrammarPointId !== null) {
+                $card->grammarPoint->prerequisites()->attach($previousGrammarPointId);
+            }
+            $previousGrammarPointId = $card->grammar_point_id;
+
+            Mistake::factory()->for($user)->create([
+                'grammar_point_id' => $card->grammar_point_id,
+                'created_at' => now()->subDays($index % 5),
+            ]);
+        }
+
+        Sanctum::actingAs($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        try {
+            $response = $this->graphQL('
+                query {
+                    roadmap {
+                        id
+                        lessonCards {
+                            id
+                            recentMistakeCount
+                            needsPractice
+                            grammarPoint {
+                                code
+                                level
+                                prerequisites {
+                                    code
+                                }
+                            }
+                        }
+                    }
+                }
+            ');
+            $queries = DB::getQueryLog();
+        } finally {
+            DB::disableQueryLog();
+        }
+
+        $response->assertGraphQLErrorFree()
+            ->assertJsonCount(10, 'data.roadmap.lessonCards')
+            ->assertJsonPath('data.roadmap.lessonCards.0.recentMistakeCount', 1)
+            ->assertJsonCount(1, 'data.roadmap.lessonCards.1.grammarPoint.prerequisites');
+
+        $this->assertLessThanOrEqual(
+            8,
+            count($queries),
+            'Expected roadmap query with 10 cards + prerequisites + mistakes to run in <= 8 SQL queries, got '.count($queries)
+        );
     }
 }

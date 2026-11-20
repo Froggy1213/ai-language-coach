@@ -21,12 +21,18 @@ const stoppedWaiting = ref(false)
 
 const isAnalyzing = computed(() => analyzing.value && !stoppedWaiting.value)
 
+watch(sessionId, () => {
+  stoppedWaiting.value = false
+})
+
 async function handleRefresh(): Promise<void> {
   refreshing.value = true
 
   try {
     await refresh()
-    stoppedWaiting.value = true
+    if (!error.value && session.value) {
+      stoppedWaiting.value = true
+    }
   } finally {
     refreshing.value = false
   }
@@ -128,6 +134,18 @@ const goalTone = computed(() => (goalReview.value?.goalAchieved ? GOAL_TONES.ach
       <UiSpinner />
       {{ reflect.loading }}
     </p>
+
+    <div v-else-if="error && !session" class="space-y-5 py-10">
+      <UiNotice :message="error">
+        <template #actions>
+          <UiButton variant="ghost" size="sm" :loading="refreshing" @click="handleRefresh">
+            {{ common.retryShort }}
+          </UiButton>
+        </template>
+      </UiNotice>
+
+      <UiButtonLink to="/roadmap" variant="quiet" size="lg">{{ common.backToRoadmap }}</UiButtonLink>
+    </div>
 
     <div v-else-if="!session" class="space-y-5 py-10">
       <PageHeader :title="reflect.notFound" :lead="reflect.notFoundBody" />
@@ -260,6 +278,11 @@ const goalTone = computed(() => (goalReview.value?.goalAchieved ? GOAL_TONES.ach
           :title="reflect.analysisUnfinished"
         >
           {{ reflect.analysisUnfinishedBody }}
+          <template #actions>
+            <UiButton variant="quiet" size="sm" :loading="refreshing" @click="handleRefresh">
+              {{ reflect.checkNow }}
+            </UiButton>
+          </template>
         </UiNotice>
 
         <div v-else class="space-y-8">

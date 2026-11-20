@@ -28,12 +28,12 @@ Route::post('/webhooks/stripe', StripeWebhookController::class)
 
 // The voice agent reports its own failures here (plan §5).
 Route::post('/internal/sessions/{session}/fail', FailVoiceSessionController::class)
-    ->middleware([VerifyInternalSecret::class, 'throttle:120,1'])
+    ->middleware([VerifyInternalSecret::class, 'throttle:600,1'])
     ->whereNumber('session');
 
 // The voice agent reports per-turn latency here (plan §5).
 Route::post('/internal/sessions/{session}/turns', RecordVoiceSessionTurnController::class)
-    ->middleware([VerifyInternalSecret::class, 'throttle:120,1'])
+    ->middleware([VerifyInternalSecret::class, 'throttle:1200,1'])
     ->whereNumber('session');
 
 // The learner's browser reports client-side WebRTC / microphone failures here.

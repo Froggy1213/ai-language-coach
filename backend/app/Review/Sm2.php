@@ -20,6 +20,8 @@ final class Sm2
 
     public const MIN_EASE_FACTOR = 1.30;
 
+    public const MAX_INTERVAL_DAYS = 365;
+
     /**
      * Compute the next SM-2 review parameters.
      *
@@ -71,6 +73,7 @@ final class Sm2
                 if ($newIntervalDays < 1) {
                     $newIntervalDays = 1;
                 }
+                $newIntervalDays = min(self::MAX_INTERVAL_DAYS, $newIntervalDays);
                 $newRepetitionNumber = $repetitionNumber + 1;
             }
         }

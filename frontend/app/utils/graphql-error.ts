@@ -1,8 +1,12 @@
+import { errors as errorsCopy } from '~/constants/strings'
+
 /**
  * Structural shape of a GraphQL error or Urql CombinedError.
  */
 export interface GraphQLErrorLike {
   message?: string
+  networkError?: Error | unknown
+  response?: { status?: number } | unknown
   graphQLErrors?: ReadonlyArray<{
     message?: string
     extensions?: {
@@ -17,6 +21,43 @@ export interface GraphQLErrorLike {
 function isObject(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null
 }
+
+function getResponseStatus(error: Record<string, unknown>): number | null {
+  const response = isObject(error.response) ? error.response : undefined
+  return typeof response?.status === 'number' ? response.status : null
+}
+
+function graphQLErrorIsInternal(error: Record<string, unknown>): boolean {
+  const graphQLErrors = Array.isArray(error.graphQLErrors) ? error.graphQLErrors : []
+  const first = graphQLErrors[0]
+  const extensions = isObject(first) && isObject(first.extensions) ? first.extensions : undefined
+  return extensions?.category === 'internal'
+}
+
+function isRateLimitMessage(message: string | null): boolean {
+  if (!message) {
+    return false
+  }
+  return /^(?:\[GraphQL\]\s*|\[\w+\]\s*)?Rate limit\b/i.test(message)
+    || /too many (?:requests|attempts)/i.test(message)
+}
+
+function isInternalServerMessage(message: string | null): boolean {
+  if (!message) {
+    return false
+  }
+  return /^(?:\[(?:Network|GraphQL)\]\s*)?Internal server error\.?$/i.test(message)
+}
+
+function isNetworkMessage(message: string | null): boolean {
+  if (!message) {
+    return false
+  }
+  return /^\[Network\]/i.test(message)
+    || /^(?:Failed to fetch|Load failed|NetworkError\b|fetch failed)/i.test(message)
+}
+
+const JAPANESE_CHAR_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/
 
 /**
  * A message worth showing the user.
@@ -99,21 +140,21 @@ export function graphQLErrorExtensions(error: GraphQLErrorLike | unknown): Recor
 }
 
 /** The one message that must never depend on an index lookup, so it stays total. */
-export const AUTH_EXPIRED_MESSAGE = 'セッションの有効期限が切れました。もう一度ログインしてください。'
+export const AUTH_EXPIRED_MESSAGE = errorsCopy.authExpired
 
 export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
   UNAUTHENTICATED: AUTH_EXPIRED_MESSAGE,
-  REVIEW_ITEM_NOT_FOUND: '復習する項目が見つかりません。',
-  GRAMMAR_POINT_NOT_FOUND: '文法項目が見つかりません。',
-  CONFIRMATION_REQUIRED: '削除を確定するには DELETE と入力してください。',
-  PASSWORD_MISMATCH: 'パスワードが正しくありません。',
-  PASSWORD_RESET_INVALID: '再設定リンクが無効か、有効期限が切れています。もう一度リクエストしてください。',
-  EMAIL_VERIFICATION_INVALID: '確認リンクが無効です。設定画面から確認メールを再送してください。',
-  EMAIL_VERIFICATION_EXPIRED: '確認リンクの有効期限が切れています。設定画面から確認メールを再送してください。',
-  VOICE_CONSENT_REQUIRED: '音声の録音と処理への同意が必要です。',
-  SCENARIO_DRAFT_FAILED: 'AIがお題を組み立てられませんでした。もう一度お試しください。',
-  SCENARIO_NOT_FOUND: '指定されたお題が見つかりません。',
-  BILLING_CANCEL_FAILED: 'サブスクリプションを解約できませんでした。通信状況を確認して、もう一度お試しください。',
+  REVIEW_ITEM_NOT_FOUND: errorsCopy.reviewItemNotFound,
+  GRAMMAR_POINT_NOT_FOUND: errorsCopy.grammarPointNotFound,
+  CONFIRMATION_REQUIRED: errorsCopy.confirmationRequired,
+  PASSWORD_MISMATCH: errorsCopy.passwordMismatch,
+  PASSWORD_RESET_INVALID: errorsCopy.passwordResetInvalid,
+  EMAIL_VERIFICATION_INVALID: errorsCopy.emailVerificationInvalid,
+  EMAIL_VERIFICATION_EXPIRED: errorsCopy.emailVerificationExpired,
+  VOICE_CONSENT_REQUIRED: errorsCopy.voiceConsentRequired,
+  SCENARIO_DRAFT_FAILED: errorsCopy.scenarioDraftFailed,
+  SCENARIO_NOT_FOUND: errorsCopy.scenarioNotFound,
+  BILLING_CANCEL_FAILED: errorsCopy.billingCancelFailed,
 }
 
 /**
@@ -121,14 +162,17 @@ export const DEFAULT_GRAPHQL_ERROR_MESSAGES: Record<string, string> = {
  *
  * Resolution order:
  * 1. Checks `graphQLErrorCode(error)` in `{ ...DEFAULT_GRAPHQL_ERROR_MESSAGES, ...options.codes }`.
- * 2. When the server rejected the input and the caller supplied a `fallback`,
- *    returns that fallback instead of the server's own sentence — validation text
- *    is written in the server's language, not the interface's.
- * 3. Inspects the raw server message: an exact `Unauthenticated.` (Laravel
- *    Lighthouse guards emit this without an error code) maps to shared copy.
- * 4. Looks the raw server message up in `options.messages`, for the handful of
- *    backend messages that carry no code but still deserve their own wording.
- * 5. Otherwise returns the server message, or the fallback when there is none.
+ * 2. Inspects the raw server message: an exact `Unauthenticated.` (Laravel
+ *    Lighthouse guards emit this without an error code) maps to shared copy,
+ *    and explicit `options.messages` mappings run before generic validation
+ *    fallback so domain-specific validation rules (such as `voice-errors.ts`)
+ *    remain reachable.
+ * 3. Maps HTTP 401, `@throttle` / HTTP 429 rate-limit responses, HTTP 5xx /
+ *    internal server errors, and network transport failures (`[Network] ...`)
+ *    to Japanese strings from `constants/strings.ts`.
+ * 4. When the server rejected the input (`extensions.category === 'validation'`),
+ *    returns the caller's `fallback` instead of English server validation text.
+ * 5. Returns an already-localized Japanese message if present, or the fallback.
  *
  * Never returns null or undefined.
  */
@@ -140,7 +184,7 @@ export function graphQLErrorMessageFor(
     fallback?: string
   },
 ): string {
-  const fallback = options?.fallback ?? 'リクエストを完了できませんでした。しばらくしてからお試しください。'
+  const fallback = options?.fallback ?? errorsCopy.fallback
 
   if (!isObject(error)) {
     return fallback
@@ -151,10 +195,6 @@ export function graphQLErrorMessageFor(
 
   if (code && mergedCodes[code]) {
     return mergedCodes[code]
-  }
-
-  if (options?.fallback && graphQLErrorIsValidation(error)) {
-    return options.fallback
   }
 
   const serverMessage = graphQLErrorMessage(error)
@@ -169,7 +209,29 @@ export function graphQLErrorMessageFor(
     return mappedMessage
   }
 
-  if (serverMessage) {
+  const status = getResponseStatus(error)
+
+  if (status === 401) {
+    return mergedCodes.UNAUTHENTICATED ?? AUTH_EXPIRED_MESSAGE
+  }
+
+  if (status === 429 || isRateLimitMessage(serverMessage)) {
+    return errorsCopy.rateLimited
+  }
+
+  if ((status !== null && status >= 500) || graphQLErrorIsInternal(error) || isInternalServerMessage(serverMessage)) {
+    return errorsCopy.serverError
+  }
+
+  if (Boolean(error.networkError) || isNetworkMessage(serverMessage)) {
+    return errorsCopy.network
+  }
+
+  if (graphQLErrorIsValidation(error)) {
+    return fallback
+  }
+
+  if (serverMessage && JAPANESE_CHAR_RE.test(serverMessage)) {
     return serverMessage
   }
 

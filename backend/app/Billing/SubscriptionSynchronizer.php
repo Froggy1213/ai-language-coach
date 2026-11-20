@@ -62,14 +62,25 @@ final class SubscriptionSynchronizer
             ->where('stripe_subscription_id', $stripeId)
             ->first();
 
-        $userId = $this->userIdFrom($payload);
-
         if (! $subscription instanceof Subscription) {
-            if ($userId === null) {
-                // Without a learner the row cannot be attributed. Dropping it is
-                // better than inventing one; a later event with metadata, or the
-                // operator, can still reconcile it.
-                Log::warning('Stripe subscription webhook without a learner.', ['subscription' => $stripeId]);
+            $userId = $this->userIdFrom($payload);
+
+            if ($userId === null && is_string($payload['customer'] ?? null) && $payload['customer'] !== '') {
+                $matchedUserId = User::query()
+                    ->where('stripe_customer_id', $payload['customer'])
+                    ->value('id');
+                $userId = is_numeric($matchedUserId) ? (int) $matchedUserId : null;
+            }
+
+            if ($userId === null || ! User::query()->whereKey($userId)->exists()) {
+                // Without an existing learner the row cannot be attributed (for
+                // example when `customer.subscription.deleted` arrives after the
+                // learner deleted their account). Returning cleanly lets the
+                // webhook dedupe row commit and stops Stripe from retrying.
+                Log::warning('Stripe subscription webhook for an unknown or deleted learner.', [
+                    'subscription' => $stripeId,
+                    'user_id' => $userId,
+                ]);
 
                 return;
             }
@@ -78,6 +89,15 @@ final class SubscriptionSynchronizer
                 'user_id' => $userId,
                 'stripe_subscription_id' => $stripeId,
             ]);
+        } else {
+            if (in_array($subscription->status, ['canceled', 'incomplete_expired'], true)) {
+                return;
+            }
+
+            $incomingStatus = (string) ($payload['status'] ?? $subscription->status ?? 'incomplete');
+            if ($subscription->isActive() && $incomingStatus === 'incomplete') {
+                return;
+            }
         }
 
         $priceId = (string) data_get($payload, 'items.data.0.price.id', '');

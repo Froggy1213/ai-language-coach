@@ -25,8 +25,11 @@ use App\Scenarios\ScenarioDrafter;
 use App\Support\ProductionSanityCheck;
 use App\Voice\LiveKitToken;
 use Aws\S3\S3Client;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Nuwave\Lighthouse\Schema\TypeRegistry;
 use Nuwave\Lighthouse\Support\Contracts\ProvidesValidationRules;
@@ -49,11 +52,20 @@ class AppServiceProvider extends ServiceProvider
             $config = [
                 'version' => 'latest',
                 'region' => $disk['region'] ?: 'us-east-1',
-                'credentials' => [
-                    'key' => $disk['key'] ?? '',
-                    'secret' => $disk['secret'] ?? '',
-                ],
             ];
+
+            // Only supply static credentials when configured; on ECS the task
+            // role supplies them via the SDK's default credential chain, and an
+            // empty key pair disables that chain.
+            $key = (string) ($disk['key'] ?? '');
+            $secret = (string) ($disk['secret'] ?? '');
+
+            if ($key !== '' && $secret !== '') {
+                $config['credentials'] = [
+                    'key' => $key,
+                    'secret' => $secret,
+                ];
+            }
 
             if (filled($disk['endpoint'] ?? null)) {
                 $config['endpoint'] = $disk['endpoint'];
@@ -127,5 +139,40 @@ class AppServiceProvider extends ServiceProvider
         $typeRegistry->register(new NativeEnumType(AssessmentStatus::class));
         $typeRegistry->register(new NativeEnumType(VoiceSessionStatus::class));
         $typeRegistry->register(new NativeEnumType(BillingInterval::class));
+
+        $this->registerRateLimiters();
+    }
+
+    /**
+     * Isolate each GraphQL mutation's rate limit into its own bucket.
+     *
+     * Without a `name:` or `prefix:`, Lighthouse's `@throttle` shares a single
+     * key across all fields per IP.
+     */
+    private function registerRateLimiters(): void
+    {
+        $byIp = static fn (int $perMinute): \Closure => static fn (Request $request): Limit => Limit::perMinute($perMinute)
+            ->by((string) $request->ip());
+
+        $byUserOrIp = static fn (int $perMinute): \Closure => static fn (Request $request): Limit => Limit::perMinute($perMinute)
+            ->by((string) ($request->user('sanctum')?->getKey() ?? $request->user()?->getKey() ?? $request->ip()));
+
+        RateLimiter::for('gql-login', $byIp(10));
+        RateLimiter::for('gql-register', $byIp(5));
+        RateLimiter::for('gql-forgot-password', $byIp(5));
+        RateLimiter::for('gql-reset-password', $byIp(5));
+        RateLimiter::for('gql-verify-email', $byIp(10));
+
+        RateLimiter::for('gql-verify-email-send', $byUserOrIp(5));
+        RateLimiter::for('gql-update-profile', $byUserOrIp(10));
+        RateLimiter::for('gql-update-password', $byUserOrIp(5));
+        RateLimiter::for('gql-assessment-upload', $byUserOrIp(10));
+        RateLimiter::for('gql-assessment-submit', $byUserOrIp(10));
+        RateLimiter::for('gql-scenario-draft', $byUserOrIp(10));
+        RateLimiter::for('gql-voice-token', $byUserOrIp(15));
+        RateLimiter::for('gql-review-submit', $byUserOrIp(60));
+        RateLimiter::for('gql-delete-account', $byUserOrIp(5));
+        RateLimiter::for('gql-billing-checkout', $byUserOrIp(10));
+        RateLimiter::for('gql-billing-portal', $byUserOrIp(10));
     }
 }

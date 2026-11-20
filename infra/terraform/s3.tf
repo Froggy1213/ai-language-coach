@@ -42,11 +42,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "storage" {
   }
 }
 
+# Assessment recordings are transient PII that PRIVACY.md requires to be
+# permanently deleted immediately after transcription or account deletion.
+# Suspending versioning prevents S3 from retaining deleted recordings as
+# noncurrent versions (and cleanly transitions any pre-existing bucket).
 resource "aws_s3_bucket_versioning" "storage" {
   bucket = aws_s3_bucket.storage.id
 
   versioning_configuration {
-    status = "Enabled"
+    status = "Suspended"
   }
 }
 
@@ -91,6 +95,8 @@ resource "aws_s3_bucket_cors_configuration" "storage" {
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
 
+  depends_on = [aws_s3_bucket_versioning.storage]
+
   # Rule 1: Raw assessment audio cleanup (Plan §5, §7)
   # Raw audio must not be retained longer than required for STT batch processing.
   rule {
@@ -122,6 +128,35 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
 
     expiration {
       days = var.transcript_retention_days
+    }
+  }
+
+  # Rule 3: Purge any historical noncurrent versions and orphaned delete markers
+  # left behind by suspended versioning so deleted recordings are never retained.
+  rule {
+    id     = "NoncurrentAndDeleteMarkerCleanup"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      expired_object_delete_marker = true
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  # Rule 4: Abort abandoned browser/multipart uploads after 1 day.
+  rule {
+    id     = "AbortIncompleteMultipartUploads"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
     }
   }
 }

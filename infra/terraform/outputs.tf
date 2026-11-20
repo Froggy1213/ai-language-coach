@@ -58,3 +58,13 @@ output "cloudwatch_dashboard_name" {
   description = "Name of the operations CloudWatch dashboard"
   value       = aws_cloudwatch_dashboard.main.dashboard_name
 }
+
+output "alarms_sns_topic_arn" {
+  description = "SNS topic ARN receiving CloudWatch operational alarm notifications"
+  value       = local.alarm_sns_topic_arn
+}
+
+output "reverb_internal_hostname" {
+  description = "Private Cloud Map DNS hostname for internal Laravel-to-Reverb event publishing"
+  value       = "reverb.${aws_service_discovery_private_dns_namespace.internal.name}"
+}

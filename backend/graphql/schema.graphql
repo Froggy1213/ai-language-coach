@@ -52,13 +52,13 @@ type Mutation {
 
     "Sign in and start a session (Sanctum SPA cookie)."
     login(email: String!, password: String!): User!
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-login")
         @field(resolver: "App\\GraphQL\\Mutations\\Login")
         @validator(class: "App\\GraphQL\\Validators\\LoginValidator")
 
     "Create an account and sign in."
     register(name: String!, email: String!, password: String!, targetLanguage: String!): User!
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-register")
         @field(resolver: "App\\GraphQL\\Mutations\\Register")
         @validator(class: "App\\GraphQL\\Validators\\RegisterValidator")
 
@@ -73,7 +73,7 @@ type Mutation {
         "Email address of the account."
         email: String!
     ): Boolean!
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-forgot-password")
         @field(resolver: "App\\GraphQL\\Mutations\\ForgotPassword")
         @validator(class: "App\\GraphQL\\Validators\\ForgotPasswordValidator")
 
@@ -88,7 +88,7 @@ type Mutation {
         "The new password (at least 8 characters)."
         password: String!
     ): Boolean!
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-reset-password")
         @field(resolver: "App\\GraphQL\\Mutations\\ResetPassword")
         @validator(class: "App\\GraphQL\\Validators\\ResetPasswordValidator")
 
@@ -98,7 +98,7 @@ type Mutation {
     """
     sendEmailVerificationNotification: Boolean!
         @guard
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-verify-email-send")
         @field(resolver: "App\\GraphQL\\Mutations\\SendEmailVerificationNotification")
 
     """
@@ -115,7 +115,7 @@ type Mutation {
         "HMAC-SHA256 signature."
         signature: String!
     ): Boolean!
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-verify-email")
         @field(resolver: "App\\GraphQL\\Mutations\\VerifyEmail")
         @validator(class: "App\\GraphQL\\Validators\\VerifyEmailValidator")
 
@@ -129,7 +129,7 @@ type Mutation {
         email: String!
     ): User!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-update-profile")
         @field(resolver: "App\\GraphQL\\Mutations\\UpdateProfile")
         @validator(class: "App\\GraphQL\\Validators\\UpdateProfileValidator")
 
@@ -143,7 +143,7 @@ type Mutation {
         newPassword: String!
     ): Boolean!
         @guard
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-update-password")
         @field(resolver: "App\\GraphQL\\Mutations\\UpdatePassword")
         @validator(class: "App\\GraphQL\\Validators\\UpdatePasswordValidator")
 
@@ -162,7 +162,7 @@ type Mutation {
         contentType: String!
     ): PresignedUpload!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-assessment-upload")
         @field(resolver: "App\\GraphQL\\Mutations\\CreateAssessmentUploadUrl")
         @validator(class: "App\\GraphQL\\Validators\\CreateAssessmentUploadUrlValidator")
 
@@ -175,7 +175,7 @@ type Mutation {
         audioUrl: String!
     ): Assessment!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-assessment-submit")
         @field(resolver: "App\\GraphQL\\Mutations\\SubmitAssessment")
         @validator(class: "App\\GraphQL\\Validators\\SubmitAssessmentValidator")
 
@@ -195,7 +195,7 @@ type Mutation {
         code: String
     ): Scenario!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-scenario-draft")
         @field(resolver: "App\\GraphQL\\Mutations\\DraftCustomScenario")
         @validator(class: "App\\GraphQL\\Validators\\DraftCustomScenarioValidator")
 
@@ -237,7 +237,7 @@ type Mutation {
         scenarioCode: String
     ): VoiceSession!
         @guard
-        @throttle(maxAttempts: 15, decayMinutes: 1)
+        @throttle(name: "gql-voice-token")
         @field(resolver: "App\\Voice\\StartVoiceSession")
 
     """
@@ -262,13 +262,14 @@ type Mutation {
         quality: Int!
     ): ReviewItem!
         @guard
+        @throttle(name: "gql-review-submit")
         @field(resolver: "App\\GraphQL\\Mutations\\SubmitReviewResult")
         @validator(class: "App\\GraphQL\\Validators\\SubmitReviewResultValidator")
 
     """
-    Mark a lesson card as completed and unlock the next card in sequence (order_index + 1)
-    inside a database transaction under pessimistic locking. Idempotent: repeating on
-    an already completed card leaves it completed and returns it.
+    Mark a lesson card as completed and unlock any dependent cards in the
+    grammar prerequisite DAG inside a database transaction under pessimistic locking.
+    Idempotent: repeating on an already completed card leaves it completed and returns it.
     """
     completeLessonCard(
         "The lesson card to complete; must be one of the learner's own cards."
@@ -289,7 +290,7 @@ type Mutation {
         confirmation: String!
     ): Boolean!
         @guard
-        @throttle(maxAttempts: 5, decayMinutes: 1)
+        @throttle(name: "gql-delete-account")
         @field(resolver: "App\\GraphQL\\Mutations\\DeleteAccount")
 
     """
@@ -303,7 +304,7 @@ type Mutation {
         interval: BillingInterval!
     ): BillingRedirect!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-billing-checkout")
         @field(resolver: "App\\GraphQL\\Mutations\\CreateCheckoutSession")
 
     """
@@ -312,7 +313,7 @@ type Mutation {
     """
     createBillingPortalSession: BillingRedirect!
         @guard
-        @throttle(maxAttempts: 10, decayMinutes: 1)
+        @throttle(name: "gql-billing-portal")
         @field(resolver: "App\\GraphQL\\Mutations\\CreateBillingPortalSession")
 }
 

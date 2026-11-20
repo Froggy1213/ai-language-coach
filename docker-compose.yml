@@ -101,6 +101,7 @@ x-laravel-environment: &laravel-environment
   # (`cache.serializable_classes => false`), so every repeated query 500s.
   LIGHTHOUSE_BROADCASTER: reverb
   LIGHTHOUSE_SUBSCRIPTION_STORAGE: redis
+  LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL: ${LIGHTHOUSE_SUBSCRIPTION_STORAGE_TTL:-3600}
   LIGHTHOUSE_QUERY_CACHE_MODE: opcache
   LIGHTHOUSE_MAX_QUERY_DEPTH: ${LIGHTHOUSE_MAX_QUERY_DEPTH:-10}
   LIGHTHOUSE_MAX_QUERY_COMPLEXITY: ${LIGHTHOUSE_MAX_QUERY_COMPLEXITY:-50}
@@ -148,13 +149,14 @@ x-laravel-environment: &laravel-environment
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-coach_minio}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-coach_minio_password}
   AWS_BUCKET: ${AWS_BUCKET:-coach-audio}
-  AWS_DEFAULT_REGION: us-east-1
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
   AWS_USE_PATH_STYLE_ENDPOINT: "true"
 
-  # Batch speech-to-text model for the onboarding assessment. The Laravel side
-  # reads the model from `dij-digital/deepgram-laravel`, whose own fallback is
-  # still Nova-2 — a different generation from the Nova-3 the streaming agent
-  # uses. Named here so both passes transcribe the same way.
+  # Batch speech-to-text key and model for the onboarding assessment. The
+  # Laravel side reads the model from `dij-digital/deepgram-laravel`, whose own
+  # fallback is still Nova-2 — a different generation from the Nova-3 the
+  # streaming agent uses. Named here so both passes transcribe the same way.
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
   DEEPGRAM_DEFAULT_MODEL: ${DEEPGRAM_DEFAULT_MODEL:-nova-3}
 
   # LIVEKIT_URL is what this backend dials (Twirp); LIVEKIT_PUBLIC_URL is what
@@ -179,7 +181,7 @@ x-laravel-environment: &laravel-environment
   SENTRY_RELEASE: ${SENTRY_RELEASE:-}
   CLOUDWATCH_METRICS_ENABLED: ${CLOUDWATCH_METRICS_ENABLED:-false}
   CLOUDWATCH_METRICS_NAMESPACE: ${CLOUDWATCH_METRICS_NAMESPACE:-AiLanguageCoach/Voice}
-  CLOUDWATCH_METRICS_REGION: ${CLOUDWATCH_METRICS_REGION:-us-east-1}
+  CLOUDWATCH_METRICS_REGION: ${CLOUDWATCH_METRICS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
   CLOUDWATCH_METRICS_ENVIRONMENT: ${CLOUDWATCH_METRICS_ENVIRONMENT:-local}
   VOICE_MONTHLY_MINUTES_BUDGET: ${VOICE_MONTHLY_MINUTES_BUDGET:-300}
 
@@ -378,7 +380,7 @@ services:
       # before that is speaking into an empty room.
       GREETING_WAIT_SECONDS: ${GREETING_WAIT_SECONDS:-60}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
@@ -482,6 +484,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: coach_horizon
+    user: www-data
     restart: unless-stopped
     logging: *default-logging
     command: ["php", "artisan", "horizon"]
@@ -508,6 +511,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: coach_scheduler
+    user: www-data
     restart: unless-stopped
     logging: *default-logging
     command: ["php", "artisan", "schedule:work"]
@@ -530,6 +534,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: coach_reverb
+    user: www-data
     restart: unless-stopped
     logging: *default-logging
     # The image's role convention is Reverb on 8081 (README -> "Containers"),
@@ -578,6 +583,10 @@ services:
       NUXT_PUBLIC_REVERB_HOST: ${NUXT_PUBLIC_REVERB_HOST:-127.0.0.1}
       NUXT_PUBLIC_REVERB_PORT: ${NUXT_PUBLIC_REVERB_PORT:-8081}
       NUXT_PUBLIC_REVERB_SCHEME: ${NUXT_PUBLIC_REVERB_SCHEME:-http}
+      NUXT_PUBLIC_LEGAL_OPERATOR_NAME: ${NUXT_PUBLIC_LEGAL_OPERATOR_NAME:-}
+      NUXT_PUBLIC_LEGAL_ADDRESS: ${NUXT_PUBLIC_LEGAL_ADDRESS:-}
+      NUXT_PUBLIC_LEGAL_PHONE: ${NUXT_PUBLIC_LEGAL_PHONE:-}
+      NUXT_PUBLIC_LEGAL_EMAIL: ${NUXT_PUBLIC_LEGAL_EMAIL:-}
     depends_on:
       - api
 

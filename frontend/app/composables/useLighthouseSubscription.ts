@@ -1,5 +1,7 @@
 import { getCurrentScope, onScopeDispose } from 'vue'
+import { realtime as realtimeCopy } from '~/constants/strings'
 import { csrfAwareFetch } from '~/utils/csrf-fetch'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 
 export interface LighthouseSubscriptionHandle {
   stop: () => void
@@ -26,8 +28,7 @@ export interface OpenLighthouseSubscriptionOptions<TEvent> {
  * channel handshake — and a learner who hits both should read one sentence, not
  * two versions of it.
  */
-const SOCKET_UNREACHABLE
-  = 'リアルタイム接続を確立できませんでした。しばらくしてからもう一度お試しください。'
+const SOCKET_UNREACHABLE = realtimeCopy.socketUnreachable
 
 /**
  * Resolves the Pusher connection socket ID from Laravel Echo.
@@ -95,7 +96,7 @@ function waitForSubscriptionHandshake(
     if (typeof channel?.error === 'function') {
       channel.error((err: any) => {
         clearTimeout(timeout)
-        reject(new Error(err?.message ?? 'チャンネルの認証に失敗しました。'))
+        reject(new Error(graphQLErrorMessageFor(err, { fallback: realtimeCopy.channelAuthFailed })))
       })
     }
   })
@@ -215,13 +216,18 @@ export async function openLighthouseSubscription<TEvent>(
   })
 
   if (!response.ok) {
-    throw new Error(`サブスクリプションの登録がサーバーに拒否されました（${response.status}）。`)
+    throw new Error(realtimeCopy.subscribeRejected(response.status))
   }
 
   const body = await response.json()
 
   if (body?.errors && body.errors.length > 0) {
-    throw new Error(body.errors[0]?.message ?? 'サブスクリプションを登録できませんでした。')
+    throw new Error(
+      graphQLErrorMessageFor(
+        { graphQLErrors: body.errors },
+        { fallback: realtimeCopy.subscribeFailed },
+      ),
+    )
   }
 
   const channelName = body?.extensions?.lighthouse_subscriptions?.channel as
@@ -229,11 +235,13 @@ export async function openLighthouseSubscription<TEvent>(
     | undefined
 
   if (!channelName) {
-    throw new Error('サーバーがサブスクリプションのチャンネルを返しませんでした。')
+    throw new Error(realtimeCopy.missingChannel)
   }
 
   const name = channelName.replace(/^private-/, '')
   const channel = echo.private(name)
+
+  let stopped = false
 
   // Lighthouse wraps broadcast result in `{ more, result }` envelope (decision 21).
   // The event payload is under `result.data[event]`, so reading `payload.data` directly
@@ -241,6 +249,9 @@ export async function openLighthouseSubscription<TEvent>(
   channel.listen(
     '.lighthouse-subscription',
     (payload: { result?: { data?: Record<string, unknown> } }) => {
+      if (stopped) {
+        return
+      }
       const data = payload?.result?.data
       if (data && options.event in data) {
         const eventPayload = data[options.event] as TEvent | null | undefined
@@ -254,13 +265,13 @@ export async function openLighthouseSubscription<TEvent>(
   try {
     await waitForSubscriptionHandshake(channel, options.subscribeTimeoutMs ?? 10000)
   } catch (err) {
+    stopped = true
     try {
       echo.leave(name)
     } catch {}
     throw err
   }
 
-  let stopped = false
   const stop = () => {
     if (stopped) {
       return
@@ -294,8 +305,11 @@ export function useLighthouseSubscription(): {
 
   const activeHandles = new Set<LighthouseSubscriptionHandle>()
   const reconnectWatchers = new Set<() => void>()
+  let disposed = false
+  let generation = 0
 
   function stopAll(): void {
+    generation += 1
     for (const handle of Array.from(activeHandles)) {
       handle.stop()
     }
@@ -310,7 +324,27 @@ export function useLighthouseSubscription(): {
   async function open<TEvent>(
     options: OpenLighthouseSubscriptionOptions<TEvent>,
   ): Promise<LighthouseSubscriptionHandle> {
-    const handle = await openLighthouseSubscription<TEvent>(options, transport)
+    if (disposed) {
+      return { stop: () => {} }
+    }
+
+    const openGeneration = generation
+    const handle = await openLighthouseSubscription<TEvent>(
+      {
+        ...options,
+        onEvent: (payload) => {
+          if (!disposed && openGeneration === generation) {
+            options.onEvent(payload)
+          }
+        },
+      },
+      transport,
+    )
+
+    if (disposed || openGeneration !== generation) {
+      handle.stop()
+      return { stop: () => {} }
+    }
 
     let wrappedStopped = false
     const wrappedHandle: LighthouseSubscriptionHandle = {
@@ -339,7 +373,15 @@ export function useLighthouseSubscription(): {
    * of a permanently stuck screen.
    */
   function onReconnect(handler: () => void): () => void {
-    const stopWatching = watchPusherReconnects($echo, handler)
+    if (disposed) {
+      return () => {}
+    }
+
+    const stopWatching = watchPusherReconnects($echo, () => {
+      if (!disposed) {
+        handler()
+      }
+    })
     reconnectWatchers.add(stopWatching)
 
     return () => {
@@ -350,6 +392,7 @@ export function useLighthouseSubscription(): {
 
   if (getCurrentScope()) {
     onScopeDispose(() => {
+      disposed = true
       stopAll()
     })
   }

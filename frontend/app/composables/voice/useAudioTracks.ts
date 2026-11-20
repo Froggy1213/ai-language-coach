@@ -6,6 +6,7 @@ import {
   type Room,
 } from 'livekit-client'
 import type { Ref, ShallowRef } from 'vue'
+import { voice as voiceCopy } from '~/constants/strings'
 
 /** A microphone failure the caller turns into UI state and telemetry. */
 export interface MicrophoneFailure {
@@ -128,8 +129,8 @@ export function useAudioTracks(options: UseAudioTracksOptions) {
         failure: {
           cause: micErr,
           message: isDenied
-            ? 'マイクの使用がブラウザで拒否されました。ブラウザの設定でマイクを許可してください。'
-            : `マイクを有効にできませんでした：${micErr?.message ?? '利用できません'}。`,
+            ? voiceCopy.micDenied
+            : voiceCopy.micEnableFailed(micErr?.message),
         },
       }
     }
@@ -154,7 +155,7 @@ export function useAudioTracks(options: UseAudioTracksOptions) {
 
       return {
         cause: micErr,
-        message: `マイクを有効にできませんでした：${micErr?.message ?? '利用できません'}。`,
+        message: voiceCopy.micEnableFailed(micErr?.message),
       }
     }
   }

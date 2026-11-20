@@ -12,6 +12,20 @@ import {
   VERIFY_EMAIL_MUTATION,
 } from '~/graphql/documents'
 import type { CurrentUser } from '~/types/view-models'
+import { graphQLErrorCode, graphQLErrorMessage } from '~/utils/graphql-error'
+
+function isUnauthenticatedError(error: CombinedError): boolean {
+  if (graphQLErrorCode(error) === 'UNAUTHENTICATED') {
+    return true
+  }
+
+  if (graphQLErrorMessage(error) === 'Unauthenticated.') {
+    return true
+  }
+
+  const status = (error.response as { status?: number } | undefined)?.status
+  return status === 401
+}
 
 /**
  * Session state for the SPA, shared through `useState` so the header, the
@@ -27,14 +41,29 @@ export function useAuth() {
   const resolved = useState<boolean>('auth:resolved', () => false)
 
   async function refresh(): Promise<CurrentUser | null> {
-    const { data } = await $urql
-      .query<{ me: CurrentUser | null }>(ME_QUERY, {}, { requestPolicy: 'network-only' })
-      .toPromise()
+    try {
+      const { data, error } = await $urql
+        .query<{ me: CurrentUser | null }>(ME_QUERY, {}, { requestPolicy: 'network-only' })
+        .toPromise()
 
-    user.value = data?.me ?? null
-    resolved.value = true
+      if (error) {
+        if (isUnauthenticatedError(error)) {
+          user.value = null
+          resolved.value = true
+        }
 
-    return user.value
+        return user.value
+      }
+
+      user.value = data?.me ?? null
+      resolved.value = true
+
+      return user.value
+    } catch {
+      // Transient network error: preserve current user state and leave `resolved`
+      // unchanged so subsequent navigation retries `ME_QUERY`.
+      return user.value
+    }
   }
 
   async function login(email: string, password: string): Promise<void> {
@@ -70,7 +99,12 @@ export function useAuth() {
   }
 
   async function logout(): Promise<void> {
-    await $urql.mutation(LOGOUT_MUTATION, {}).toPromise()
+    const { error } = await $urql.mutation(LOGOUT_MUTATION, {}).toPromise()
+
+    if (error && !isUnauthenticatedError(error)) {
+      throw error
+    }
+
     await clearSession()
   }
 

@@ -180,6 +180,25 @@ class LiveKitApiTest extends TestCase
         });
     }
 
+    public function test_participants_and_delete_room_handle_http_404_gracefully(): void
+    {
+        Http::fake([
+            '*/twirp/livekit.RoomService/ListParticipants' => Http::response(
+                ['code' => 'not_found', 'msg' => 'requested room does not exist'],
+                404
+            ),
+            '*/twirp/livekit.RoomService/DeleteRoom' => Http::response(
+                ['code' => 'not_found', 'msg' => 'requested room does not exist'],
+                404
+            ),
+        ]);
+
+        $this->assertSame([], $this->api()->participants('missing-room'));
+        $this->api()->deleteRoom('missing-room');
+
+        Http::assertSentCount(2);
+    }
+
     private function api(): LiveKitApi
     {
         $token = new LiveKitToken(

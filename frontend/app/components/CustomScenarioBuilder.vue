@@ -41,8 +41,6 @@ const registers = [
 
 const step = ref<'prompt' | 'confirm'>(props.initialScenario ? 'confirm' : 'prompt')
 const promptText = ref(props.initialScenario?.userPrompt ?? '')
-const selectedRegister = ref<string>(props.initialScenario?.register ?? 'neutral')
-const selectedLevel = ref<CefrLevel>(props.initialScenario?.level ?? props.defaultLevel)
 const errorMessage = ref<string | null>(null)
 
 const form = reactive({
@@ -77,8 +75,6 @@ function applyDraft(scenario: Scenario): void {
   if (scenario.userPrompt) {
     promptText.value = scenario.userPrompt
   }
-  selectedLevel.value = scenario.level
-  selectedRegister.value = scenario.register
 }
 
 watch(
@@ -133,8 +129,8 @@ async function requestDraft(): Promise<void> {
   try {
     const result = await draftMutation.executeMutation({
       prompt: promptText.value.trim(),
-      register: selectedRegister.value,
-      level: selectedLevel.value,
+      register: form.register,
+      level: form.level,
       code: form.code || null,
     })
 
@@ -253,7 +249,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
           rows="3"
           maxlength="500"
           :placeholder="talk.custom.promptPlaceholder"
-          class="w-full rounded-2xl border border-[var(--line)] bg-[var(--bg)] px-4 py-3 text-[0.9375rem] leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
+          class="w-full rounded-2xl border border-[var(--line)] bg-[var(--surface-sunken)] px-4 py-3 text-[0.9375rem] leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
         />
       </div>
 
@@ -264,9 +260,9 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
           </label>
           <select
             id="custom-scenario-register"
-            v-model="selectedRegister"
+            v-model="form.register"
             data-testid="custom-scenario-register-select"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           >
             <option v-for="reg in registers" :key="reg.value" :value="reg.value">
               {{ reg.label }}
@@ -280,9 +276,9 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
           </label>
           <select
             id="custom-scenario-level"
-            v-model="selectedLevel"
+            v-model="form.level"
             data-testid="custom-scenario-level-select"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           >
             <option v-for="lvl in levels" :key="lvl" :value="lvl">
               {{ lvl }}
@@ -328,7 +324,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
       </div>
 
       <!-- Prompt bar with one-click AI regeneration -->
-      <div class="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--bg)] p-4">
+      <div class="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface-sunken)] p-4">
         <label for="custom-scenario-regenerate-prompt" class="label block">
           {{ talk.custom.promptLabel }}
         </label>
@@ -364,7 +360,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-title-input"
             type="text"
             maxlength="140"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           >
         </div>
 
@@ -376,7 +372,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-summary-input"
             rows="2"
             maxlength="260"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           />
         </div>
 
@@ -385,7 +381,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
           <select
             id="confirm-register"
             v-model="form.register"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           >
             <option v-for="reg in registers" :key="reg.value" :value="reg.value">
               {{ reg.label }}
@@ -398,7 +394,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
           <select
             id="confirm-level"
             v-model="form.level"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           >
             <option v-for="lvl in levels" :key="lvl" :value="lvl">
               {{ lvl }}
@@ -414,7 +410,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-setting-input"
             rows="2"
             maxlength="260"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           />
         </div>
 
@@ -426,7 +422,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-ai-role-input"
             rows="2"
             maxlength="200"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           />
         </div>
 
@@ -438,7 +434,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-learner-role-input"
             rows="2"
             maxlength="200"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           />
         </div>
 
@@ -450,7 +446,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
             data-testid="confirm-learner-goal-input"
             rows="2"
             maxlength="220"
-            class="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+            class="w-full rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2.5 text-[0.9375rem] leading-relaxed text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
           />
         </div>
 
@@ -478,7 +474,7 @@ async function submitConfirm(startImmediately: boolean): Promise<void> {
                 :data-testid="`confirm-phrase-input-${index}`"
                 type="text"
                 maxlength="160"
-                class="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3.5 py-2 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+                class="min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-[var(--surface-sunken)] px-3.5 py-2 text-[0.9375rem] text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
               >
               <button
                 v-if="form.usefulPhrases.length > 3"

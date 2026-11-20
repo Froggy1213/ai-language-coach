@@ -6,7 +6,7 @@
 # - Port 80 redirects to Port 443 HTTPS.
 # - Port 443 routes:
 #   - Default: Nuxt 4 web frontend (port 3000)
-#   - Path /app/*, /apps/*: Reverb WebSocket server (port 8081, WSS upgrade)
+#   - Path /app/*: Reverb WebSocket server (port 8081, WSS upgrade; /apps/* stays internal)
 #   - Path /graphql*, /api/*, /sanctum/*, /up: Laravel API (port 8080)
 
 resource "aws_lb" "main" {
@@ -161,7 +161,8 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# Rule 1: Reverb WebSockets (Pusher protocol paths /app/*, /apps/*)
+# Rule 1: Reverb WebSockets (Pusher client path /app/* only; /apps/* is Laravel's
+# internal HTTP publish API reached via private service discovery on :8081, matching docker/Caddyfile)
 resource "aws_lb_listener_rule" "reverb" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 10
@@ -173,7 +174,7 @@ resource "aws_lb_listener_rule" "reverb" {
 
   condition {
     path_pattern {
-      values = ["/app/*", "/apps/*"]
+      values = ["/app/*"]
     }
   }
 }

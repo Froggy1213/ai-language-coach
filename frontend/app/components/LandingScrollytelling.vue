@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { OrbState } from '~/composables/useConversation'
-import { app, landing } from '~/constants/strings'
+import { app, common, landing } from '~/constants/strings'
 
 /**
  * Cinematic scrollytelling landing page for guests.
@@ -59,7 +59,7 @@ const playgroundEnergy = ref(0.72)
           </span>
         </a>
 
-        <nav class="hidden items-center gap-6 text-[0.875rem] text-[var(--ink-muted)] md:flex" aria-label="ランディングナビゲーション">
+        <nav class="hidden items-center gap-6 text-[0.875rem] text-[var(--ink-muted)] md:flex" :aria-label="landing.nav.ariaLabel">
           <a href="#story" class="transition-colors hover:text-[var(--ink)]">{{ landing.nav.story }}</a>
           <a href="#method" class="transition-colors hover:text-[var(--ink)]">{{ landing.nav.method }}</a>
           <a href="#interactive" class="transition-colors hover:text-[var(--ink)]">{{ landing.nav.interactive }}</a>
@@ -70,7 +70,7 @@ const playgroundEnergy = ref(0.72)
           <button
             type="button"
             class="grid size-9 place-items-center rounded-full text-[var(--ink-faint)] transition hover:bg-[var(--surface)] hover:text-[var(--ink)]"
-            :aria-label="theme === 'dark' ? 'ライトテーマに切り替える' : 'ダークテーマに切り替える'"
+            :aria-label="theme === 'dark' ? common.switchToLightTheme : common.switchToDarkTheme"
             @click="toggleTheme"
           >
             <ThemeIcon :theme="theme" />
@@ -173,7 +173,7 @@ const playgroundEnergy = ref(0.72)
               <span class="size-2 rounded-full bg-[var(--color-sage-400)]" />
               <div class="text-left">
                 <p class="font-mono text-[0.625rem] tracking-[0.12em] text-[var(--ink-faint)]">CEFR DIAGNOSTIC</p>
-                <p class="tnum text-[0.8125rem] font-medium">B1 · 明瞭度 94%</p>
+                <p class="tnum text-[0.8125rem] font-medium">{{ landing.hero.telemetryValue }}</p>
               </div>
             </div>
 
@@ -286,7 +286,7 @@ const playgroundEnergy = ref(0.72)
               <div class="flex items-center justify-between gap-4">
                 <div>
                   <p class="label text-[var(--accent)]">VOICE-FIRST ARCHITECTURE</p>
-                  <p class="mt-1 text-[1rem] font-medium">あなたの声に反応する光のコア</p>
+                  <p class="mt-1 text-[1rem] font-medium">{{ landing.stage.prologueHeading }}</p>
                 </div>
                 <span class="tnum rounded-full bg-[var(--accent-dim)] px-3 py-1 font-mono text-[0.75rem] text-[var(--accent)]">
                   60 FPS · LIVE
@@ -335,14 +335,14 @@ const playgroundEnergy = ref(0.72)
 
               <div class="grid grid-cols-2 gap-3 pt-1">
                 <div class="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-3">
-                  <p class="label">発音の目安</p>
+                  <p class="label">{{ landing.stage.pronunciationTitle }}</p>
                   <p class="tnum mt-1 text-[1rem] font-medium text-[var(--color-sage-400)]">
                     {{ landing.stage.clarityLabel }}
                   </p>
                 </div>
 
                 <div class="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-3">
-                  <p class="label">聞き取りにくかった語</p>
+                  <p class="label">{{ landing.stage.uncertainWordsTitle }}</p>
                   <div class="mt-1.5 flex flex-wrap gap-1.5">
                     <span
                       v-for="item in landing.stage.uncertainWords"
@@ -394,7 +394,7 @@ const playgroundEnergy = ref(0.72)
                         v-if="item.status === 'ready'"
                         class="rounded-full bg-[var(--accent)] px-2 py-0.2 text-[0.625rem] font-semibold text-[var(--accent-ink)]"
                       >
-                        いまここ
+                        {{ landing.stage.currentBadge }}
                       </span>
                     </div>
                     <p class="truncate text-[0.9375rem] font-medium">{{ item.title }}</p>
@@ -415,7 +415,7 @@ const playgroundEnergy = ref(0.72)
               <div class="flex items-center justify-between border-b border-[var(--line)] pb-3">
                 <div class="flex items-center gap-2">
                   <span class="size-2 rounded-full bg-[var(--color-sage-400)]" />
-                  <span class="text-[0.8125rem] font-medium">AI講師が参加中 · Second Conditional</span>
+                  <span class="text-[0.8125rem] font-medium">{{ landing.stage.dialogue.status }}</span>
                 </div>
                 <span class="tnum font-mono text-[0.8125rem] text-[var(--accent)]">{{ simulatedSessionClock }}</span>
               </div>
@@ -446,14 +446,14 @@ const playgroundEnergy = ref(0.72)
             >
               <div class="space-y-2.5">
                 <div>
-                  <p class="label">あなたの発話</p>
+                  <p class="label">{{ landing.stage.reflection.youSaidLabel }}</p>
                   <p class="text-[0.875rem] text-[var(--ink-faint)] line-through decoration-[var(--color-clay-400)]">
                     {{ landing.stage.reflection.youSaid }}
                   </p>
                 </div>
 
                 <div>
-                  <p class="label">正しい形</p>
+                  <p class="label">{{ landing.stage.reflection.correctionLabel }}</p>
                   <p class="text-[0.9375rem] font-medium text-[var(--color-sage-400)]">
                     {{ landing.stage.reflection.correction }}
                   </p>
@@ -466,7 +466,7 @@ const playgroundEnergy = ref(0.72)
 
               <!-- SM-2 Retention Timeline -->
               <div class="border-t border-[var(--line)] pt-3">
-                <p class="label mb-2">SM-2 間隔反復スケジュール</p>
+                <p class="label mb-2">{{ landing.stage.reflection.scheduleTitle }}</p>
                 <div class="grid grid-cols-5 gap-1.5 text-center">
                   <div
                     v-for="slot in landing.stage.reflection.schedule"
@@ -488,7 +488,7 @@ const playgroundEnergy = ref(0.72)
         <!-- Bottom Video-Style Chapter Scrubber Bar -->
         <div class="relative z-20 mx-auto w-full max-w-6xl px-5 pb-5 sm:px-6 sm:pb-7">
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface-strong)_82%,transparent)] p-2 backdrop-blur-xl">
-            <div class="flex flex-wrap items-center gap-1 sm:gap-1.5" role="tablist" aria-label="ストーリーチャプター">
+            <div class="flex flex-wrap items-center gap-1 sm:gap-1.5" role="tablist" :aria-label="landing.stage.chapterListLabel">
               <button
                 v-for="(chapter, idx) in landing.chapters"
                 :key="chapter.id"

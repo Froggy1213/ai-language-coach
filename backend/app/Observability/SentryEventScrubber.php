@@ -44,6 +44,20 @@ final class SentryEventScrubber
         'utterance',
         'password',
         'password_confirmation',
+        'current_password',
+        'currentpassword',
+        'new_password',
+        'newpassword',
+        'token',
+        'signature',
+        'livekit_token',
+        'livekittoken',
+        'user_prompt',
+        'userprompt',
+        'authorization',
+        'cookie',
+        'x_internal_secret',
+        'stripe_signature',
     ];
 
     public static function scrubEvent(Event $event, ?EventHint $hint = null): ?Event
@@ -119,13 +133,21 @@ final class SentryEventScrubber
             self::SENSITIVE_KEYS,
         ));
 
-        $pattern = '/(?i)("(?:'.$keys.')"\s*:\s*)(?:"(?:\\.|[^"\\\\])*"|[^,}\s]+)/';
+        $pattern = '/(?i)("(?:'.$keys.')"\s*:\s*)(?:"(?:\\\\.|[^"\\\\])*"|[^,}\s]+)/';
 
         return (string) preg_replace($pattern, '$1"[REDACTED]"', $text);
     }
 
     public static function scrubBreadcrumb(Breadcrumb $breadcrumb): ?Breadcrumb
     {
+        $message = $breadcrumb->getMessage();
+        if (is_string($message) && $message !== '') {
+            $scrubbedMessage = self::scrubText($message);
+            if ($scrubbedMessage !== $message) {
+                $breadcrumb = $breadcrumb->withMessage($scrubbedMessage);
+            }
+        }
+
         foreach ($breadcrumb->getMetadata() as $key => $value) {
             $scrubbed = self::isSensitiveKey((string) $key)
                 ? self::REDACTED
@@ -150,6 +172,10 @@ final class SentryEventScrubber
             }
 
             return $scrubbed;
+        }
+
+        if (is_string($data)) {
+            return self::scrubText($data);
         }
 
         return $data;

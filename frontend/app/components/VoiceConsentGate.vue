@@ -24,6 +24,20 @@ async function handleConfirm(): Promise<void> {
     emit('confirmed')
   }
 }
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && !submitting.value) {
+    emit('cancelled')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>

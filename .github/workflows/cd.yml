@@ -34,12 +34,14 @@ name: CD
 # ==============================================================================
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: cd-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -47,7 +49,8 @@ permissions:
   contents: read  # Required for actions/checkout
 
 jobs:
-  # The deployment is armed by a repository variable, not by the push itself.
+  # The deployment is armed by a repository variable, not by the push itself, and
+  # gated on CI completing green for a push to `main` (or manual workflow_dispatch).
   #
   # This repository has no AWS account yet (plan §7 lists the milestone as
   # infrastructure-as-code that was never applied), and a CD job that walks
@@ -56,8 +59,16 @@ jobs:
   # AWS_DEPLOY_ENABLED=true after the secrets and the OIDC role exist turns the
   # same workflow into the real deployment, with no edit to this file.
   guard:
-    name: Is the deployment armed?
+    name: Is the deployment armed and CI green?
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
     outputs:
       deploy: ${{ steps.check.outputs.deploy }}
     steps:
@@ -103,11 +114,14 @@ jobs:
       NAME_PREFIX: ${{ vars.NAME_PREFIX || 'ai-language-coach' }}
       APP_DOMAIN: ${{ vars.APP_DOMAIN || 'coach.example.com' }}
       LIVEKIT_HOST: ${{ vars.LIVEKIT_HOST || 'livekit.example.com' }}
-      IMAGE_TAG: ${{ github.sha }}
+      TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      IMAGE_TAG: sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TARGET_SHA }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -124,9 +138,13 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       # ------------------------------------------------------------------------
-      # 1. Build and Push Container Images to ECR
+      # 1. Build and Push Immutable Container Images to ECR
       # ------------------------------------------------------------------------
-      - name: Build and Push API Image (covers laravel-app, horizon, reverb, migrations)
+      # ECR repositories are configured with image_tag_mutability = "IMMUTABLE"
+      # and lifecycle prefix "sha-" (infra/terraform/ecr.tf). Each commit pushes
+      # its own immutable `sha-<git-sha>` tag — never `:latest` — so every ECS
+      # task definition revision pins an exact digest for deterministic rollbacks.
+      - name: Build and Push API Image (covers laravel-app, horizon, reverb, scheduler, migrations)
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -134,7 +152,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-api:${{ env.IMAGE_TAG }}
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -146,7 +163,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-web:${{ env.IMAGE_TAG }}
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -158,37 +174,93 @@ jobs:
           push: true
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-agent:${{ env.IMAGE_TAG }}
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.NAME_PREFIX }}-agent:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       # ------------------------------------------------------------------------
-      # 2. Run Database Migrations (One-off ECS Fargate Task)
+      # 2. Register Migration Task Revision & Run Database Migrations
       # ------------------------------------------------------------------------
       - name: Run Database Migrations
         run: |
+          REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+          API_IMAGE="${REGISTRY}/${NAME_PREFIX}-api:${IMAGE_TAG}"
+          MIGRATION_FAMILY="${NAME_PREFIX}-migration"
+
+          CURRENT_TD=$(aws ecs describe-task-definition \
+            --task-definition "$MIGRATION_FAMILY" \
+            --query 'taskDefinition' \
+            --output json)
+
+          UPDATED_TD=$(echo "$CURRENT_TD" | jq \
+            --arg name "migration" \
+            --arg image "$API_IMAGE" \
+            'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+             | .containerDefinitions |= map(if .name == $name then .image = $image else . end)')
+
+          MIGRATION_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$UPDATED_TD" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "Registered migration task definition: $MIGRATION_TD_ARN"
+
           ./scripts/migrate-ecs.sh \
-            --cluster "${{ env.NAME_PREFIX }}-cluster" \
-            --task-def "${{ env.NAME_PREFIX }}-migration"
+            --cluster "${NAME_PREFIX}-cluster" \
+            --task-def "$MIGRATION_TD_ARN"
 
       # ------------------------------------------------------------------------
-      # 3. Deploy ECS Fargate Services & Wait for Stability
+      # 3. Register Immutable Task Revisions & Deploy ECS Fargate Services
       # ------------------------------------------------------------------------
       - name: Deploy ECS Services
         run: |
-          CLUSTER="${{ env.NAME_PREFIX }}-cluster"
-          SERVICES=("laravel-app" "horizon-worker" "reverb" "voice-agent-worker" "web")
+          CLUSTER="${NAME_PREFIX}-cluster"
+          REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+          API_IMAGE="${REGISTRY}/${NAME_PREFIX}-api:${IMAGE_TAG}"
+          WEB_IMAGE="${REGISTRY}/${NAME_PREFIX}-web:${IMAGE_TAG}"
+          AGENT_IMAGE="${REGISTRY}/${NAME_PREFIX}-agent:${IMAGE_TAG}"
 
-          echo "Triggering new deployments across ECS services..."
-          for svc in "${SERVICES[@]}"; do
-            echo "Updating service $svc..."
+          register_and_update() {
+            local svc="$1"
+            local family="$2"
+            local container_name="$3"
+            local image="$4"
+
+            echo "Registering new task definition for $svc ($family -> $image)..."
+            local current_td
+            current_td=$(aws ecs describe-task-definition \
+              --task-definition "$family" \
+              --query 'taskDefinition' \
+              --output json)
+
+            local updated_td
+            updated_td=$(echo "$current_td" | jq \
+              --arg name "$container_name" \
+              --arg img "$image" \
+              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+               | .containerDefinitions |= map(if .name == $name then .image = $img else . end)')
+
+            local new_td_arn
+            new_td_arn=$(aws ecs register-task-definition \
+              --cli-input-json "$updated_td" \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+
+            echo "Updating ECS service $svc to $new_td_arn..."
             aws ecs update-service \
               --cluster "$CLUSTER" \
               --service "$svc" \
-              --force-new-deployment \
+              --task-definition "$new_td_arn" \
               --output text > /dev/null
-          done
+          }
 
+          register_and_update "laravel-app"        "${NAME_PREFIX}-laravel-app"        "api"         "$API_IMAGE"
+          register_and_update "horizon-worker"     "${NAME_PREFIX}-horizon-worker"     "horizon"     "$API_IMAGE"
+          register_and_update "reverb"             "${NAME_PREFIX}-reverb"             "reverb"      "$API_IMAGE"
+          register_and_update "scheduler"          "${NAME_PREFIX}-scheduler"          "scheduler"   "$API_IMAGE"
+          register_and_update "voice-agent-worker" "${NAME_PREFIX}-voice-agent-worker" "voice-agent" "$AGENT_IMAGE"
+          register_and_update "web"                "${NAME_PREFIX}-web"                "web"         "$WEB_IMAGE"
+
+          SERVICES=("laravel-app" "horizon-worker" "reverb" "scheduler" "voice-agent-worker" "web")
           echo "Waiting for all ECS services to reach steady state..."
           aws ecs wait services-stable \
             --cluster "$CLUSTER" \

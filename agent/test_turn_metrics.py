@@ -174,6 +174,20 @@ class TestTurnMetrics(unittest.TestCase):
         info = extract_metric_info(m)
         self.assertEqual(info["speech_id"], "speech-1")
         self.assertEqual(info["llm_first_token_sec"], 0.41)
+        self.assertFalse(info["cancelled"])
+
+    def test_extract_metric_info_ignores_cancelled_preemptive_llm(self):
+        m = DummyMetric(
+            type="llm_metrics",
+            speech_id="speech-preempt",
+            ttft=0.19,
+            duration=0.25,
+            cancelled=True,
+        )
+        info = extract_metric_info(m)
+        self.assertEqual(info["speech_id"], "speech-preempt")
+        self.assertIsNone(info["llm_first_token_sec"])
+        self.assertTrue(info["cancelled"])
 
     def test_extract_metric_info_tts(self):
         m = DummyMetric(type="tts_metrics", speech_id="speech-1", ttfb=0.18, duration=0.9)
@@ -481,7 +495,7 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             mock_report.assert_not_called()
 
     async def test_drain_flushes_the_in_flight_turn_before_closing(self):
-        tracker = TurnMetricsTracker(session_id=101, flush_delay=0.02)
+        tracker = TurnMetricsTracker(session_id=101, flush_delay=5.0)
         tracker.on_user_speech("Draining the last turn")
 
         with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
@@ -489,10 +503,10 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
                 DummyMetric(type="eou_metrics", speech_id="turn-drain", end_of_utterance_delay=0.20)
             )
 
-            # Shutdown calls drain() instead of close(): the turn scheduled for a
-            # delayed flush must still reach the backend, because it carries the
-            # last learner utterance the mistake analysis reads.
-            await tracker.drain(timeout=1.0)
+            # Shutdown calls drain() instead of close(): pending turns must flush
+            # immediately (cancelling the 5.0 s delay sleep) rather than waiting
+            # out flush_delay.
+            await tracker.drain(timeout=0.5)
 
             mock_report.assert_awaited_once()
             called_session_id, payload = mock_report.await_args.args
@@ -500,22 +514,148 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["turn_id"], "turn-drain")
             self.assertEqual(payload["transcript"], "Draining the last turn")
             self.assertEqual(len(tracker._flush_tasks), 0)
+            self.assertEqual(len(tracker.pending_turns), 0)
+
+    async def test_drain_awaits_in_flight_background_dispatch_tasks(self):
+        tracker = TurnMetricsTracker(session_id=103, flush_delay=5.0)
+        tracker.on_user_speech("Last utterance before hanging up")
+
+        post_started = asyncio.Event()
+        post_completed = False
+
+        async def slow_report(session_id, payload):
+            nonlocal post_completed
+            post_started.set()
+            await asyncio.sleep(0.05)
+            post_completed = True
+
+        with patch("turn_tracker.report_session_turn", side_effect=slow_report):
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="turn-bg", end_of_utterance_delay=0.25)
+            )
+            tracker.handle_metric(
+                DummyMetric(type="llm_metrics", speech_id="turn-bg", ttft=0.30)
+            )
+            # TTS triggers immediate _dispatch_turn in _background_tasks and removes _flush_tasks entry
+            tracker.handle_metric(
+                DummyMetric(type="tts_metrics", speech_id="turn-bg", ttfb=0.15)
+            )
+            await post_started.wait()
+            self.assertEqual(len(tracker._flush_tasks), 0)
+            self.assertFalse(post_completed)
+
+            # drain() must await the in-flight _background_tasks HTTP POST
+            await tracker.drain(timeout=1.0)
+            self.assertTrue(post_completed)
 
     async def test_drain_is_bounded_when_a_flush_does_not_finish(self):
         tracker = TurnMetricsTracker(session_id=102, flush_delay=5.0)
         tracker.on_user_speech("Too slow to drain")
 
-        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
+        completed = False
+
+        async def hung_report(session_id, payload):
+            nonlocal completed
+            await asyncio.sleep(5.0)
+            completed = True
+
+        with patch("turn_tracker.report_session_turn", side_effect=hung_report):
             tracker.handle_metric(
                 DummyMetric(type="eou_metrics", speech_id="turn-drain-slow", end_of_utterance_delay=0.20)
             )
 
             # The timeout must release the job rather than let a hung backend hold
             # shutdown open; close() then cancels the remaining task.
-            await tracker.drain(timeout=0.01)
+            await tracker.drain(timeout=0.02)
 
-            mock_report.assert_not_called()
+            self.assertFalse(completed)
             self.assertEqual(len(tracker._flush_tasks), 0)
+
+    async def test_cancelled_preemptive_llm_metric_does_not_create_phantom_turn(self):
+        tracker = TurnMetricsTracker(session_id=44, flush_delay=0.02)
+        tracker.on_user_speech("Partial interim speech")
+
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
+            tracker.handle_metric(
+                DummyMetric(
+                    type="llm_metrics",
+                    speech_id="sp-cancelled",
+                    ttft=0.18,
+                    cancelled=True,
+                )
+            )
+            await asyncio.sleep(0.05)
+
+            self.assertEqual(len(tracker.pending_turns), 0)
+            self.assertEqual(len(tracker._flush_tasks), 0)
+            mock_report.assert_not_called()
+
+    async def test_interrupted_greeting_uncorrelated_tts_does_not_attach_to_first_learner_turn(self):
+        tracker = TurnMetricsTracker(session_id=55, flush_delay=5.0)
+        dispatched = []
+
+        async def fake_report(session_id, payload):
+            dispatched.append(payload)
+
+        with patch("turn_tracker.report_session_turn", side_effect=fake_report):
+            # 1. Greeting is active when learner interrupts
+            tracker.set_greeting_active(True)
+            tracker.on_user_speech("Hello coach!")
+            tracker.handle_metric(
+                DummyMetric(type="eou_metrics", speech_id="sp-first", end_of_utterance_delay=0.30)
+            )
+            tracker.handle_metric(
+                DummyMetric(
+                    type="llm_metrics",
+                    speech_id="sp-first",
+                    ttft=0.20,
+                    timestamp=1001.2,
+                    duration=0.2,
+                )
+            )
+
+            # Uncorrelated TTS arriving while greeting is active must be ignored
+            tracker.handle_metric(DummyMetric(type="tts_metrics", ttfb=0.11))
+            tracker.set_greeting_active(False)
+
+            # Cancelled uncorrelated TTS from the interrupted greeting must be ignored
+            tracker.handle_metric(
+                DummyMetric(type="tts_metrics", ttfb=0.12, cancelled=True)
+            )
+
+            # Late uncorrelated TTS whose synthesis started before the turn's LLM started must be ignored
+            tracker.handle_metric(
+                DummyMetric(type="tts_metrics", ttfb=0.13, timestamp=1001.1, duration=0.8)
+            )
+
+            await asyncio.sleep(0.01)
+            self.assertEqual(len(dispatched), 0)
+            self.assertIn("sp-first", tracker.pending_turns)
+            self.assertIsNone(tracker.pending_turns["sp-first"]["tts_first_chunk_sec"])
+
+            # Now the real reply's uncorrelated TTS arrives and attaches properly
+            tracker.handle_metric(
+                DummyMetric(type="tts_metrics", ttfb=0.24, timestamp=1001.6, duration=0.3)
+            )
+            await asyncio.sleep(0.01)
+
+            self.assertEqual(len(dispatched), 1)
+            self.assertEqual(dispatched[0]["turn_id"], "sp-first")
+            self.assertEqual(dispatched[0]["tts_first_chunk"], 240.0)
+
+    async def test_uncorrelated_tts_ignores_turn_without_learner_speech(self):
+        tracker = TurnMetricsTracker(session_id=56, flush_delay=5.0)
+        with patch("turn_tracker.report_session_turn", new_callable=AsyncMock) as mock_report:
+            # A turn with LLM only (no EOU and no transcript) must not consume uncorrelated TTS
+            tracker.handle_metric(
+                DummyMetric(type="llm_metrics", speech_id="sp-no-speech", ttft=0.25)
+            )
+            tracker.handle_metric(DummyMetric(type="tts_metrics", ttfb=0.15))
+            await asyncio.sleep(0.01)
+
+            self.assertIsNone(tracker.pending_turns["sp-no-speech"]["tts_first_chunk_sec"])
+            mock_report.assert_not_called()
+            tracker.close()
 
     def test_record_completed_turn_id_deque_eviction(self):
         tracker = TurnMetricsTracker(session_id=1)
@@ -534,6 +674,8 @@ class TestTurnMetricsTracker(unittest.IsolatedAsyncioTestCase):
 class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
     def _create_mock_session_and_aiohttp(self, responses_or_effects):
         mock_session = MagicMock()
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
         side_effects = []
         for item in responses_or_effects:
             if isinstance(item, Exception):
@@ -546,8 +688,7 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
         mock_session.post.side_effect = side_effects
 
         mock_aiohttp = MagicMock()
-        mock_aiohttp.ClientSession.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_aiohttp.ClientSession.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_aiohttp.ClientSession.return_value = mock_session
         mock_aiohttp.ClientTimeout = MagicMock()
         return mock_session, mock_aiohttp
 
@@ -618,6 +759,58 @@ class TestReportSessionFailure(unittest.IsolatedAsyncioTestCase):
              patch("backend.aiohttp", mock_aiohttp):
             await report_session_failure(42, "agent_error")
             self.assertEqual(mock_session.post.call_count, 1)
+
+    async def test_shared_http_session_is_reused_across_turns_and_closed_cleanly(self):
+        from backend import close_http_session, report_session_turn
+
+        r1 = AsyncMock(status=200)
+        r2 = AsyncMock(status=200)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([r1, r2])
+
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp):
+            await report_session_turn(42, {"turn_id": "t-1"})
+            await report_session_turn(42, {"turn_id": "t-2"})
+
+            self.assertEqual(mock_aiohttp.ClientSession.call_count, 1)
+            self.assertEqual(mock_session.post.call_count, 2)
+
+            await close_http_session()
+            mock_session.close.assert_awaited_once()
+
+    async def test_report_session_turn_retries_on_5xx_and_network_errors(self):
+        from backend import report_session_turn
+
+        mock_502 = AsyncMock(status=502, text=AsyncMock(return_value="Bad Gateway"))
+        mock_200 = AsyncMock(status=200)
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp(
+            [Exception("connection reset"), mock_502, mock_200]
+        )
+
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await report_session_turn(42, {"turn_id": "t-retry"})
+
+            self.assertEqual(mock_session.post.call_count, 3)
+            self.assertEqual(mock_aiohttp.ClientSession.call_count, 1)
+            self.assertEqual(mock_sleep.await_count, 2)
+            mock_sleep.assert_any_await(0.25)
+            mock_sleep.assert_any_await(0.5)
+
+    async def test_report_session_turn_does_not_retry_on_4xx(self):
+        from backend import report_session_turn
+
+        mock_422 = AsyncMock(status=422, text=AsyncMock(return_value="Unprocessable"))
+        mock_session, mock_aiohttp = self._create_mock_session_and_aiohttp([mock_422])
+
+        with patch("os.getenv", side_effect=lambda k, d=None: "secret" if "SECRET" in k else d or "http://backend"), \
+             patch("backend.aiohttp", mock_aiohttp), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await report_session_turn(42, {"turn_id": "t-422"})
+
+            self.assertEqual(mock_session.post.call_count, 1)
+            mock_sleep.assert_not_awaited()
 
 
 class TestMetadataAndPipeline(unittest.TestCase):
@@ -720,6 +913,7 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
 
     async def test_entrypoint_vad_failure(self):
         ctx = self._make_ctx(has_vad=False)
+        ctx.shutdown = MagicMock()
 
         mock_silero = MagicMock()
         mock_silero.VAD.load.side_effect = Exception("vad load failed")
@@ -728,26 +922,32 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
              patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "agent_error")
+            ctx.shutdown.assert_called_once_with(reason="agent_error")
 
     async def test_entrypoint_stt_failure(self):
         ctx = self._make_ctx()
+        ctx.shutdown = MagicMock()
 
         with patch("session.create_stt", side_effect=Exception("stt creation failed")), \
              patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "stt_failed")
+            ctx.shutdown.assert_called_once_with(reason="stt_failed")
 
     async def test_entrypoint_llm_failure(self):
         ctx = self._make_ctx(session_id=42)
+        ctx.shutdown = MagicMock()
 
         with patch("session.create_stt", return_value="fake_stt"), \
              patch("session.create_llm", side_effect=Exception("llm creation failed")), \
              patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "llm_failed")
+            ctx.shutdown.assert_called_once_with(reason="llm_failed")
 
     async def test_entrypoint_tts_failure(self):
         ctx = self._make_ctx()
+        ctx.shutdown = MagicMock()
 
         with patch("session.create_stt", return_value="fake_stt"), \
              patch("session.create_llm", return_value="fake_llm"), \
@@ -755,6 +955,87 @@ class TestEntrypoint(unittest.IsolatedAsyncioTestCase):
              patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
             await entrypoint(ctx)
             mock_fail.assert_awaited_once_with(42, "tts_failed")
+            ctx.shutdown.assert_called_once_with(reason="tts_failed")
+
+    async def test_entrypoint_runtime_error_after_connect_triggers_shutdown(self):
+        ctx = self._make_ctx()
+        ctx.shutdown = MagicMock()
+
+        mock_session = MagicMock()
+        mock_session.start = AsyncMock(side_effect=RuntimeError("pipeline start crashed"))
+
+        with patch("session.create_stt", return_value="fake_stt"), \
+             patch("session.create_llm", return_value="fake_llm"), \
+             patch("session.create_tts", return_value="fake_tts"), \
+             patch("session.USE_AGENT_SESSION", True), \
+             patch("session.Agent", MagicMock()), \
+             patch("session.AgentSession", return_value=mock_session), \
+             patch("session.report_session_failure", new_callable=AsyncMock) as mock_fail:
+            await entrypoint(ctx)
+            mock_fail.assert_awaited_once_with(42, "agent_error")
+            ctx.shutdown.assert_called_once_with(reason="agent_error")
+
+    async def test_participant_disconnect_waits_grace_period_and_cancels_on_reconnect(self):
+        from session import _register_participant_disconnect
+
+        ctx = self._make_ctx()
+        ctx.shutdown = MagicMock()
+        handlers = {}
+
+        def fake_on(event_name):
+            def _decorator(fn):
+                handlers[event_name] = fn
+                return fn
+            return _decorator
+
+        ctx.room.on = MagicMock(side_effect=fake_on)
+        ctx.room.remote_participants = {}
+
+        cancel_grace = _register_participant_disconnect(ctx, "room-1", grace_seconds=0.06)
+        participant = DummyMetric(identity="learner-1")
+
+        # 1. Disconnect starts grace period; does NOT shut down immediately
+        handlers["participant_disconnected"](participant)
+        ctx.shutdown.assert_not_called()
+
+        # 2. Reconnect before grace expires cancels pending shutdown
+        await asyncio.sleep(0.02)
+        ctx.room.remote_participants = {"learner-1": participant}
+        handlers["participant_connected"](participant)
+        await asyncio.sleep(0.06)
+        ctx.shutdown.assert_not_called()
+
+        # 3. Disconnect without reconnect shuts down after grace period expires
+        ctx.room.remote_participants = {}
+        handlers["participant_disconnected"](participant)
+        await asyncio.sleep(0.02)
+        ctx.shutdown.assert_not_called()
+        await asyncio.sleep(0.06)
+        ctx.shutdown.assert_called_once_with(reason="participant_disconnected")
+        cancel_grace()
+
+    async def test_build_agent_strips_markdown_stream_in_tts_node(self):
+        from session import _build_agent
+
+        class FakeBaseAgent:
+            def __init__(self, instructions: str):
+                self.instructions = instructions
+
+            def tts_node(self, text, model_settings):
+                return text
+
+        async def _token_stream():
+            for token in ["**Great**", " job", "!\n", "-", " ", "Try", " `", "have", " been", "`", " in", " a", " check", "-", "in", "."]:
+                yield token
+
+        with patch("session.Agent", FakeBaseAgent):
+            agent_obj = _build_agent("system prompt")
+            out_stream = agent_obj.tts_node(_token_stream(), model_settings=None)
+            collected = []
+            async for piece in out_stream:
+                collected.append(piece)
+
+        self.assertEqual("".join(collected), "Great job!\nTry have been in a check-in.")
 
     async def test_entrypoint_non_dict_metadata(self):
         ctx = self._make_ctx(metadata='["a", "b", "c"]')
@@ -1003,6 +1284,50 @@ class TestAgentLoggerConfiguration(unittest.TestCase):
         import agent
         self.assertFalse(agent.logger.propagate)
         self.assertEqual(len(agent.logger.handlers), 1)
+
+
+class TestPromptsContractAndMarkdownStripping(unittest.IsolatedAsyncioTestCase):
+    def test_all_pytest_prompt_contract_functions_pass(self):
+        import test_prompts
+
+        ran = 0
+        for name in dir(test_prompts):
+            if name.startswith("test_"):
+                fn = getattr(test_prompts, name)
+                if callable(fn):
+                    fn()
+                    ran += 1
+        self.assertGreaterEqual(ran, 18)
+
+    async def test_strip_markdown_stream_handles_single_char_chunks(self):
+        from prompts import strip_markdown_for_tts, strip_markdown_stream
+
+        sample = (
+            "### Lesson\n"
+            "**Well done!** Try saying `I have been` in a check-in conversation.\n"
+            "- First point\n"
+            "* Second _important_ point with [a link](https://example.com)!\n"
+            "```text\n"
+            "Plain spoken line\n"
+            "```"
+        )
+
+        async def _char_by_char():
+            for ch in sample:
+                yield ch
+
+        pieces = []
+        async for out in strip_markdown_stream(_char_by_char()):
+            pieces.append(out)
+
+        streamed = "".join(pieces)
+        self.assertEqual(streamed, strip_markdown_for_tts(sample))
+        self.assertNotIn("**", streamed)
+        self.assertNotIn("`", streamed)
+        self.assertNotIn("###", streamed)
+        self.assertIn("check-in", streamed)
+        self.assertIn("Second important point with a link!", streamed)
+        self.assertIn("Plain spoken line", streamed)
 
 
 if __name__ == "__main__":

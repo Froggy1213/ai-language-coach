@@ -6,6 +6,7 @@ use App\Enums\LessonCardStatus;
 use App\Enums\RoadmapStatus;
 use App\Grammar\LessonUnlocks;
 use App\Models\LessonCard;
+use App\Models\Roadmap;
 use App\Models\User;
 use GraphQL\Error\Error;
 use Illuminate\Support\Facades\DB;
@@ -29,9 +30,25 @@ final class CompleteLessonCard
         $lessonCardId = (string) $args['lessonCardId'];
 
         return DB::transaction(function () use ($user, $lessonCardId): LessonCard {
-            $card = LessonCard::query()
+            // Lock the active/completed roadmap before any lesson card so every
+            // unlock transaction (here and in AnalyzeVoiceSessionMistakes)
+            // acquires locks in the same `roadmaps -> lesson_cards` order.
+            $roadmap = Roadmap::query()
+                ->where('user_id', $user->getKey())
+                ->where('status', '!=', RoadmapStatus::Archived)
+                ->whereHas('lessonCards', static fn ($query) => $query->whereKey($lessonCardId))
+                ->lockForUpdate()
+                ->first();
+
+            if (! $roadmap instanceof Roadmap) {
+                throw new Error(
+                    'This lesson card does not exist.',
+                    extensions: ['code' => 'LESSON_CARD_NOT_FOUND'],
+                );
+            }
+
+            $card = $roadmap->lessonCards()
                 ->whereKey($lessonCardId)
-                ->forUser($user)
                 ->lockForUpdate()
                 ->first();
 
@@ -54,22 +71,18 @@ final class CompleteLessonCard
                 $card->update(['status' => LessonCardStatus::Completed]);
             }
 
-            $roadmap = $card->roadmap()->lockForUpdate()->first();
+            $this->unlocks->syncRoadmap($roadmap, completedCard: $card);
 
-            if ($roadmap !== null) {
-                $this->unlocks->syncRoadmap($roadmap, completedCard: $card);
+            $hasIncompleteCards = LessonCard::query()
+                ->where('roadmap_id', $roadmap->getKey())
+                ->whereIn('status', [LessonCardStatus::Locked, LessonCardStatus::Ready])
+                ->exists();
 
-                $hasIncompleteCards = LessonCard::query()
-                    ->where('roadmap_id', $card->roadmap_id)
-                    ->whereIn('status', [LessonCardStatus::Locked, LessonCardStatus::Ready])
-                    ->exists();
-
-                if (! $hasIncompleteCards) {
-                    $roadmap->update(['status' => RoadmapStatus::Completed]);
-                }
+            if (! $hasIncompleteCards) {
+                $roadmap->update(['status' => RoadmapStatus::Completed]);
             }
 
             return $card->fresh();
-        });
+        }, 3);
     }
 }

@@ -5,6 +5,7 @@ namespace App\Voice;
 use App\Billing\VoiceMinutesExhausted;
 use App\Billing\VoiceSubscriptionInactive;
 use App\Enums\LessonCardStatus;
+use App\Enums\RoadmapStatus;
 use App\Enums\VoiceSessionStatus;
 use App\Models\LessonCard;
 use App\Models\User;
@@ -147,6 +148,8 @@ final class StartVoiceSession
                 $exception->getMessage(),
                 extensions: [
                     'code' => 'VOICE_MINUTES_EXHAUSTED',
+                    'planCode' => $exception->planCode,
+                    'hasSubscription' => $exception->hasSubscription,
                     'usedSeconds' => $exception->usedSeconds,
                     'includedSeconds' => $exception->includedSeconds,
                     'resetsAt' => $exception->resetsAt?->toIso8601String(),
@@ -192,7 +195,9 @@ final class StartVoiceSession
     {
         $card = LessonCard::query()
             ->whereKey($lessonCardId)
-            ->forUser($user)
+            ->whereHas('roadmap', static fn ($query) => $query
+                ->where('user_id', $user->getKey())
+                ->where('status', '!=', RoadmapStatus::Archived))
             ->first();
 
         if (! $card instanceof LessonCard) {

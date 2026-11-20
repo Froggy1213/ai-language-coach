@@ -297,3 +297,48 @@ ElevenLabs (в 2–5 раз дороже, мультиязычность сей�
 `frontend/app/constants/strings.ts`, `frontend/app/pages/settings/billing.vue`,
 `frontend/app/graphql/documents.ts`, `.env.production.example`, `docker-compose.prod.yml`
 **Статус:** active
+
+## 2026-11-20 — Терминальные подписки откатываются на free-лимит, активные строки приоритетнее новых неактивных
+
+**Решение:** `VoiceAllowanceResolver::for` исключает статусы `canceled` и `incomplete_expired` и сортирует `active`/`trialing` раньше остальных статусов при выборе текущей подписки; если активных/неоплаченных строк нет, ученик возвращается на free-план (30 минут в месяц). Обе границы `monthlyWindow` считаются от исходного `$anchor` через `addMonthsNoOverflow`, чтобы анкоры 29–31 чисел не сдвигались и `resetsAt` всегда оставался в будущем. Вебхук-синхронизатор игнорирует откат терминальных подписок и даунгрейд `active` в `incomplete`, а события для уже удалённого пользователя подтверждает HTTP 200 без записи.
+**Почему:** иначе отменённый подписчик навсегда застревал со статусом `VOICE_SUBSCRIPTION_INACTIVE` без доступа к free-лимиту, новая брошенная попытка чекаута перекрывала старую активную подписку, а короткие месяцы смещали `resetsAt` в прошлое.
+**Отвергнуто:** удаление строк подписок при отмене (теряется аудит и привязка к Stripe-истории); пересчёт следующего окна от предыдущего `$start` (теряет 29–31 день после февраля).
+**Следствие:** отмена в портале Stripe корректно возвращает пользователя на 30 free-минут после окончания периода; портал без `stripe_customer_id` и истории подписок отдаёт типизированную `BILLING_NO_SUBSCRIPTION`; повторная отмена удалённой в Stripe подписки не блокирует `deleteAccount`.
+**Файлы:** `backend/app/Billing/{VoiceAllowanceResolver,VoiceMinutesExhausted,SubscriptionSynchronizer,StripeSdkGateway,BillingCheckout,BillingPortalUnavailable}.php`, `backend/app/Voice/StartVoiceSession.php`, `backend/app/GraphQL/Mutations/CreateBillingPortalSession.php`, `frontend/app/composables/{useVoiceSession,useBilling}.ts`, `frontend/app/components/VoiceLimitGate.vue`, `frontend/app/pages/{pricing,settings/billing}.vue`, `frontend/app/constants/strings.ts`
+**Статус:** active
+
+## 2026-11-20 — Именованные per-mutation rate limiter'ы для GraphQL вместо общего @throttle по IP
+
+**Решение:** в `AppServiceProvider::registerRateLimiters` заведены 16 изолированных именованных лимитеров (`gql-*`); для публичных auth/email мутаций ключ — IP, для аутентифицированных — ID пользователя (`sanctum` / default guard, fallback на IP). В `backend/graphql/schema.graphql` все мутации переведены на `@throttle(name: "gql-*")`, добавлен лимит `gql-review-submit` (60/мин) на `submitReviewResult`, а внутренние эндпоинты агента в `backend/routes/api.php` подняты до `600,1` (`/fail`) и `1200,1` (`/turns`).
+**Почему:** Lighthouse `@throttle(maxAttempts, decayMinutes)` без `name`/`prefix` пишет всё в один bucket по IP, поэтому частые мутации одного пользователя или одного NAT сжигали лимит других пользователей и несвязанных критичных операций (например, `deleteAccount`). Низкий лимит `60,1` на `/turns` угрожал троттлингом потоковых реплик от воркеров агента.
+**Отвергнуто:** задавать только `prefix` в SDL (требует дублирования конфигурации вместо центральной карты лимитов в провайдере и не переключает ключ с IP на `user_id`).
+**Следствие:** лимиты мутаций независимы между операциями и пользователями (для аутентифицированных маршрутов).
+**Файлы:** `backend/app/Providers/AppServiceProvider.php`, `backend/graphql/schema.graphql`, `backend/routes/api.php`, `backend/tests/Feature/Privacy/DeleteAccountThrottleTest.php`
+**Статус:** active
+
+## 2026-11-20 — Потолок SM-2 интервала в 365 дней и миграция review_items.next_review_at на DATETIME
+
+**Решение:** в `Sm2::calculate` введён верхний потолок `Sm2::MAX_INTERVAL_DAYS = 365`, а колонка `review_items.next_review_at` переведена новой миграцией с `TIMESTAMP` на `DATETIME`.
+**Почему:** при серии идеальных ответов (`quality = 5`) экспоненциальный рост SM-2 за ~12 повторений выводил `next_review_at` за границу MySQL `TIMESTAMP` (`2038-01-19`) и ломал `submitReviewResult` SQL-ошибкой переполнения даты.
+**Отвергнуто:** оставить только `DATETIME` без ограничения интервала (бесконечный рост интервала до десятков лет бессмысленен для языкового повторения); только кап без `DATETIME` (остаётся риск 2038 для долгоживущих данных).
+**Следствие:** максимальный интервал повторения ограничен 1 годом, переполнение 2038 исключено.
+**Файлы:** `backend/app/Review/Sm2.php`, `backend/database/migrations/2026_11_20_000001_change_review_items_next_review_at_to_datetime.php`, `backend/tests/Unit/Review/Sm2Test.php`, `backend/tests/Feature/Review/SubmitReviewResultTest.php`
+**Статус:** active
+
+## 2026-11-20 — Стриппинг Markdown перед TTS, разделители <scenario_data> и grace period при обрыве WebRTC
+
+**Решение:** в `agent/prompts.py` добавлен инвариант запрета Markdown для TTS, а также потоковый фильтр `strip_markdown_stream` / `strip_markdown_for_tts` на уровне `tts_node` и стартового приветствия (`agent/session.py`). Пользовательские поля сценария оборачиваются в `<scenario_data>...</scenario_data>` с очисткой попыток закрыть тег. При `participant_disconnected` агент ждёт `PARTICIPANT_DISCONNECT_GRACE_SECONDS = 6.0` (отменяя таймер при реконнекте), а на любом сбое инициализации или рантайма вызывает `ctx.shutdown()`. `TurnMetricsTracker.drain` немедленно сбрасывает ожидающие ходы и дожидается фоновых HTTP-задач; `agent/backend.py` переиспользует общий `aiohttp.ClientSession` и делает до 2 ретраев на 5xx/сетевых сбоях в `report_session_turn`.
+**Почему:** это закрывает открытую задачу из прошлой сессии (Markdown-разметка в ответах LLM перед синтезом речи), защищает промпт кастомных сценариев от инъекций, устраняет потерю последней реплики при завершении звонка и обрывы сессии на коротких мобильных провалах сети.
+**Отвергнуто:** полагаться только на системный промпт без фильтрации потока перед TTS (LLM периодически всё равно вставляет `**bold**`); закрывать комнату мгновенно при `participant_disconnected`.
+**Следствие:** реплики перед TTS очищены от Markdown, финальные ходы гарантированно доставляются в Laravel перед выходом воркера.
+**Файлы:** `agent/{prompts,session,turn_tracker,turn_metrics,backend,test_prompts,test_turn_metrics}.py`
+**Статус:** active
+
+## 2026-11-20 — AWS S3 без накопления noncurrent-аудио, Cloud Map для Reverb и CD после зелёного CI с immutable SHA-тегами
+
+**Решение:** на S3-бакете аудиозаписей ассессмента (`infra/terraform/s3.tf`) версионирование переведено в `Suspended` с lifecycle-очисткой `noncurrent_version_expiration = 1` день, `expired_object_delete_marker = true` и `AbortIncompleteMultipartUploads`. В ECS (`infra/terraform/ecs.tf`, `security_groups.tf`, `alb.tf`) добавлены Cloud Map namespace `*.internal` для `reverb` (`REVERB_SCHEME=http`, порт 8081 между задачами), singleton-сервис `scheduler` (`php artisan schedule:work` от `www-data`), IAM-политика `cloudwatch:PutMetricData`, а публичное правило ALB для Reverb сужено до `/app/*`. На LiveKit EC2 (`infra/livekit/user-data.sh`, `security_groups.tf`) открыт `7882/udp` и поднят Caddy TLS-прокси на `:443 -> 127.0.0.1:7880`. В `.github/workflows/cd.yml` деплой гейтится через `workflow_run` успешного `CI` и пушит только immutable теги `sha-<commit>` во все 6 сервисов ECS и `migration`.
+**Почему:** включённое версионирование без очистки noncurrent-версий оставляло удалённые записи голоса в S3 навсегда вопреки `PRIVACY.md`; `REVERB_HOST=127.0.0.1` не работает между отдельными Fargate-задачами (`awsvpc`); пуш `:latest` в `IMMUTABLE` ECR ломал повторный деплой; отсутствие TLS на 443 и закрытый `7882/udp` блокировали WebRTC на LiveKit EC2.
+**Отвергнуто:** переключать ECR в `MUTABLE` и деплоить `:latest` (ломает детерминированный откат ревизий ECS); публиковать `/apps/*` наружу через ALB.
+**Следствие:** удаление аудио в S3 физически удаляет объекты, ECS-таски общаются с Reverb по внутреннему DNS, деплой в AWS идёт только после зелёного CI по точным SHA-образам.
+**Файлы:** `infra/terraform/{s3,ecs,security_groups,alb,secrets,cloudwatch,variables,outputs}.tf`, `infra/livekit/{user-data.sh,livekit.yaml.tpl,docker-compose.yml.tpl}`, `infra/README.md`, `.github/workflows/cd.yml`, `scripts/smoke-test.sh`, `docker-compose.yml`, `docker-compose.prod.yml`, `backend/Dockerfile`, `backend/config/lighthouse.php`
+**Статус:** active

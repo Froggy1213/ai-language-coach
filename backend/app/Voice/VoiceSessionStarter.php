@@ -41,6 +41,7 @@ final class VoiceSessionStarter
         private readonly VoiceSessionQuota $quota,
         private readonly VoiceAllowanceResolver $allowances,
         private readonly VoiceAgentDispatcher $dispatcher,
+        private readonly VoiceSessionLifecycle $lifecycle,
     ) {}
 
     /**
@@ -111,10 +112,7 @@ final class VoiceSessionStarter
             // is the backstop, and it costs nothing but an idle room until then.
             // Marking the session failed is what keeps the idempotency guard from
             // handing this dead room back on the next attempt.
-            $session->update([
-                'status' => VoiceSessionStatus::Failed,
-                'fail_reason' => VoiceSessionFailReason::VoiceFleetBusy->value,
-            ]);
+            $this->lifecycle->failed($session->getKey(), VoiceSessionFailReason::VoiceFleetBusy);
 
             Log::warning('Voice session start failed: fleet busy.', [
                 'session_id' => $session->getKey(),
@@ -129,19 +127,16 @@ final class VoiceSessionStarter
             // `pending`, and the guard above would hand that session — and a
             // token for a room with nobody in it — straight back on the learner's
             // next attempt. Failing it here is what keeps the guard honest.
-            $session->update([
-                'status' => VoiceSessionStatus::Failed,
-                'fail_reason' => VoiceSessionFailReason::VoiceStartFailed->value,
-            ]);
+            $this->lifecycle->failed($session->getKey(), VoiceSessionFailReason::VoiceStartFailed);
 
             report($exception);
 
             throw VoiceStartFailed::forFailure($exception);
         }
 
-        $session->update(['status' => VoiceSessionStatus::Active]);
+        $this->lifecycle->activate($session->getKey());
 
-        return $session;
+        return $session->refresh();
     }
 
     /**

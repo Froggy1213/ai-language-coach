@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { CombinedError } from '@urql/vue'
 import {
   common,
   legal,
   settings as copy,
 } from '~/constants/strings'
+import { graphQLErrorMessageFor } from '~/utils/graphql-error'
 import { planDisplayName } from '~/utils/plan-label'
 
 /**
@@ -41,12 +43,18 @@ const consentValue = computed(() =>
 )
 
 const signingOut = ref(false)
+const logoutError = ref<string | null>(null)
 
 async function handleSignOut(): Promise<void> {
   signingOut.value = true
+  logoutError.value = null
 
   try {
     await logout()
+  } catch (failure) {
+    logoutError.value = graphQLErrorMessageFor(failure as CombinedError, {
+      fallback: copy.logoutError,
+    })
   } finally {
     signingOut.value = false
   }
@@ -119,6 +127,8 @@ async function handleSignOut(): Promise<void> {
          things a settings screen is for. -->
     <section class="space-y-3">
       <h2 class="label">{{ copy.sections.session }}</h2>
+
+      <UiNotice v-if="logoutError" :message="logoutError" />
 
       <div class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
         <p class="text-[0.8125rem] leading-relaxed text-[var(--ink-faint)]">{{ copy.logoutHint }}</p>

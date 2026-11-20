@@ -27,6 +27,7 @@ const {
 } = useBilling()
 
 const interval = ref<BillingInterval>('month')
+const openingPlanCode = ref<string | null>(null)
 
 /**
  * Stripe sends a cancelled Checkout back here. The notice is read once and the
@@ -43,11 +44,10 @@ onMounted(async () => {
     void router.replace({ query: {} }).catch(() => {})
   }
 
-  await loadPlans()
-
-  if (user.value) {
-    await refresh()
-  }
+  await Promise.all([
+    loadPlans(),
+    user.value ? refresh() : Promise.resolve(),
+  ])
 })
 
 type PlanCopy = { name: string, tagline: string, description: string }
@@ -72,7 +72,7 @@ function isCurrent(plan: BillingPlan): boolean {
 
 const hasActiveSubscription = computed(() =>
   overview.value?.hasSubscription === true
-  && ['active', 'trialing', 'past_due'].includes(overview.value.status ?? ''),
+  && ['active', 'trialing', 'past_due', 'unpaid'].includes(overview.value.status ?? ''),
 )
 
 async function choose(plan: BillingPlan): Promise<void> {
@@ -82,7 +82,11 @@ async function choose(plan: BillingPlan): Promise<void> {
   }
 
   if (hasActiveSubscription.value) {
-    await openPortal()
+    openingPlanCode.value = plan.code
+    const redirected = await openPortal()
+    if (!redirected) {
+      openingPlanCode.value = null
+    }
     return
   }
 
@@ -134,7 +138,7 @@ async function choose(plan: BillingPlan): Promise<void> {
     </p>
 
     <div v-else class="grid gap-4 md:grid-cols-3">
-      <!-- Free plan: no card, no Stripe, fifteen minutes. -->
+      <!-- Free plan: no card, no Stripe, thirty minutes per month. -->
       <article class="flex flex-col gap-4 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-5">
         <header class="space-y-1">
           <h2 class="display text-[1.25rem]">{{ copy.freeTitle }}</h2>
@@ -187,11 +191,19 @@ async function choose(plan: BillingPlan): Promise<void> {
           <UiButton
             variant="primary"
             block
-            :loading="checkingOut === `${plan.code}:${interval}` || (hasActiveSubscription && openingPortal)"
+            :loading="checkingOut === `${plan.code}:${interval}` || (openingPortal && openingPlanCode === plan.code)"
             :disabled="(checkingOut !== null && checkingOut !== `${plan.code}:${interval}`) || openingPortal"
             @click="choose(plan)"
           >
-            {{ user ? copy.choose : copy.loginToChoose }}
+            {{
+              !user
+                ? copy.loginToChoose
+                : isCurrent(plan)
+                  ? copy.manageCurrent
+                  : hasActiveSubscription
+                    ? copy.changePlan
+                    : copy.choose
+            }}
           </UiButton>
         </div>
       </article>

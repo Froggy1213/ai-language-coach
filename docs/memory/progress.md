@@ -1,63 +1,50 @@
 # Progress
 
-Updated: 2026-11-18 · session: voice-tts-recovery — Aura вместо Cartesia и 30 минут free в месяц
+Updated: 2026-11-20 · session: review-packages-1-4 — полный цикл правок по код-ревью (Пакеты 1–4)
 
 ## Сейчас
 
-Ветка `main`. Голосовой пайплайн переведён на **Deepgram Aura** как основной TTS: Cartesia
-остаётся fallback и больше не участвует, пока задан `DEEPGRAM_API_KEY`. Причина перехода —
-Cartesia была выбрана только за один мультиязычный голос, а продукт учит лишь английскому
-(`config/languages.php`); Deepgram уже STT-вендор, дешевле и в замере не медленнее (ttfb
-0.20–0.32 с против 0.35 с). Прежний голос Cartesia к тому же удалили из каталога, из-за чего
-агент молчал (`Voice not found` → `no audio frames were pushed`).
+Ветка `main` (все изменения Пакетов 1–4 в рабочем дереве, не закоммичены). Закрыты все четыре пакета из полного код-ревью репозитория:
 
-Одновременно free-план стал **30 минут в месяц** вместо пожизненных 15: окно считается от даты
-регистрации (`VoiceAllowanceResolver::freeAllowance`), `resetsAt` теперь не `null` и у free.
-
-Заодно починена телеметрия TTS: у Deepgram `TTSMetrics` приходят после синтеза (~3.3 с) и без
-`speech_id`, поэтому `tts_first_chunk_ms` выпадал из `TURN_LATENCY`. Вынесены
-`TURN_FLUSH_DELAY_SECONDS = 5.0` и `TURN_DRAIN_TIMEOUT_SECONDS = 6.0`, добавлена привязка
-метрики без `speech_id` к ожидающему ходу.
+- **Пакет 1 (Биллинг и Paywall):** `VoiceAllowanceResolver` исключает терминальные подписки (`canceled`, `incomplete_expired`) с приоритетом `active`/`trialing` и откатом на 30 free-минут/мес; обе границы `monthlyWindow` считаются от исходного `$anchor` (фикс 29–31 чисел); `VOICE_MINUTES_EXHAUSTED` передаёт `planCode` и `hasSubscription` в GraphQL extensions и `VoiceLimitGate.vue`; `SubscriptionSynchronizer` устойчив к вебхукам удалённых пользователей и out-of-order событиям; `StripeSdkGateway::cancelSubscription` идемпотентен при 404/`resource_missing`; `BillingCheckout` блокирует дубли при `unpaid` и отдаёт `BILLING_NO_SUBSCRIPTION` для портала без Stripe-профиля; обновлены `useBilling.ts`, `pricing.vue` и `settings/billing.vue`.
+- **Пакет 2 (Стабильность и безопасность бэкенда):** `S3Client` использует default credential chain (ECS Task Role) при пустых ключах; 16 именованных `RateLimiter`-бакетов `gql-*` (включая `gql-review-submit` 60/мин) и повышенные лимиты `/fail` (`600,1`) и `/turns` (`1200,1`); `RoadmapLessonCards` устраняет N+1 на `Roadmap.lessonCards`; `LiveKitApi` трактует 404 в `participants`/`deleteRoom` как отсутствие комнаты; `VoiceSessionLifecycle` добавляет `activate` и запись/кап `duration_sec` при fail/abandon активной сессии; единый порядок блокировок `Roadmap -> LessonCard` и фильтрация архивных роадмапов; скраббинг экранированных кавычек, сообщений breadcrumb и новых ключей в `SentryEventScrubber`; потолок `Sm2::MAX_INTERVAL_DAYS = 365` и миграция `review_items.next_review_at` в `DATETIME`.
+- **Пакет 3 (Python-агент и фронтенд WebRTC/подписок/ошибок/Закон #4):**
+  - `agent/`: `TurnMetricsTracker.drain()` немедленно сбрасывает ожидающие ходы и ждёт `_background_tasks`; `_attach_uncorrelated_tts()` не привязывает приветствие или отменённый TTS к первому ходу; `turn_metrics.py` отбрасывает `cancelled` `LLMMetrics`; `session.py` вызывает `ctx.shutdown()` при ошибках инициализации/рантайма, ждёт grace period `6.0s` на `participant_disconnected` и чистит Markdown перед TTS; `backend.py` переиспользует `aiohttp.ClientSession` и ретраит 5xx/сетевые ошибки в `report_session_turn()`; `prompts.py` запрещает Markdown и оборачивает данные сценария в `<scenario_data>`.
+  - `frontend/`: монотонный `attemptId`, `removeAllListeners()` и `reset()` в `useVoiceSession.ts`; проверка `disposed`/`generation` после `await openLighthouseSubscription` в `useLighthouseSubscription.ts`; привязка к `pendingAssessmentId` и `onReconnect` в `useAssessment.ts` и `level.vue`; ретрай HTTP 419 в `csrf-fetch.ts`; сохранение сессии при сетевых сбоях `ME_QUERY` и показ ошибок `logout` в `useAuth.ts`; локализация сетевых/401/429/5xx ошибок в `graphql-error.ts` и `voice-errors.ts`; фиксы `reflect/[[id]].vue`, `CustomScenarioBuilder.vue` (`--surface-sunken`, сохранение `register`/`level`), `lesson/[cardId].vue` и `talk/[code].vue` (`:finishing`, смена параметра маршрута), `PronunciationPanel.vue`, `UiNotice.vue` (`role="alert"`), `Escape` в модалках, `additionalTypenames: ['ReviewItem']` для `dueCount`, обновление Deepgram/Resend и опечатки в `strings.ts`, вынос всех захардкоженных японских строк в `strings.ts` (Закон #4).
+- **Пакет 4 (Инфраструктура, Docker, CI/CD и гигиена):** S3 `Suspended` версионирование + 1-дневная очистка noncurrent/multipart в `s3.tf`; Cloud Map DNS для Reverb (`REVERB_SCHEME=http`, SG 8081), сужение ALB до `/app/*`, `scheduler` ECS сервис (` www-data`), `cloudwatch:PutMetricData` и `ignore_changes = [desired_count]` в `ecs.tf`; пустой `SENTRY_DSN` в `secrets.tf`; гейт `cd.yml` через `workflow_run` от `CI` и деплой по immutable тегам `sha-<commit>`; фикс фильтра и SNS алармов в `cloudwatch.tf`; `7882/udp` + Caddy TLS `:443` на LiveKit EC2 и проверка `https://$LIVEKIT_HOST/` в `smoke-test.sh`; не-root `www-data` таргеты в `backend/Dockerfile`, чистка `docker-compose*.yml`, дефолт `'opcache'` и `storage_ttl = 3600` в `config/lighthouse.php`, удаление `voice-samples/*.mp3` и `docker/livekit.yaml`, актуализация `README.md`.
 
 ## Проверено
 
-- **Сквозной программный прогон** (комната + explicit dispatch + 20 с английской речи из wav):
-  Deepgram STT даёт транскрипты, Groq отвечает, TTS — `aura-2-thalia-en` / `ttfb` 0.20–0.32 с,
-  `audio_duration` 6.2–6.8 с; `TURN_LATENCY` теперь с `tts_first_chunk_ms` 236.6.
-- `cd agent && python3 -m unittest discover -s . -p "test_*.py"` — `Ran 115 tests`, `OK`
-  (`skipped=16`): новый тест на приоритет Deepgram и на TTS-метрику без `speech_id`.
-- `cd backend && php artisan test --compact` — `608 passed (3016 assertions)`;
-  `./vendor/bin/pint --dirty` — passed.
-- `cd frontend && npm run codegen` — diff в `app/types/graphql.ts` только комментарий поля
-  `resetsAt`; `npm run typecheck` и `npm run build` — passed (1.87 MB / 457 kB gzip).
-- Живой стек пересобран (`api`, `web`, `voice-agent`), все healthy; `config:show billing.free_seconds`
-  = 1800; резолвер на реальном пользователе: `plan=free included=30min used=16min resets=2026-12-14`.
-- `README.md`, `AGENTS.md`, `agent/README.md`, `infra/README.md` (цена TTS и total) обновлены под
-  новый стек и лимит.
+- **Backend:**
+  - `cd backend && php artisan lighthouse:clear-cache` — passed.
+  - `cd backend && ./vendor/bin/pint --test` — `{"tool":"pint","result":"passed"}`.
+  - `cd backend && php artisan test --compact` (против `mysql` и `redis` в OrbStack/Docker) — `627 passed` (`3159 assertions`, `17042ms`).
+- **Agent:**
+  - `python3 -m unittest discover -s agent -p "test_*.py"` — `Ran 128 tests in 1.408s — OK (skipped=16)` (включая все 21 контрактный тест из `test_prompts.py`).
+- **Frontend:**
+  - `cd frontend && HOME=/tmp NUXT_TELEMETRY_DISABLED=1 npm run codegen` — `frontend/app/types/graphql.ts` синхронизирован со схемой.
+  - `cd frontend && HOME=/tmp NUXT_TELEMETRY_DISABLED=1 npm run typecheck` — `Type check passed`.
+  - `cd frontend && HOME=/tmp NUXT_TELEMETRY_DISABLED=1 npm run build` — `Client built`, `Server built`, `✔ Nuxt Nitro server built`, `✨ Build complete!`.
+- **Infra / Docker / Scripts:**
+  - `bash -n scripts/smoke-test.sh infra/livekit/user-data.sh` — passed (exit 0).
+  - `docker compose -f docker-compose.yml --profile full config -q` и override с `docker-compose.prod.yml` — passed (exit 0).
+  - Парсинг YAML (`docker-compose.yml`, `docker-compose.prod.yml`, `.github/workflows/cd.yml`, `infra/livekit/*.tpl`) и статическая проверка ссылок/плейсхолдеров `infra/terraform/*.tf` — passed.
 
 ## Дальше
 
-1. **Живой прогон из браузера** на `/lesson/{cardId}`: программный probe проверяет пайплайн, но не
-   UI-транскрипты и не слышимость в колонках.
-2. **Markdown в ответах агента**: в транскриптах вида `what **is** in the room` LLM отдаёт
-   разметку, которая попадает в TTS-текст. Проверить, читается ли она вслух, и либо запретить
-   markdown в промпте, либо чистить перед синтезом.
-3. **Проверить Aura-2 на длинных репликах**: метрика приходит после полного синтеза; при ответах
-   дольше ~5 с `tts_first_chunk` снова может потеряться (см. `gotchas.md`, 2026-11-18).
+1. Просмотреть `git status` / `git diff` и закоммитить изменения Пакетов 1–4.
+2. Живой браузерный прогон `/lesson/{cardId}` против локального стека (`docker compose --profile full`) и E2E smoke (`npm run e2e:smoke`).
 
 ## Открытые вопросы
 
-- Оставлять ли Cartesia в образе и ключах как fallback, или убрать совсем (сейчас она инертна).
-- Free-план: 30 минут в месяц — это же значение для всех новых и текущих free-учёток? Сейчас
-  применилось ко всем без миграции, использованные минуты считаются с даты регистрации.
-- Не проверялись: Stripe checkout, Resend, деплой AWS (см. запись 2026-11-17).
+- Не проверялись вживую внешний Stripe checkout, Resend и раскатка Terraform на реальном AWS-аккаунте (`terraform` CLI на хосте не установлен).
 
 ## Блокировано
 
-Ничего в коде.
+Ничего.
 
 ## Прошлая сессия
 
-- 2026-11-18 — голос восстановлен: удалённый голос Cartesia заменён, пайплайн проверен end-to-end.
+- 2026-11-18 — голос восстановлен: удалённый голос Cartesia заменён на Deepgram Aura, free-план 30 минут в месяц, телеметрия TTS.
 - 2026-11-17 — подтверждение email, сброс пароля, Resend.
 - 2026-11-16 — `/settings` разделён на хаб и четыре экрана; профиль и пароль.
